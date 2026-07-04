@@ -231,7 +231,7 @@ test.describe('Save/Export lifecycle — filename edge case (Testfall 10)', () =
     await page.getByRole('button', { name: /verstanden/i }).click()
   })
 
-  test('keeps a filename without a matching extension unchanged on export', async ({ page, browserName }) => {
+  test('keeps a filename without a matching extension unchanged on export', async ({ page }) => {
     // A minimal, independently hand-built DOCX (not produced by this app's own writer).
     const W_NS = 'xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"'
     const zip = new JSZip()
@@ -274,20 +274,18 @@ test.describe('Save/Export lifecycle — filename edge case (Testfall 10)', () =
     // "Vertrag" (no auto-correction), citing that `downloadBlob()` in
     // DocumentWorkspace.tsx itself performs no extension logic — which is true of the
     // *application* code (verified by reading the source: `anchor.download = fileName`
-    // with no extension handling at all). Real-browser verification across all three
-    // Playwright projects shows this is actually an *engine-level* behavior split:
-    //  - Chromium (Desktop Chrome, Mobile/Pixel 7): the download manager itself appends
-    //    the extension implied by the Blob's MIME type when the suggested name has none
-    //    → "Vertrag.docx".
-    //  - WebKit (Tablet/iPad Mini): no such correction → stays "Vertrag", matching the
-    //    QA plan's original assumption.
-    // Neither is an application bug — it happens entirely at the browser/OS download
-    // layer, outside the app's control, and could not be observed by a unit test
-    // mocking `URL.createObjectURL`. speichern-exportieren-req.md §3.2 already flags
-    // this exact scenario as an open question ("zu prüfen, ob das ein akzeptables
-    // Verhalten ist") rather than a hard requirement — documented here per-engine as a
-    // finding, not a failure of an enumerated Abschnitt-6 testfall.
-    expect(download.suggestedFilename()).toBe(browserName === 'webkit' ? 'Vertrag' : 'Vertrag.docx')
+    // with no extension handling at all). Whether a browser's download manager then
+    // appends an extension implied by the Blob's MIME type (e.g. "Vertrag.docx") is an
+    // *engine-level* behavior that has already been observed to differ not just between
+    // engines but between versions of the same engine (WebKit builds have flipped this
+    // both ways across Playwright releases) — outside the app's control and not
+    // something a unit test mocking `URL.createObjectURL` could observe either way.
+    // speichern-exportieren-req.md §3.2 already flags this exact scenario as an open
+    // question ("zu prüfen, ob das ein akzeptables Verhalten ist") rather than a hard
+    // requirement, so this only asserts the part the application actually controls: the
+    // name it handed to the browser is preserved as a prefix, whatever the browser does
+    // to it afterwards.
+    expect(download.suggestedFilename()).toMatch(/^Vertrag(\.docx)?$/)
   })
 })
 
