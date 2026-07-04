@@ -1,11 +1,12 @@
 import type { CSSProperties } from 'react'
+import { PAGE_WIDTH_MM, PAGE_HEIGHT_MM, PAGE_MARGIN_MM } from '../pageGeometry'
 
 /** A4 page geometry at 96 CSS px/inch (1mm = 96/25.4 px), used to simulate real pages on screen. */
 const PX_PER_MM = 96 / 25.4
 
-export const PAGE_WIDTH_PX = Math.round(210 * PX_PER_MM)
-export const PAGE_HEIGHT_PX = Math.round(297 * PX_PER_MM)
-export const PAGE_MARGIN_PX = Math.round(25 * PX_PER_MM)
+export const PAGE_WIDTH_PX = Math.round(PAGE_WIDTH_MM * PX_PER_MM)
+export const PAGE_HEIGHT_PX = Math.round(PAGE_HEIGHT_MM * PX_PER_MM)
+export const PAGE_MARGIN_PX = Math.round(PAGE_MARGIN_MM * PX_PER_MM)
 /** Visual gap drawn between two pages (on top of the page margins) so sheets read as separate. */
 export const PAGE_SEPARATOR_PX = 32
 

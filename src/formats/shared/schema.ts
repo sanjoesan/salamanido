@@ -3,6 +3,13 @@ import { tableNodes } from 'prosemirror-tables'
 
 const alignAttr = { align: { default: 'left', validate: 'string' } }
 
+/** Tooltip/screen-reader text shown on an `unsupported_block` placeholder, keyed by `attrs.kind`. */
+export const UNSUPPORTED_KIND_LABEL: Record<string, string> = {
+  textbox: 'Textfeld — vereinfacht dargestellt',
+  object: 'Eingebettetes Objekt — nicht unterstützt',
+  chart: 'Diagramm — nicht unterstützt',
+}
+
 const nodes: Record<string, NodeSpec> = {
   doc: { content: 'block+' },
 
@@ -68,6 +75,34 @@ const nodes: Record<string, NodeSpec> = {
     toDOM(node) {
       const { src, alt, width, height } = node.attrs
       return ['img', { src, alt, width, height }]
+    },
+  },
+
+  // Placeholder for content the reader could not fully interpret (e.g. a DOCX/ODT
+  // textbox, embedded chart/OLE object) — keeps at least the recoverable text/blocks
+  // visible and editable instead of silently dropping them (see datei-oeffnen-req.md
+  // §3.13). Deliberately permissive (`block+`) so the reader can always populate it;
+  // `assertLoadableDocument` relies on that permissiveness never being violated.
+  unsupported_block: {
+    group: 'block',
+    content: 'block+',
+    attrs: { kind: { default: 'object', validate: 'string' } },
+    parseDOM: [
+      {
+        tag: 'div[data-unsupported-kind]',
+        getAttrs: (dom) => ({ kind: (dom as HTMLElement).dataset.unsupportedKind || 'object' }),
+      },
+    ],
+    toDOM(node) {
+      return [
+        'div',
+        {
+          class: 'unsupported-block',
+          'data-unsupported-kind': node.attrs.kind,
+          title: UNSUPPORTED_KIND_LABEL[node.attrs.kind as string] ?? UNSUPPORTED_KIND_LABEL.object,
+        },
+        0,
+      ]
     },
   },
 

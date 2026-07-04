@@ -5,10 +5,17 @@ interface FormatPickerProps {
   modules: AnyFormatModule[]
   planned: PlannedFormat[]
   onOpen: (moduleId: string, doc: OpenDocument) => void
+  /**
+   * Error message carried over from a crash in the previously open editor (see
+   * `EditorErrorBoundary`/`App.tsx`), shown exactly like any other failed-import
+   * banner. Only read once on mount — `FormatPicker` is freshly mounted every time
+   * `App.tsx` swaps back to it, so this always reflects the latest crash.
+   */
+  initialError?: string | null
 }
 
-export function FormatPicker({ modules, planned, onOpen }: FormatPickerProps) {
-  const [error, setError] = useState<string | null>(null)
+export function FormatPicker({ modules, planned, onOpen, initialError = null }: FormatPickerProps) {
+  const [error, setError] = useState<string | null>(initialError)
   const fileInputs = useRef<Record<string, HTMLInputElement | null>>({})
 
   async function handleFile(module: AnyFormatModule, file: File) {
@@ -27,9 +34,17 @@ export function FormatPicker({ modules, planned, onOpen }: FormatPickerProps) {
 
   function handleCreateNew(module: AnyFormatModule) {
     setError(null)
-    const content = module.createNew()
-    const ext = module.extensions[0] ?? ''
-    onOpen(module.id, { fileName: `${module.defaultName}${ext}`, content, dirty: false })
+    try {
+      const content = module.createNew()
+      const ext = module.extensions[0] ?? ''
+      onOpen(module.id, { fileName: `${module.defaultName}${ext}`, content, dirty: false })
+    } catch (err) {
+      setError(
+        `Neues Dokument (${module.label}) konnte nicht erstellt werden: ${
+          err instanceof Error ? err.message : String(err)
+        }`,
+      )
+    }
   }
 
   return (

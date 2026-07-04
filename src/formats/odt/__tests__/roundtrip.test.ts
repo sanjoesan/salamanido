@@ -1,3 +1,4 @@
+import JSZip from 'jszip'
 import { writeOdt } from '../writer'
 import { readOdt } from '../reader'
 import type { WordDocumentContent } from '../../shared/documentModel'
@@ -273,6 +274,28 @@ describe('ODT round trip: header, footer, and metadata', () => {
     }
     const result = await roundTrip(original)
     expect(result.meta.title).toBe('Mein Testdokument')
+  })
+})
+
+describe('ODT writer: page geometry', () => {
+  it('writes the same A4/2.5cm page geometry as DOCX', async () => {
+    const blob = await writeOdt(doc([paragraph('x')]))
+    const zip = await JSZip.loadAsync(blob)
+    const stylesXml = await zip.file('styles.xml')!.async('text')
+
+    expect(stylesXml).toContain('fo:margin="2.5cm"')
+    expect(stylesXml).toContain('fo:page-width="21cm"')
+    expect(stylesXml).toContain('fo:page-height="29.7cm"')
+  })
+})
+
+describe('ODT writer: font default', () => {
+  it("a blank new document's Standard style carries no explicit font or size (implicit application default, see specs/neues-dokument-code.md 3.5)", async () => {
+    const blob = await writeOdt(doc([paragraph('x')]))
+    const zip = await JSZip.loadAsync(blob)
+    const stylesXml = await zip.file('styles.xml')!.async('text')
+
+    expect(stylesXml).toMatch(/<style:style style:name="Standard" style:family="paragraph"\s*\/>/)
   })
 })
 

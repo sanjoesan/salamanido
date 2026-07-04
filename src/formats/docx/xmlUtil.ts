@@ -18,6 +18,7 @@ export const OOXML_NAMESPACES = {
   cp: 'http://schemas.openxmlformats.org/package/2006/metadata/core-properties',
   dc: 'http://purl.org/dc/elements/1.1/',
   dcterms: 'http://purl.org/dc/terms/',
+  vml: 'urn:schemas-microsoft-com:vml',
 } as const
 
 export const WORD_NAMESPACE_DECLARATIONS = `xmlns:w="${OOXML_NAMESPACES.w}" xmlns:r="${OOXML_NAMESPACES.r}" xmlns:wp="${OOXML_NAMESPACES.wp}" xmlns:a="${OOXML_NAMESPACES.a}" xmlns:pic="${OOXML_NAMESPACES.pic}"`

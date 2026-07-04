@@ -13,6 +13,12 @@ import {
   type RunProps,
 } from './styleRegistry'
 import { ImageCollector, type CollectedImage } from './imageCollector'
+import { PAGE_WIDTH_MM, PAGE_HEIGHT_MM, PAGE_MARGIN_MM } from '../shared/pageGeometry'
+
+/** ODF measures page geometry in cm; renders e.g. 25 -> "2.5cm", 210 -> "21cm". */
+function mmToCm(mm: number): string {
+  return `${(mm / 10).toFixed(1).replace(/\.0$/, '')}cm`
+}
 
 interface JsonNode {
   type: string
@@ -142,7 +148,7 @@ function buildStylesXml(headerXml: string | null, footerXml: string | null, styl
     `<office:document-styles ${NAMESPACE_DECLARATIONS} office:version="1.3">` +
     `<office:styles><style:style style:name="Standard" style:family="paragraph"/></office:styles>` +
     `<office:automatic-styles>` +
-    `<style:page-layout style:name="PL1"><style:page-layout-properties fo:margin="2.5cm" fo:page-width="21cm" fo:page-height="29.7cm"/></style:page-layout>` +
+    `<style:page-layout style:name="PL1"><style:page-layout-properties fo:margin="${mmToCm(PAGE_MARGIN_MM)}" fo:page-width="${mmToCm(PAGE_WIDTH_MM)}" fo:page-height="${mmToCm(PAGE_HEIGHT_MM)}"/></style:page-layout>` +
     `${styles.serializeDefs()}` +
     `</office:automatic-styles>` +
     `<office:master-styles>` +

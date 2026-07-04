@@ -69,3 +69,20 @@ body {
 .page-break-spacer {
   width: 100%;
 }
+
+/* Marks content the reader could not fully interpret (textbox/embedded object) so it
+   reads as "simplified", not as ordinary body text. See schema.ts: unsupported_block. */
+.unsupported-block {
+  border: 1px dashed #9ca3af;
+  border-radius: 4px;
+  padding: 0.4em 0.6em;
+  margin: 0 0 0.6em;
+  background: #f9fafb;
+}
+
+@media (prefers-color-scheme: dark) {
+  .unsupported-block {
+    border-color: #52525b;
+    background: #18181b;
+  }
+}

@@ -1,5 +1,6 @@
 import JSZip from 'jszip'
 import type { WordDocumentContent } from '../shared/documentModel'
+import { assertLoadableDocument } from '../shared/validateDocument'
 import { OOXML_NAMESPACES, parseXmlDocument } from './xmlUtil'
 
 interface JsonNode {
@@ -114,36 +115,123 @@ function marksFromRunProperties(rPr: Element | null): Array<{ type: string; attr
 }
 
 interface RunLike {
-  kind: 'text' | 'break' | 'image'
+  kind: 'text' | 'break' | 'image' | 'unsupported'
   text?: string
   marks?: Array<{ type: string; attrs?: Record<string, unknown> }>
   imageRelId?: string
   imageAlt?: string
+  unsupportedKind?: 'textbox' | 'object'
+  unsupportedBlocks?: JsonNode[]
 }
 
-function decodeParagraphRuns(pEl: Element): RunLike[] {
-  const runs: RunLike[] = []
-  for (const rEl of childElements(pEl, OOXML_NAMESPACES.w, 'r')) {
-    const rPr = firstChildNS(rEl, OOXML_NAMESPACES.w, 'rPr')
-    const marks = marksFromRunProperties(rPr)
-    for (const child of Array.from(rEl.children)) {
-      if (child.namespaceURI === OOXML_NAMESPACES.w && child.localName === 't') {
-        runs.push({ kind: 'text', text: child.textContent ?? '', marks: marks.length ? marks : undefined })
-      } else if (child.namespaceURI === OOXML_NAMESPACES.w && child.localName === 'br') {
-        runs.push({ kind: 'break' })
-      } else if (child.namespaceURI === OOXML_NAMESPACES.w && child.localName === 'drawing') {
-        const blip = child.getElementsByTagNameNS(OOXML_NAMESPACES.a, 'blip')[0]
-        const relId = blip?.getAttributeNS(OOXML_NAMESPACES.r, 'embed') ?? undefined
-        const docPr = child.getElementsByTagNameNS(OOXML_NAMESPACES.wp, 'docPr')[0]
-        runs.push({ kind: 'image', imageRelId: relId, imageAlt: docPr?.getAttribute('name') ?? '' })
-      }
+// A textbox can itself contain a paragraph with another textbox — cap the recursion
+// at one level so a pathological/self-referential file can't blow the call stack;
+// past this depth a nested textbox degrades to an opaque "object" placeholder instead
+// of being unpacked further.
+const MAX_TEXTBOX_NESTING_DEPTH = 1
+
+/**
+ * Decides what a `<w:drawing>` or legacy `<w:pict>` element represents:
+ * - an actual image (`a:blip` / `v:imagedata` present) → an `image` run, as before.
+ * - otherwise a textbox (`w:txbxContent`, present identically for both the modern
+ *   `wps:txbx` and legacy `v:textbox` wrappers) → its paragraphs are kept as an
+ *   `unsupported` run so the visible text survives instead of vanishing.
+ * - otherwise (a chart/OLE/diagram with no extractable text) → an opaque
+ *   `unsupported` run with no content, still rendered as a visible placeholder
+ *   rather than disappearing without a trace (see datei-oeffnen-req.md §3.13).
+ */
+function decodeDrawingOrPict(
+  el: Element,
+  headingInfo: HeadingInfo,
+  imageRels: Map<string, string>,
+  depth: number,
+): RunLike {
+  const blip = el.getElementsByTagNameNS(OOXML_NAMESPACES.a, 'blip')[0]
+  const imagedata = el.getElementsByTagNameNS(OOXML_NAMESPACES.vml, 'imagedata')[0]
+  const relId =
+    blip?.getAttributeNS(OOXML_NAMESPACES.r, 'embed') ?? imagedata?.getAttributeNS(OOXML_NAMESPACES.r, 'id') ?? undefined
+  if (relId) {
+    const docPr = el.getElementsByTagNameNS(OOXML_NAMESPACES.wp, 'docPr')[0]
+    return { kind: 'image', imageRelId: relId, imageAlt: docPr?.getAttribute('name') ?? '' }
+  }
+
+  const txbxContent = el.getElementsByTagNameNS(OOXML_NAMESPACES.w, 'txbxContent')[0]
+  if (txbxContent) {
+    if (depth >= MAX_TEXTBOX_NESTING_DEPTH) return { kind: 'unsupported', unsupportedKind: 'object' }
+    const unsupportedBlocks = childElements(txbxContent, OOXML_NAMESPACES.w, 'p').flatMap((p) =>
+      paragraphToBlocks(p, headingInfo, imageRels, depth + 1),
+    )
+    return { kind: 'unsupported', unsupportedKind: 'textbox', unsupportedBlocks }
+  }
+
+  return { kind: 'unsupported', unsupportedKind: 'object' }
+}
+
+function decodeRunElement(rEl: Element, headingInfo: HeadingInfo, imageRels: Map<string, string>, depth: number): RunLike[] {
+  const rPr = firstChildNS(rEl, OOXML_NAMESPACES.w, 'rPr')
+  const marks = marksFromRunProperties(rPr)
+  const out: RunLike[] = []
+  for (const child of Array.from(rEl.children)) {
+    if (child.namespaceURI === OOXML_NAMESPACES.w && child.localName === 't') {
+      out.push({ kind: 'text', text: child.textContent ?? '', marks: marks.length ? marks : undefined })
+    } else if (child.namespaceURI === OOXML_NAMESPACES.w && child.localName === 'br') {
+      out.push({ kind: 'break' })
+    } else if (child.namespaceURI === OOXML_NAMESPACES.w && (child.localName === 'drawing' || child.localName === 'pict')) {
+      out.push(decodeDrawingOrPict(child, headingInfo, imageRels, depth))
     }
   }
+  return out
+}
+
+/**
+ * Collects runs from a paragraph, descending into the wrapper elements real Word
+ * files routinely place runs inside — a hyperlink, an accepted tracked insertion, a
+ * smart tag, a content-control (`w:sdt`), or a simple field's cached result
+ * (`w:fldSimple`) — so their visible text is not silently dropped (see
+ * datei-oeffnen-code.md §2). A tracked *deletion* (`w:del`) is skipped outright: its
+ * text must not resurface as if it were still part of the document.
+ */
+function collectRuns(
+  container: Element,
+  runs: RunLike[],
+  headingInfo: HeadingInfo,
+  imageRels: Map<string, string>,
+  depth: number,
+): void {
+  for (const child of Array.from(container.children)) {
+    if (child.namespaceURI !== OOXML_NAMESPACES.w) continue
+    if (child.localName === 'r') {
+      runs.push(...decodeRunElement(child, headingInfo, imageRels, depth))
+    } else if (child.localName === 'del') {
+      // Deleted (rejected/pending) tracked-change text — must not become visible.
+    } else if (child.localName === 'ins' || child.localName === 'hyperlink' || child.localName === 'smartTag') {
+      collectRuns(child, runs, headingInfo, imageRels, depth)
+    } else if (child.localName === 'sdt') {
+      const sdtContent = firstChildNS(child, OOXML_NAMESPACES.w, 'sdtContent')
+      if (sdtContent) collectRuns(sdtContent, runs, headingInfo, imageRels, depth)
+    } else if (child.localName === 'fldSimple') {
+      collectRuns(child, runs, headingInfo, imageRels, depth)
+    }
+  }
+}
+
+function decodeParagraphRuns(pEl: Element, headingInfo: HeadingInfo, imageRels: Map<string, string>, depth = 0): RunLike[] {
+  const runs: RunLike[] = []
+  collectRuns(pEl, runs, headingInfo, imageRels, depth)
   return runs
 }
 
-/** A `<w:p>` may mix text and image-drawing runs — split it into block nodes. */
-function paragraphToBlocks(pEl: Element, headingInfo: HeadingInfo, imageRels: Map<string, string>): JsonNode[] {
+function emptyParagraph(): JsonNode {
+  return { type: 'paragraph', attrs: { align: 'left' } }
+}
+
+/** A `<w:p>` may mix text, image-drawing and unsupported-object runs — split it into block nodes. */
+function paragraphToBlocks(
+  pEl: Element,
+  headingInfo: HeadingInfo,
+  imageRels: Map<string, string>,
+  depth = 0,
+): JsonNode[] {
   const pPr = firstChildNS(pEl, OOXML_NAMESPACES.w, 'pPr')
   const pStyleEl = pPr && firstChildNS(pPr, OOXML_NAMESPACES.w, 'pStyle')
   const styleId = pStyleEl?.getAttributeNS(OOXML_NAMESPACES.w, 'val') ?? null
@@ -152,13 +240,18 @@ function paragraphToBlocks(pEl: Element, headingInfo: HeadingInfo, imageRels: Ma
   const align = JC_TO_ALIGN[jcVal] ?? 'left'
   const level = headingLevelForStyle(styleId, headingInfo)
 
-  const runs = decodeParagraphRuns(pEl)
-  const hasImage = runs.some((r) => r.kind === 'image')
+  const runs = decodeParagraphRuns(pEl, headingInfo, imageRels, depth)
+  const hasBlockRun = runs.some((r) => r.kind === 'image' || r.kind === 'unsupported')
 
-  if (!hasImage) {
+  if (!hasBlockRun) {
     const content = runsToInline(runs)
-    if (level) return [{ type: 'heading', attrs: { level, align }, content }]
-    return [{ type: 'paragraph', attrs: { align }, content }]
+    // Mirror ProseMirror's own Node.toJSON(), which omits `content` entirely for an
+    // empty fragment rather than emitting `content: []` — otherwise a freshly created
+    // blank document and the same document after an export/import round trip would be
+    // structurally different (`toEqual`) despite ProseMirror treating them as the same
+    // node (`.eq()` true). See createBlankWordDocument()/emptyDocJSON() in documentModel.ts.
+    if (level) return [content.length > 0 ? { type: 'heading', attrs: { level, align }, content } : { type: 'heading', attrs: { level, align } }]
+    return [content.length > 0 ? { type: 'paragraph', attrs: { align }, content } : { type: 'paragraph', attrs: { align } }]
   }
 
   const blocks: JsonNode[] = []
@@ -174,6 +267,10 @@ function paragraphToBlocks(pEl: Element, headingInfo: HeadingInfo, imageRels: Ma
       flush()
       const target = run.imageRelId ? imageRels.get(run.imageRelId) : undefined
       blocks.push({ type: 'image', attrs: { src: target ?? '', alt: run.imageAlt ?? '' } })
+    } else if (run.kind === 'unsupported') {
+      flush()
+      const content = run.unsupportedBlocks?.length ? run.unsupportedBlocks : [emptyParagraph()]
+      blocks.push({ type: 'unsupported_block', attrs: { kind: run.unsupportedKind ?? 'object' }, content })
     } else {
       buffer.push(run)
     }
@@ -184,7 +281,7 @@ function paragraphToBlocks(pEl: Element, headingInfo: HeadingInfo, imageRels: Ma
 
 function runsToInline(runs: RunLike[]): JsonNode[] {
   return runs
-    .filter((r) => r.kind !== 'image')
+    .filter((r) => r.kind === 'text' || r.kind === 'break')
     .map((r) => (r.kind === 'break' ? { type: 'hard_break' } : { type: 'text', text: r.text ?? '', marks: r.marks }))
     .filter((n) => n.type !== 'text' || n.text)
 }
@@ -200,7 +297,14 @@ function listMarkerFor(pEl: Element): ListMarker {
   return { numId: numIdEl?.getAttributeNS(OOXML_NAMESPACES.w, 'val') ?? null }
 }
 
-function parseTable(tblEl: Element, headingInfo: HeadingInfo, imageRels: Map<string, string>): JsonNode {
+// Real-world files can nest tables absurdly deeply (a known parser-fuzzing pattern —
+// "deep-table-cell.docx" in the Apache POI test corpus nests hundreds of levels and
+// blew the call stack here before this guard existed). Past this depth we stop
+// descending into further nested tables and keep just their paragraph text, rather
+// than crashing the whole import.
+const MAX_TABLE_NESTING_DEPTH = 25
+
+function parseTable(tblEl: Element, headingInfo: HeadingInfo, imageRels: Map<string, string>, depth = 0): JsonNode {
   const rowEls = childElements(tblEl, OOXML_NAMESPACES.w, 'tr')
   const colCount =
     childElements(tblEl, OOXML_NAMESPACES.w, 'tblGrid')[0]?.getElementsByTagNameNS(OOXML_NAMESPACES.w, 'gridCol')
@@ -226,9 +330,14 @@ function parseTable(tblEl: Element, headingInfo: HeadingInfo, imageRels: Map<str
         continue
       }
 
-      const content = childElements(tcEl, OOXML_NAMESPACES.w, 'p')
-        .flatMap((p) => paragraphToBlocks(p, headingInfo, imageRels))
-        .concat(childElements(tcEl, OOXML_NAMESPACES.w, 'tbl').map((t) => parseTable(t, headingInfo, imageRels)))
+      const content = childElements(tcEl, OOXML_NAMESPACES.w, 'p').flatMap((p) =>
+        paragraphToBlocks(p, headingInfo, imageRels),
+      )
+      if (depth < MAX_TABLE_NESTING_DEPTH) {
+        content.push(
+          ...childElements(tcEl, OOXML_NAMESPACES.w, 'tbl').map((t) => parseTable(t, headingInfo, imageRels, depth + 1)),
+        )
+      }
       const cellNode: JsonNode = { type: 'table_cell', attrs: { colspan, rowspan: 1, colwidth: null }, content }
       cells.push(cellNode)
 
@@ -369,10 +478,12 @@ export async function readDocx(file: File | Blob): Promise<WordDocumentContent> 
     title = coreDoc.getElementsByTagNameNS(OOXML_NAMESPACES.dc, 'title')[0]?.textContent ?? ''
   }
 
-  return {
+  const result: WordDocumentContent = {
     body: { type: 'doc', content: bodyBlocks.length ? bodyBlocks : [{ type: 'paragraph', attrs: { align: 'left' } }] },
     header: headerBlocks ? { type: 'doc', content: headerBlocks } : null,
     footer: footerBlocks ? { type: 'doc', content: footerBlocks } : null,
     meta: { title },
   }
+  assertLoadableDocument(result)
+  return result
 }

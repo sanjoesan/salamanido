@@ -78,4 +78,54 @@ describe('FormatPicker', () => {
 
     expect(await screen.findByRole('alert')).toHaveTextContent(/kaputte datei/i)
   })
+
+  it('shows an error message when creating a new document fails', async () => {
+    const failingModule = makeModule({
+      createNew: () => {
+        throw new Error('vorlage kaputt')
+      },
+    })
+    const user = userEvent.setup()
+    render(<FormatPicker modules={[failingModule]} planned={[]} onOpen={() => {}} />)
+
+    await user.click(screen.getByRole('button', { name: /neu erstellen/i }))
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(/vorlage kaputt/i)
+  })
+
+  it('clears a previous import error banner when creating a new document', async () => {
+    const failingModule = makeModule({
+      importFile: async () => {
+        throw new Error('kaputte datei')
+      },
+    })
+    const user = userEvent.setup()
+    render(<FormatPicker modules={[failingModule]} planned={[]} onOpen={() => {}} />)
+
+    const file = new File(['x'], 'kaputt.test')
+    const input = document.querySelector('input[type="file"]') as HTMLInputElement
+    await userEvent.upload(input, file)
+    expect(await screen.findByRole('alert')).toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: /neu erstellen/i }))
+
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+  })
+
+  it('rapid double-click on "Neu erstellen" does not throw or call onOpen with inconsistent state', async () => {
+    const onOpen = vi.fn()
+    render(<FormatPicker modules={[makeModule()]} planned={[]} onOpen={onOpen} />)
+
+    const button = screen.getByRole('button', { name: /neu erstellen/i })
+    button.click()
+    button.click()
+
+    expect(onOpen).toHaveBeenCalledTimes(2)
+    for (const call of onOpen.mock.calls) {
+      expect(call[0]).toBe('test-fmt')
+      expect(call[1]).toEqual(
+        expect.objectContaining({ fileName: 'unbenannt.test', content: 'neuer inhalt', dirty: false }),
+      )
+    }
+  })
 })

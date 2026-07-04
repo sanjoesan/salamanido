@@ -4,6 +4,7 @@ import { escapeXml, WORD_NAMESPACE_DECLARATIONS } from './xmlUtil'
 import { RelationshipRegistry, RELATIONSHIP_TYPES } from './relationships'
 import { ImageCollector, type CollectedImage } from './imageCollector'
 import { HEADING_STYLE_ID, headingStylesXml, BULLET_NUM_ID, ORDERED_NUM_ID, numberingXml } from './styleDefs'
+import { defaultPageSetupXml } from './pageSetup'
 
 interface JsonNode {
   type: string
@@ -241,6 +242,8 @@ export async function writeDocx(doc: WordDocumentContent): Promise<Blob> {
     const relId = documentRels.add(RELATIONSHIP_TYPES.footer, 'footer1.xml')
     sectPrExtra += `<w:footerReference w:type="default" r:id="${relId}"/>`
   }
+
+  sectPrExtra += defaultPageSetupXml()
 
   documentRels.add(RELATIONSHIP_TYPES.styles, 'styles.xml')
   documentRels.add(RELATIONSHIP_TYPES.numbering, 'numbering.xml')
