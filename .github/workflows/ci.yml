@@ -25,7 +25,11 @@ jobs:
       - run: npm run build
 
       - name: Install Playwright browsers
-        run: npx playwright install --with-deps chromium webkit
+        # firefox is required by the "Desktop Firefox (Clipboard)" project added
+        # for the Kopieren/Einfügen browser matrix (playwright.config.ts); without
+        # it CI fails with "Executable doesn't exist … firefox". Keep this in sync
+        # with the projects declared in playwright.config.ts.
+        run: npx playwright install --with-deps chromium webkit firefox
 
       - run: npm run test:e2e
 
