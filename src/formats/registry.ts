@@ -1,17 +1,12 @@
 import type { AnyFormatModule, PlannedFormat } from './types'
 import { odtModule } from './odt/odt'
+import { docxModule } from './docx/docx'
 
 /** Implemented formats, registered here as each phase lands. */
-export const formatModules: AnyFormatModule[] = [odtModule]
+export const formatModules: AnyFormatModule[] = [odtModule, docxModule]
 
 /** Full format roadmap, used by the picker to show what's coming next. */
 export const plannedFormats: PlannedFormat[] = [
-  {
-    id: 'docx',
-    label: 'Word-Dokument (.docx)',
-    description: 'Seitenbasierter Texteditor, kompatibel mit Microsoft Word.',
-    extensions: ['.docx'],
-  },
   {
     id: 'xlsx',
     label: 'Tabellenkalkulation (.xlsx / .csv)',
