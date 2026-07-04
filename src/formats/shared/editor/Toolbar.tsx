@@ -25,25 +25,38 @@ function run(view: EditorView, command: (state: typeof view.state, dispatch: typ
   view.focus()
 }
 
-function MarkButton({ view, mark, label, title }: { view: EditorView; mark: string; label: string; title: string }) {
+function MarkButton({
+  view,
+  mark,
+  label,
+  title,
+  glyphClassName = '',
+}: {
+  view: EditorView
+  mark: string
+  label: string
+  title: string
+  glyphClassName?: string
+}) {
   const markType = wordSchema.marks[mark]
   const active = markType.isInSet(view.state.selection.$from.marks()) !== undefined
   return (
     <button
       type="button"
       title={title}
+      aria-label={title}
       aria-pressed={active}
       onMouseDown={(e) => {
         e.preventDefault()
         run(view, toggleMark(markType))
       }}
-      className={`px-2 py-1 rounded text-sm font-medium border ${
+      className={`px-2 py-1 rounded text-sm border ${
         active
           ? 'bg-neutral-900 text-white border-neutral-900 dark:bg-neutral-100 dark:text-neutral-900'
           : 'border-transparent hover:bg-neutral-100 dark:hover:bg-neutral-800 text-neutral-700 dark:text-neutral-300'
       }`}
     >
-      {label}
+      <span className={glyphClassName}>{label}</span>
     </button>
   )
 }
@@ -119,10 +132,10 @@ export function Toolbar({ view }: ToolbarProps) {
 
       <div className="w-px h-5 bg-neutral-300 dark:bg-neutral-700 mx-1" />
 
-      <MarkButton view={view} mark="strong" label="F" title="Fett" />
-      <MarkButton view={view} mark="em" label="K" title="Kursiv" />
-      <MarkButton view={view} mark="underline" label="U" title="Unterstrichen" />
-      <MarkButton view={view} mark="strike" label="S" title="Durchgestrichen" />
+      <MarkButton view={view} mark="strong" label="F" title="Fett" glyphClassName="font-bold" />
+      <MarkButton view={view} mark="em" label="K" title="Kursiv" glyphClassName="italic" />
+      <MarkButton view={view} mark="underline" label="U" title="Unterstrichen" glyphClassName="underline" />
+      <MarkButton view={view} mark="strike" label="S" title="Durchgestrichen" glyphClassName="line-through" />
 
       <div className="w-px h-5 bg-neutral-300 dark:bg-neutral-700 mx-1" />
 
