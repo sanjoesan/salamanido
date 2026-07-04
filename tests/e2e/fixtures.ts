@@ -14,23 +14,23 @@ export const test = base.extend<{
   errors: string[]
   requests: string[]
 }>({
-  errors: async ({ page }, use) => {
+  errors: async ({ page }, provideFixture) => {
     const errors: string[] = []
     page.on('pageerror', (e) => errors.push(String(e)))
     page.on('console', (msg) => {
       if (msg.type() === 'error') errors.push(msg.text())
     })
-    await use(errors)
+    await provideFixture(errors)
   },
-  requests: async ({ page }, use) => {
+  requests: async ({ page }, provideFixture) => {
     const requests: string[] = []
     page.on('request', (r) => requests.push(r.url()))
-    await use(requests)
+    await provideFixture(requests)
   },
-  page: async ({ page }, use) => {
+  page: async ({ page }, provideFixture) => {
     await page.goto('/')
     await page.getByRole('button', { name: /verstanden/i }).click()
-    await use(page)
+    await provideFixture(page)
   },
 })
 
