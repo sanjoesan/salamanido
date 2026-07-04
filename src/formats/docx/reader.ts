@@ -288,13 +288,17 @@ function runsToInline(runs: RunLike[]): JsonNode[] {
 
 interface ListMarker {
   numId: string | null
+  ilvl: number
 }
 
 function listMarkerFor(pEl: Element): ListMarker {
   const pPr = firstChildNS(pEl, OOXML_NAMESPACES.w, 'pPr')
   const numPr = pPr && firstChildNS(pPr, OOXML_NAMESPACES.w, 'numPr')
   const numIdEl = numPr && firstChildNS(numPr, OOXML_NAMESPACES.w, 'numId')
-  return { numId: numIdEl?.getAttributeNS(OOXML_NAMESPACES.w, 'val') ?? null }
+  const ilvlEl = numPr && firstChildNS(numPr, OOXML_NAMESPACES.w, 'ilvl')
+  const numId = numIdEl?.getAttributeNS(OOXML_NAMESPACES.w, 'val') ?? null
+  const ilvl = Number(ilvlEl?.getAttributeNS(OOXML_NAMESPACES.w, 'val') ?? '0') || 0
+  return { numId, ilvl }
 }
 
 // Real-world files can nest tables absurdly deeply (a known parser-fuzzing pattern —
@@ -338,7 +342,14 @@ function parseTable(tblEl: Element, headingInfo: HeadingInfo, imageRels: Map<str
           ...childElements(tcEl, OOXML_NAMESPACES.w, 'tbl').map((t) => parseTable(t, headingInfo, imageRels, depth + 1)),
         )
       }
-      const cellNode: JsonNode = { type: 'table_cell', attrs: { colspan, rowspan: 1, colwidth: null }, content }
+      // A cell without any recognized child (rare, but real files exist without a
+      // `<w:p>` at all) must still satisfy table_cell's non-empty `block+` content
+      // model — fall back to an empty paragraph rather than risk an uncheckable node.
+      const cellNode: JsonNode = {
+        type: 'table_cell',
+        attrs: { colspan, rowspan: 1, colwidth: null },
+        content: content.length ? content : [emptyParagraph()],
+      }
       cells.push(cellNode)
 
       for (let c = col; c < Math.min(col + colspan, colCount); c++) {
@@ -352,30 +363,79 @@ function parseTable(tblEl: Element, headingInfo: HeadingInfo, imageRels: Map<str
   return { type: 'table', content: rows }
 }
 
+/**
+ * Reconstructs list nesting from a flat sequence of paragraphs/blocks. Real Word files
+ * represent a nested list not as actual XML nesting but as a flat run of `<w:p>`
+ * elements that all share one `w:numId` and differ only in `w:ilvl` (indent level).
+ * This walks that flat sequence with a small stack of "list currently being built"
+ * frames, one per currently-open indent level: a jump to a deeper `w:ilvl` opens a new
+ * nested `bullet_list`/`ordered_list` inside the `list_item` just added at the
+ * shallower level, and a jump back to a shallower level closes and re-attaches the
+ * finished nested list as a further block inside that `list_item` — see
+ * datei-oeffnen-req.md §6 criterion 2 ("Listen … -Verschachtelung … bleiben
+ * identisch"). Without this, every paragraph sharing a `numId` collapses into one flat
+ * list regardless of its `w:ilvl`.
+ */
 function groupLists(items: Array<{ marker: ListMarker; block: JsonNode }>, kindByNumId: Map<string, 'bullet' | 'ordered'>): JsonNode[] {
-  const result: JsonNode[] = []
-  let currentNumId: string | null = null
-  let currentItems: JsonNode[] = []
+  interface Frame {
+    numId: string
+    ilvl: number
+    node: JsonNode // bullet_list/ordered_list under construction; node.content holds its list_items
+  }
 
-  const flush = () => {
-    if (currentItems.length === 0) return
-    const kind = (currentNumId && kindByNumId.get(currentNumId)) || 'bullet'
-    result.push({ type: kind === 'ordered' ? 'ordered_list' : 'bullet_list', content: currentItems })
-    currentItems = []
-    currentNumId = null
+  const result: JsonNode[] = []
+  const stack: Frame[] = []
+
+  const openFrame = (numId: string, ilvl: number) => {
+    const kind = kindByNumId.get(numId) || 'bullet'
+    stack.push({ numId, ilvl, node: { type: kind === 'ordered' ? 'ordered_list' : 'bullet_list', content: [] } })
+  }
+
+  const closeFrame = () => {
+    const frame = stack.pop()!
+    if (stack.length === 0) {
+      result.push(frame.node)
+      return
+    }
+    const parentItems = stack[stack.length - 1].node.content as JsonNode[]
+    const lastItem = parentItems[parentItems.length - 1]
+    lastItem.content = [...(lastItem.content ?? []), frame.node]
+  }
+
+  const closeAll = () => {
+    while (stack.length) closeFrame()
   }
 
   for (const { marker, block } of items) {
-    if (marker.numId) {
-      if (currentNumId !== null && currentNumId !== marker.numId) flush()
-      currentNumId = marker.numId
-      currentItems.push({ type: 'list_item', content: [block] })
-    } else {
-      flush()
+    if (!marker.numId) {
+      closeAll()
       result.push(block)
+      continue
     }
+    const { numId, ilvl } = marker
+    const top = stack[stack.length - 1]
+    if (!top) {
+      openFrame(numId, ilvl)
+    } else if (top.numId === numId && top.ilvl === ilvl) {
+      // Same list, same level as the item just added — nothing to open/close.
+    } else if (ilvl > top.ilvl) {
+      // Deeper indent — start a nested list inside the item just added at `top`.
+      openFrame(numId, ilvl)
+    } else {
+      // Shallower indent (or same indent but a different list/numId): close every
+      // frame deeper than the target level, then, if what remains open doesn't
+      // already match this marker, close it too and start a fresh frame.
+      while (stack.length && stack[stack.length - 1].ilvl > ilvl) closeFrame()
+      const matched = stack[stack.length - 1]
+      if (!matched || matched.ilvl !== ilvl || matched.numId !== numId) {
+        if (matched && matched.ilvl === ilvl) closeFrame()
+        openFrame(numId, ilvl)
+      }
+    }
+    const currentTop = stack[stack.length - 1]
+    ;(currentTop.node.content as JsonNode[]).push({ type: 'list_item', content: [block] })
   }
-  flush()
+  closeAll()
   return result
 }
 
@@ -413,10 +473,10 @@ async function readBodyChildren(
     if (child.namespaceURI === OOXML_NAMESPACES.w && child.localName === 'p') {
       const marker = listMarkerFor(child)
       for (const block of paragraphToBlocks(child, headingInfo, imageRels)) {
-        items.push({ marker: block.type === 'paragraph' ? marker : { numId: null }, block })
+        items.push({ marker: block.type === 'paragraph' ? marker : { numId: null, ilvl: 0 }, block })
       }
     } else if (child.namespaceURI === OOXML_NAMESPACES.w && child.localName === 'tbl') {
-      items.push({ marker: { numId: null }, block: parseTable(child, headingInfo, imageRels) })
+      items.push({ marker: { numId: null, ilvl: 0 }, block: parseTable(child, headingInfo, imageRels) })
     }
   }
   const grouped = groupLists(items, kindByNumId)
@@ -478,10 +538,16 @@ export async function readDocx(file: File | Blob): Promise<WordDocumentContent> 
     title = coreDoc.getElementsByTagNameNS(OOXML_NAMESPACES.dc, 'title')[0]?.textContent ?? ''
   }
 
+  // `doc`'s content model requires at least one block (`block+`) — a header/footer
+  // part can legally exist but resolve to zero recognizable blocks (e.g. a header
+  // containing only elements this reader doesn't extract text from), and an empty
+  // array is still truthy, so `headerBlocks ? ... : null` alone doesn't catch it. Real
+  // fixtures (`Bug54849.docx`, `Bug60341.docx`) hit exactly this and produced an
+  // uncheckable `{ type: 'doc', content: [] }` without this fallback.
   const result: WordDocumentContent = {
-    body: { type: 'doc', content: bodyBlocks.length ? bodyBlocks : [{ type: 'paragraph', attrs: { align: 'left' } }] },
-    header: headerBlocks ? { type: 'doc', content: headerBlocks } : null,
-    footer: footerBlocks ? { type: 'doc', content: footerBlocks } : null,
+    body: { type: 'doc', content: bodyBlocks.length ? bodyBlocks : [emptyParagraph()] },
+    header: headerBlocks ? { type: 'doc', content: headerBlocks.length ? headerBlocks : [emptyParagraph()] } : null,
+    footer: footerBlocks ? { type: 'doc', content: footerBlocks.length ? footerBlocks : [emptyParagraph()] } : null,
     meta: { title },
   }
   assertLoadableDocument(result)

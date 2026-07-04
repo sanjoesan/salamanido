@@ -111,6 +111,30 @@ function decodeInline(pEl: Element, styles: ParsedStyles): JsonNode[] {
     return marks
   }
 
+  /**
+   * Combines the marks inherited from an ancestor `text:span` with the marks of a
+   * nested one. A ProseMirror text node's marks must contain each mark *type* at most
+   * once (`Node.check()` enforces this) — but real-world ODT files nest spans whose
+   * styles re-apply the same property (e.g. a template style redundantly repeating
+   * `font-weight: bold` on an inner span already made bold by an outer one), which
+   * without de-duplication produced `marks: [strong, strong, em]` and made every
+   * subsequently loaded document fail `assertLoadableDocument` (see e.g. the
+   * `multiple-paragraphs-and-spans.odt`/`indentTest.odt` fixtures). The innermost
+   * (most specific) mark for a given type wins.
+   */
+  function mergeMarks(
+    outer: Array<{ type: string; attrs?: Record<string, unknown> }>,
+    inner: Array<{ type: string; attrs?: Record<string, unknown> }>,
+  ): Array<{ type: string; attrs?: Record<string, unknown> }> {
+    const merged = [...outer]
+    for (const mark of inner) {
+      const existingIndex = merged.findIndex((m) => m.type === mark.type)
+      if (existingIndex >= 0) merged[existingIndex] = mark
+      else merged.push(mark)
+    }
+    return merged
+  }
+
   function walk(node: ChildNode, marks: Array<{ type: string; attrs?: Record<string, unknown> }>) {
     if (node.nodeType === node.TEXT_NODE) {
       const text = node.textContent ?? ''
@@ -121,7 +145,7 @@ function decodeInline(pEl: Element, styles: ParsedStyles): JsonNode[] {
     const el = node as Element
     if (el.namespaceURI === ODF_NAMESPACES.text && el.localName === 'span') {
       const styleName = el.getAttributeNS(ODF_NAMESPACES.text, 'style-name')
-      const childMarks = [...marks, ...marksFor(styleName)]
+      const childMarks = mergeMarks(marks, marksFor(styleName))
       for (const child of Array.from(el.childNodes)) walk(child, childMarks)
     } else if (el.namespaceURI === ODF_NAMESPACES.text && el.localName === 'line-break') {
       result.push({ type: 'hard_break' })
@@ -239,6 +263,20 @@ function elementToBlocks(el: Element, styles: ParsedStyles, depth = 0): JsonNode
 
   if (depth >= MAX_NESTING_DEPTH) return []
 
+  // `<text:section>` is ODF's mechanism for a multi-column (or otherwise
+  // page-layout-varying) region of body text (datei-oeffnen-req.md §3.13,
+  // "mehrspaltiges Layout") — real-world newsletter-/report-style documents wrap a
+  // run of paragraphs/lists/tables in a section whose style carries
+  // `style:section-properties > style:columns`. It is a semantic *wrapper*, not a
+  // block type in its own right, and previously fell through to the default `return
+  // []` below — silently dropping every paragraph inside it. The column layout itself
+  // is not reproduced (paragraphs render as a single simplified column, which the
+  // requirement explicitly allows: "Spalten dürfen vereinfacht dargestellt werden"),
+  // but the text must not vanish, so its children are unwrapped in place instead.
+  if (ns === ODF_NAMESPACES.text && local === 'section') {
+    return Array.from(el.children).flatMap((child) => elementToBlocks(child, styles, depth + 1))
+  }
+
   // A `draw:frame` may legally appear as a direct child of `office:text` (e.g. a
   // page-anchored textbox/image, `text:anchor-type="page"`), not just nested inside a
   // `text:p` — without this, such a frame (and any text inside it) was silently
@@ -248,10 +286,15 @@ function elementToBlocks(el: Element, styles: ParsedStyles, depth = 0): JsonNode
   if (ns === ODF_NAMESPACES.text && local === 'list') {
     const styleName = el.getAttributeNS(ODF_NAMESPACES.text, 'style-name')
     const kind = (styleName && styles.listKinds.get(styleName)) || 'bullet'
-    const items = childElements(el, ODF_NAMESPACES.text, 'list-item').map((itemEl) => ({
-      type: 'list_item',
-      content: Array.from(itemEl.children).flatMap((child) => elementToBlocks(child, styles, depth + 1)),
-    }))
+    const items = childElements(el, ODF_NAMESPACES.text, 'list-item').map((itemEl) => {
+      const content = Array.from(itemEl.children).flatMap((child) => elementToBlocks(child, styles, depth + 1))
+      // A list item can legally hold nothing but e.g. a soft-page-break, which
+      // `elementToBlocks` deliberately drops — `list_item`'s `block+` content model
+      // still needs at least one block, so fall back to an empty paragraph rather
+      // than producing an invalid, uncheckable node (see `imageWithinList.odt`-style
+      // fixtures for the analogous nested-list case this guards against).
+      return { type: 'list_item', content: content.length ? content : [emptyParagraph()] }
+    })
     return [{ type: kind === 'ordered' ? 'ordered_list' : 'bullet_list', content: items }]
   }
 
@@ -261,10 +304,16 @@ function elementToBlocks(el: Element, styles: ParsedStyles, depth = 0): JsonNode
       content: childElements(rowEl, ODF_NAMESPACES.table, 'table-cell').map((cellEl) => {
         const colspan = Number(cellEl.getAttributeNS(ODF_NAMESPACES.table, 'number-columns-spanned') ?? '1') || 1
         const rowspan = Number(cellEl.getAttributeNS(ODF_NAMESPACES.table, 'number-rows-spanned') ?? '1') || 1
+        const content = Array.from(cellEl.children).flatMap((child) => elementToBlocks(child, styles, depth + 1))
         return {
           type: 'table_cell',
+          // A real-world table cell can be entirely empty (`<table:table-cell/>`, no
+          // `text:p` at all — seen e.g. in the `TableWidth.odt`/`lostBackground.odt`
+          // fixtures). `table_cell`'s content model requires at least one block, so
+          // fall back to an empty paragraph instead of producing invalid, uncheckable
+          // content.
           attrs: { colspan, rowspan, colwidth: null },
-          content: Array.from(cellEl.children).flatMap((child) => elementToBlocks(child, styles, depth + 1)),
+          content: content.length ? content : [emptyParagraph()],
         }
       }),
     }))
@@ -345,10 +394,14 @@ export async function readOdt(file: File | Blob): Promise<WordDocumentContent> {
     title = metaDoc.getElementsByTagNameNS(ODF_NAMESPACES.dc, 'title')[0]?.textContent ?? ''
   }
 
+  // `doc`'s content model requires at least one block (`block+`) — a header/footer
+  // element can legally exist but resolve to zero recognizable blocks, and an empty
+  // array is still truthy, so `headerBlocks ? ... : null` alone doesn't catch it (see
+  // the analogous DOCX fix in `docx/reader.ts` for the real fixtures that hit this).
   const result: WordDocumentContent = {
-    body: { type: 'doc', content: bodyBlocks.length ? bodyBlocks : [{ type: 'paragraph', attrs: { align: 'left' } }] },
-    header: headerBlocks ? { type: 'doc', content: headerBlocks } : null,
-    footer: footerBlocks ? { type: 'doc', content: footerBlocks } : null,
+    body: { type: 'doc', content: bodyBlocks.length ? bodyBlocks : [emptyParagraph()] },
+    header: headerBlocks ? { type: 'doc', content: headerBlocks.length ? headerBlocks : [emptyParagraph()] } : null,
+    footer: footerBlocks ? { type: 'doc', content: footerBlocks.length ? footerBlocks : [emptyParagraph()] } : null,
     meta: { title },
   }
   assertLoadableDocument(result)

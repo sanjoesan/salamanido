@@ -9,11 +9,11 @@ const FIXTURES_DIR = join(__dirname, '../../../../tests/fixtures/external/odt')
 // expected outcome, not a bug in our reader.
 const KNOWN_INVALID = new Set(['invalid.odt', 'PasswordProtected.odt', 'testInvalidPkg2.odt', 'testInvalidPkg3.odt'])
 
-// brokenList.odt (2.4 MB, ~20k automatic styles) takes 90s+ to import under Vitest's
+// brokenList.odt (2.35 MB, ~20k automatic styles) takes 90s+ to import under Vitest's
 // jsdom environment — jsdom's DOM implementation is dramatically slower than a real
-// browser engine at this element count. Confirmed via a dedicated Playwright/Chromium
-// run that the actual app imports this file in ~575ms, so this is a jsdom-only test
-// artifact, not a product bug. Covered instead by tests/e2e/large-document-import.spec.ts.
+// browser engine at this element count. Confirmed via a real Playwright/Chromium run
+// (tests/e2e/large-document-import.spec.ts) that the actual app imports this file in
+// ~0.85-0.9s, so this is a jsdom-only test artifact, not a product bug.
 const SKIP_SLOW_UNDER_JSDOM = new Set(['brokenList.odt'])
 
 function loadFixtures(): Array<{ name: string; buffer: Buffer }> {
@@ -65,5 +65,56 @@ describe('ODT reader vs. real-world fixtures (apache/tdf test corpora)', () => {
       // eslint-disable-next-line no-console
       console.log(failed.map((f) => `  - ${f.name}: ${f.error}`).join('\n'))
     }
+  })
+})
+
+describe('ODT reader: hyperlink/frame/textbox content is not silently dropped (U-4)', () => {
+  function loadFixture(name: string): Blob {
+    const buffer = readFileSync(join(FIXTURES_DIR, name))
+    return new Blob([new Uint8Array(buffer)])
+  }
+
+  it('Hyperlink-AOO401.odt: link text "Hello World!" is present', async () => {
+    const doc = await readOdt(loadFixture('Hyperlink-AOO401.odt'))
+    // Concatenate all text run fragments in document order and check the link text survives.
+    const fragments: string[] = []
+    JSON.stringify(doc.body, (key, value) => {
+      if (key === 'text') fragments.push(value)
+      return value
+    })
+    expect(fragments.join('')).toContain('Hello World!')
+  })
+
+  it('hyperlink.odt / hyperlink_destination.odt: link text survives', async () => {
+    for (const name of ['hyperlink.odt', 'hyperlink_destination.odt']) {
+      const doc = await readOdt(loadFixture(name))
+      const fragments: string[] = []
+      JSON.stringify(doc.body, (key, value) => {
+        if (key === 'text') fragments.push(value)
+        return value
+      })
+      expect(fragments.join('')).toContain('abc')
+    }
+  })
+
+  it('FrameWithTable.odt: table text inside the frame/textbox is present, not an empty image', async () => {
+    const doc = await readOdt(loadFixture('FrameWithTable.odt'))
+    const text = JSON.stringify(doc.body)
+    expect(text).toContain('unsupported_block')
+    expect(text).toContain('"text":"a"')
+    expect(text).not.toMatch(/"type":"image","attrs":\{"src":""/)
+  })
+
+  it('frame.odt: frame text content is present', async () => {
+    const doc = await readOdt(loadFixture('frame.odt'))
+    const text = JSON.stringify(doc.body)
+    expect(text).toContain('Frame Content')
+    expect(text).toContain('Page Content')
+  })
+
+  it('table-within-textBox-within-frame.odt: deeply nested text remains readable, no crash', async () => {
+    const doc = await readOdt(loadFixture('table-within-textBox-within-frame.odt'))
+    const text = JSON.stringify(doc.body)
+    expect(text).toContain('CUSTOMER_NAME')
   })
 })

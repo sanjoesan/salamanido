@@ -158,6 +158,55 @@ describe('ODT round trip: lists', () => {
     const result = await roundTrip(original)
     expect((result.body as any).content[0].type).toBe('ordered_list')
   })
+
+  it('preserves a nested list two levels deep', async () => {
+    const original = doc([
+      {
+        type: 'bullet_list',
+        content: [
+          {
+            type: 'list_item',
+            content: [
+              paragraph('Ebene 1'),
+              {
+                type: 'bullet_list',
+                content: [{ type: 'list_item', content: [paragraph('Ebene 2')] }],
+              },
+            ],
+          },
+        ],
+      },
+    ])
+    const result = await roundTrip(original)
+    const outerList = (result.body as any).content[0]
+    expect(outerList.type).toBe('bullet_list')
+    const outerItem = outerList.content[0]
+    const nestedList = outerItem.content.find((n: any) => n.type === 'bullet_list')
+    expect(nestedList).toBeTruthy()
+    expect(nestedList.content[0].content[0].content[0].text).toBe('Ebene 2')
+  })
+})
+
+describe('ODT round trip: unsupported_block', () => {
+  it('keeps rescued content of an unsupported_block visible after a write/read cycle', async () => {
+    const original = doc([
+      {
+        type: 'unsupported_block',
+        attrs: { kind: 'textbox' },
+        content: [paragraph('Text aus dem Textfeld')],
+      },
+    ])
+    const result = await roundTrip(original)
+    const text = JSON.stringify(result.body)
+    expect(text).toContain('Text aus dem Textfeld')
+  })
+})
+
+describe('ODT round trip: negative case (external image URL)', () => {
+  it('throws a readable error instead of silently dropping an image with a non-data: src', async () => {
+    const original = doc([{ type: 'image', attrs: { src: 'https://example.com/bild.png', alt: '' } }])
+    await expect(writeOdt(original)).rejects.toThrow(/data-URL/)
+  })
 })
 
 describe('ODT round trip: tables', () => {

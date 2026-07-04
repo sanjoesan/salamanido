@@ -31,12 +31,14 @@ const KNOWN_CORRUPTED = new Set([
 // this file is the *safe*, correct outcome, not a bug to fix.
 const KNOWN_XXE_PROBE = new Set(['ExternalEntityInText.docx'])
 
-// bug65649.docx (12 MB, ~16k paragraphs) takes long enough under Vitest's jsdom
-// environment to be flaky/slow — jsdom's DOM implementation is dramatically slower
-// than a real browser engine at this element count. Confirmed via a dedicated
-// Playwright/Chromium run that the actual app imports this file in ~1.9s, so this is
-// a jsdom-only test artifact, not a product bug. Covered instead by
-// tests/e2e/large-document-import.spec.ts.
+// bug65649.docx (0.45 MB on disk, ~16k paragraphs — note: an earlier version of this
+// comment said "12 MB", which was never actually measured and was wrong; corrected
+// after actually running tests/e2e/large-document-import.spec.ts) takes long enough
+// under Vitest's jsdom environment to be flaky/slow — jsdom's DOM implementation is
+// dramatically slower than a real browser engine at this element count. Confirmed via
+// a real Playwright/Chromium run (tests/e2e/large-document-import.spec.ts) that the
+// actual app imports this file in ~2.3s, so this is a jsdom-only test artifact, not a
+// product bug.
 const SKIP_SLOW_UNDER_JSDOM = new Set(['bug65649.docx'])
 
 // deep-table-cell.docx (Apache POI's own parser-stress fixture) nests <w:tbl> 5000
@@ -112,5 +114,39 @@ describe('DOCX reader vs. real-world fixtures (apache/poi test-data)', () => {
       // eslint-disable-next-line no-console
       console.log(failed.map((f) => `  - ${f.name}: ${f.error}`).join('\n'))
     }
+  })
+})
+
+describe('DOCX reader: field/hyperlink/bookmark content is not silently dropped (U-3)', () => {
+  function loadFixture(name: string): Blob {
+    const buffer = readFileSync(join(FIXTURES_DIR, name))
+    return new Blob([new Uint8Array(buffer)])
+  }
+
+  it('FieldCodes.docx: the cached AUTHOR/CREATEDATE field results appear as real text', async () => {
+    const doc = await readDocx(loadFixture('FieldCodes.docx'))
+    const text = JSON.stringify(doc.body)
+    expect(text).toContain('ANTONI')
+    expect(text).toContain('16 June 2010')
+  })
+
+  it('FldSimple.docx: the simple-field cached text is not empty', async () => {
+    const doc = await readDocx(loadFixture('FldSimple.docx'))
+    const content = (doc.body as any).content
+    const text = JSON.stringify(doc.body)
+    expect(content.length).toBeGreaterThan(0)
+    expect(text.length).toBeGreaterThan('{"type":"doc","content":[{"type":"paragraph","attrs":{"align":"left"}}]}'.length)
+  })
+
+  it('WithTabs.docx: body text remains present', async () => {
+    const doc = await readDocx(loadFixture('WithTabs.docx'))
+    expect((doc.body as any).content.length).toBeGreaterThan(0)
+    expect(JSON.stringify(doc.body).length).toBeGreaterThan(50)
+  })
+
+  it('bookmarks.docx: body text remains present around bookmark markers', async () => {
+    const doc = await readDocx(loadFixture('bookmarks.docx'))
+    expect((doc.body as any).content.length).toBeGreaterThan(0)
+    expect(JSON.stringify(doc.body).length).toBeGreaterThan(50)
   })
 })

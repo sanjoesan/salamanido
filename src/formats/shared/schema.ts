@@ -130,8 +130,15 @@ const nodes: Record<string, NodeSpec> = {
     },
   },
 
+  // Deliberately `block+` rather than `paragraph block*`: real-world ODT/DOCX files
+  // routinely produce a list item whose only content is a nested list (no own
+  // paragraph, e.g. multi-level lists authored directly at a sub-level) or a bare
+  // image — see e.g. the `listLevel10.odt`/`imageWithinList.odt` fixtures in
+  // `tests/fixtures/external/odt`. Requiring a leading paragraph rejected those as
+  // schema-incompatible (caught by `assertLoadableDocument`, turning a real,
+  // importable document into a hard import error).
   list_item: {
-    content: 'paragraph block*',
+    content: 'block+',
     parseDOM: [{ tag: 'li' }],
     toDOM() {
       return ['li', 0]

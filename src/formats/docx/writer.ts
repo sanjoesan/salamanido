@@ -92,16 +92,27 @@ function imageParagraphXml(node: JsonNode, images: ImageCollector, rels: Relatio
   )
 }
 
+interface ListContext {
+  numId: number
+  level: number
+}
+
+// OOXML only defines w:ilvl 0-8 (9 levels) — deeper nesting is clamped to the deepest
+// defined level rather than emitting an ilvl value Word doesn't recognize.
+const MAX_LIST_ILVL = 8
+
 function blockToDocx(
   node: JsonNode,
   images: ImageCollector,
   rels: RelationshipRegistry,
-  listNumId: number | null = null,
+  listContext: ListContext | null = null,
 ): string {
   switch (node.type) {
     case 'paragraph': {
       const align = (node.attrs?.align as string) ?? 'left'
-      const numPr = listNumId ? `<w:numPr><w:ilvl w:val="0"/><w:numId w:val="${listNumId}"/></w:numPr>` : ''
+      const numPr = listContext
+        ? `<w:numPr><w:ilvl w:val="${listContext.level}"/><w:numId w:val="${listContext.numId}"/></w:numPr>`
+        : ''
       return `<w:p>${paragraphPropsXml(align, numPr)}${inlineToRuns(node.content)}</w:p>`
     }
     case 'heading': {
@@ -112,15 +123,32 @@ function blockToDocx(
     }
     case 'bullet_list':
     case 'ordered_list': {
-      const numId = node.type === 'ordered_list' ? ORDERED_NUM_ID : BULLET_NUM_ID
+      // A `bullet_list`/`ordered_list` reached with an existing `listContext` is itself
+      // a further block inside a `list_item` of an enclosing list — i.e. a nested list.
+      // It shares its parent's `numId` and moves one `w:ilvl` deeper, which is what
+      // lets a reader (this app's own, or Word's) reconstruct the nesting again from
+      // `w:ilvl` on import (see datei-oeffnen-req.md §6 criterion 2 and
+      // docx/reader.ts's groupLists). A genuinely top-level list (no enclosing
+      // listContext) allocates a fresh ilvl-0 numbering context as before.
+      const nextContext: ListContext = listContext
+        ? { numId: listContext.numId, level: Math.min(listContext.level + 1, MAX_LIST_ILVL) }
+        : { numId: node.type === 'ordered_list' ? ORDERED_NUM_ID : BULLET_NUM_ID, level: 0 }
       return (node.content ?? [])
-        .flatMap((item) => (item.content ?? []).map((child) => blockToDocx(child, images, rels, numId)))
+        .flatMap((item) => (item.content ?? []).map((child) => blockToDocx(child, images, rels, nextContext)))
         .join('')
     }
     case 'table':
       return tableToDocx(node, images, rels)
     case 'image':
       return imageParagraphXml(node, images, rels)
+    case 'unsupported_block':
+      // The reader used this node purely to keep otherwise-unsupported content (a
+      // textbox, an embedded object) visible instead of silently dropping it (see
+      // datei-oeffnen-req.md §3.13). On export there is no OOXML construct to write
+      // the placeholder itself back into, so its rescued content is unwrapped and
+      // written as plain blocks — losing the "unsupported" marker, but not the text,
+      // which is what the round-trip requirement (§6) actually checks for.
+      return (node.content ?? []).map((child) => blockToDocx(child, images, rels)).join('')
     default:
       return ''
   }

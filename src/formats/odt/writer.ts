@@ -123,6 +123,14 @@ function blockToOdt(node: JsonNode, styles: TextStyleRegistry, images: ImageColl
       const alt = escapeXml(String(node.attrs?.alt ?? ''))
       return `<text:p><draw:frame draw:name="${alt || 'Image'}" svg:width="${width}" svg:height="${height}" text:anchor-type="as-char"><draw:image xlink:href="${fileName}" xlink:type="simple" xlink:show="embed" xlink:actuate="onLoad"/></draw:frame></text:p>`
     }
+    case 'unsupported_block':
+      // The reader used this node purely to keep otherwise-unsupported content (a
+      // textbox, an embedded object) visible instead of silently dropping it (see
+      // datei-oeffnen-req.md §3.13). On export there is no ODF construct to write the
+      // placeholder itself back into, so its rescued content is unwrapped and written
+      // as plain blocks — losing the "unsupported" marker, but not the text, which is
+      // what the round-trip requirement (§6) actually checks for.
+      return (node.content ?? []).map((child) => blockToOdt(child, styles, images)).join('')
     default:
       return ''
   }
