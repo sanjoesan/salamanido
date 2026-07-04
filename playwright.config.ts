@@ -25,8 +25,14 @@ export default defineConfig({
     },
   },
   projects: [
-    { name: 'Desktop Chrome', use: { ...devices['Desktop Chrome'] } },
-    { name: 'Mobile', use: { ...devices['Pixel 7'] } },
+    // `permissions` grants clipboard-read/-write explicitly: without it, Chromium's
+    // legacy execCommand('cut'/'copy') clipboard path has been observed to silently
+    // no-op (selection left completely untouched, no error) under some headless CI
+    // configurations, while working fine locally — Chromium-only, hence not applied
+    // to the WebKit/Firefox projects below (they don't support this permission and
+    // error out if it's requested).
+    { name: 'Desktop Chrome', use: { ...devices['Desktop Chrome'], permissions: ['clipboard-read', 'clipboard-write'] } },
+    { name: 'Mobile', use: { ...devices['Pixel 7'], permissions: ['clipboard-read', 'clipboard-write'] } },
     { name: 'Tablet', use: { ...devices['iPad Mini'] } },
   ],
 })
