@@ -84,8 +84,10 @@ function imageParagraphXml(node: JsonNode, images: ImageCollector, rels: Relatio
   }
   const fileName = images.add(src)
   const relId = rels.add(RELATIONSHIP_TYPES.image, `media/${fileName.split('/').pop()}`)
-  const widthPx = Number(node.attrs?.width ?? 300)
-  const heightPx = Number(node.attrs?.height ?? 200)
+  // `?? 300` alone would let a stray 0 through (`Number(0) → 0 → cx="0"` = invisible image,
+  // req §3.18); treat any non-positive/NaN size as "unset" and fall back to the default.
+  const widthPx = Number(node.attrs?.width) > 0 ? Number(node.attrs?.width) : 300
+  const heightPx = Number(node.attrs?.height) > 0 ? Number(node.attrs?.height) : 200
   // EMUs: 914400 per inch, 96px per inch by convention.
   const cx = Math.round((widthPx / 96) * 914400)
   const cy = Math.round((heightPx / 96) * 914400)

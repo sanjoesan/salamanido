@@ -182,8 +182,12 @@ function blockToOdt(node: JsonNode, styles: TextStyleRegistry, images: ImageColl
         return `<text:p>${escapeXml(imageFallbackText(String(node.attrs?.alt ?? '')))}</text:p>`
       }
       const fileName = images.add(src)
-      const width = node.attrs?.width ? `${node.attrs.width}px` : '6cm'
-      const height = node.attrs?.height ? `${node.attrs.height}px` : '4cm'
+      // ODF sizes are written in cm (interoperable, RelaxNG-checked) rather than px; the
+      // model stores CSS px at 96 dpi. Enough decimals that px→cm→px round-trips within
+      // ±1px on reimport. See bild-groesse-aendern-req.md §2.6.
+      const pxToCm = (px: number) => `${(px * (2.54 / 96)).toFixed(4).replace(/\.?0+$/, '')}cm`
+      const width = node.attrs?.width ? pxToCm(Number(node.attrs.width)) : '6cm'
+      const height = node.attrs?.height ? pxToCm(Number(node.attrs.height)) : '4cm'
       const alt = escapeXml(String(node.attrs?.alt ?? ''))
       return `<text:p><draw:frame draw:name="${alt || 'Image'}" svg:width="${width}" svg:height="${height}" text:anchor-type="as-char"><draw:image xlink:href="${fileName}" xlink:type="simple" xlink:show="embed" xlink:actuate="onLoad"/></draw:frame></text:p>`
     }

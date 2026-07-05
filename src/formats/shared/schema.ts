@@ -60,8 +60,16 @@ const nodes: Record<string, NodeSpec> = {
     attrs: {
       src: { validate: 'string' },
       alt: { default: '', validate: 'string' },
+      // Display size in CSS px (96 dpi) or null (= intrinsic). Always number|null in the
+      // model — parseDOM below normalises the HTML string form so roundtrip assertions and
+      // the resize command never see a string or NaN. See bild-groesse-aendern-req.md §2/§3.16.
       width: { default: null },
       height: { default: null },
+      // Editor-internal original size for "reset to original". Session-only: deliberately
+      // NOT rendered to the DOM (toDOM omits them) and NOT serialised to DOCX/ODT
+      // (no OOXML/ODF field for it). See §2.5 / §3.17.
+      naturalWidth: { default: null },
+      naturalHeight: { default: null },
     },
     draggable: true,
     parseDOM: [
@@ -69,18 +77,27 @@ const nodes: Record<string, NodeSpec> = {
         tag: 'img[src]',
         getAttrs: (dom) => {
           const el = dom as HTMLImageElement
+          const toNum = (v: string | null): number | null => {
+            if (v === null || v === '') return null
+            const n = Number(v)
+            return Number.isFinite(n) && n > 0 ? n : null
+          }
           return {
             src: el.getAttribute('src'),
             alt: el.getAttribute('alt') || '',
-            width: el.getAttribute('width'),
-            height: el.getAttribute('height'),
+            width: toNum(el.getAttribute('width')),
+            height: toNum(el.getAttribute('height')),
           }
         },
       },
     ],
     toDOM(node) {
+      // Only src/alt/width/height reach the DOM; naturalWidth/naturalHeight stay internal.
       const { src, alt, width, height } = node.attrs
-      return ['img', { src, alt, width, height }]
+      const attrs: Record<string, string> = { src, alt }
+      if (width != null) attrs.width = String(width)
+      if (height != null) attrs.height = String(height)
+      return ['img', attrs]
     },
   },
 

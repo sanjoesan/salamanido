@@ -353,14 +353,18 @@ describe('ODT round trip: tables', () => {
 })
 
 describe('ODT round trip: images', () => {
-  it('preserves an embedded image as a self-contained data URL', async () => {
-    const original = doc([{ type: 'image', attrs: { src: TINY_PNG, alt: 'Testbild' } }])
+  it('preserves an embedded image as a self-contained data URL (incl. its display size)', async () => {
+    const original = doc([{ type: 'image', attrs: { src: TINY_PNG, alt: 'Testbild', width: 120, height: 90 } }])
     const result = await roundTrip(original)
     const image = (result.body as any).content[0]
     expect(image.type).toBe('image')
     expect(image.attrs.src).toMatch(/^data:image\/png;base64,/)
     expect(image.attrs.src.split(',')[1]).toBe(TINY_PNG.split(',')[1])
     expect(image.attrs.alt).toBe('Testbild')
+    // display size survives the round trip too (svg:width/height now read, in cm; ±1px
+    // rounding tolerance) — bild-groesse-aendern-req.md §0.1/§5.1.5
+    expect(Math.abs(image.attrs.width - 120)).toBeLessThanOrEqual(1)
+    expect(Math.abs(image.attrs.height - 90)).toBeLessThanOrEqual(1)
   })
 
   it('splits a paragraph containing both text and an image into separate blocks', async () => {

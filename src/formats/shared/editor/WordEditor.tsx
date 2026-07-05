@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { EditorState, TextSelection } from 'prosemirror-state'
+import { EditorState, TextSelection, NodeSelection, Selection } from 'prosemirror-state'
 import { EditorView } from 'prosemirror-view'
 import { history, undo, redo } from 'prosemirror-history'
 import { keymap } from 'prosemirror-keymap'
@@ -9,12 +9,14 @@ import { tableEditing, columnResizing } from 'prosemirror-tables'
 import { dropCursor } from 'prosemirror-dropcursor'
 import { gapCursor } from 'prosemirror-gapcursor'
 import { wordSchema } from '../schema'
-import { cutSelection, insertHardBreak } from './commands'
+import { cutSelection, insertHardBreak, selectedImage } from './commands'
 import { clipboardTextSerializer } from './clipboard'
 import { createPastePlugin } from './paste'
 import { createPaginationPlugin } from './pagination'
 import { pageBackgroundStyle, PAGE_WIDTH_PX, PAGE_HEIGHT_PX, PAGE_MARGIN_PX } from './pageLayout'
 import { Toolbar } from './Toolbar'
+import { ImageResizeNodeView } from './imageNodeView'
+import { ImageSizePanel } from './ImageSizePanel'
 import type { FormatEditorProps } from '../../types'
 import type { WordDocumentContent } from '../documentModel'
 
@@ -139,6 +141,14 @@ export function WordEditor({ document: doc, onChange }: FormatEditorProps<WordDo
   // caps at 100% and just centres the page.
   const fitZoom = Math.max(ZOOM_MIN, Math.min(1, (availWidth - GUTTER_PX) / PAGE_WIDTH_PX))
   const zoom = userZoom ?? fitZoom
+  // The image NodeView is created once (in the mount effect) but its drag handler needs the
+  // *current* zoom to convert screen-px deltas to model px — read it through a ref.
+  const zoomRef = useRef(zoom)
+  zoomRef.current = zoom
+
+  // Live size mirrored from an in-progress image handle drag, so the size panel's number
+  // fields track the drag (§1.6). null when no drag is active.
+  const [liveImageSize, setLiveImageSize] = useState<{ w: number; h: number } | null>(null)
 
   // Track the scroll container's available width and the sheet's natural (unscaled)
   // height. `offsetHeight` and ResizeObserver are both transform-invariant, so the
@@ -238,6 +248,40 @@ export function WordEditor({ document: doc, onChange }: FormatEditorProps<WordDo
     const view = new EditorView(containerRef.current, {
       state,
       clipboardTextSerializer,
+      nodeViews: {
+        image: (node, nodeView, getPos) =>
+          new ImageResizeNodeView(
+            node,
+            nodeView,
+            getPos as () => number | undefined,
+            () => zoomRef.current,
+            (size) => setLiveImageSize(size),
+          ),
+      },
+      // Typing while an image is node-selected must APPEND after it, never replace it —
+      // ProseMirror's default would swap the image for the typed character. This one guard
+      // covers both triggers: right after inserting an image and right after resizing one
+      // (bild-groesse-aendern-req.md §2.10, bild-einfuegen §3.12).
+      handleTextInput(v, _from, _to, text) {
+        const sel = v.state.selection
+        if (sel instanceof NodeSelection && sel.node.type.name === 'image') {
+          const tr = v.state.tr
+          const $after = tr.doc.resolve(sel.to)
+          // Prefer an existing text position right after the image; if the image is the last
+          // block (nothing to append into), insert a fresh paragraph carrying the text.
+          const textSel = Selection.findFrom($after, 1, true)
+          if (textSel) {
+            tr.setSelection(textSel).insertText(text)
+          } else {
+            const para = wordSchema.nodes.paragraph.create(null, wordSchema.text(text))
+            tr.insert(sel.to, para)
+            tr.setSelection(TextSelection.create(tr.doc, sel.to + 1 + text.length))
+          }
+          v.dispatch(tr.scrollIntoView())
+          return true
+        }
+        return false
+      },
       dispatchTransaction(tr) {
         const newState = view.state.apply(tr)
         view.updateState(newState)
@@ -281,9 +325,11 @@ export function WordEditor({ document: doc, onChange }: FormatEditorProps<WordDo
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
+  const activeView = viewRef.current
   return (
     <div className="flex flex-col h-full">
-      {viewRef.current && <Toolbar view={viewRef.current} cutError={cutError} setCutError={setCutError} />}
+      {activeView && <Toolbar view={activeView} cutError={cutError} setCutError={setCutError} />}
+      {activeView && selectedImage(activeView.state) && <ImageSizePanel view={activeView} liveSize={liveImageSize} />}
       {pasteNotice && (
         <div
           role="status"

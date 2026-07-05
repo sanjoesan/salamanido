@@ -120,8 +120,21 @@ interface RunLike {
   marks?: Array<{ type: string; attrs?: Record<string, unknown> }>
   imageRelId?: string
   imageAlt?: string
+  imageWidth?: number | null
+  imageHeight?: number | null
   unsupportedKind?: 'textbox' | 'object'
   unsupportedBlocks?: JsonNode[]
+}
+
+// OOXML drawing sizes are in EMU (English Metric Units): 914400 per inch, 96 px per
+// inch → 9525 EMU per CSS px. Reading <wp:extent> so an imported image keeps its real
+// size instead of falling back to a hard-coded default on the next export.
+const EMU_PER_PX = 914400 / 96
+function emuAttrToPx(value: string | null): number | null {
+  if (!value) return null
+  const emu = Number(value)
+  if (!Number.isFinite(emu) || emu <= 0) return null
+  return Math.round(emu / EMU_PER_PX)
 }
 
 // A textbox can itself contain a paragraph with another textbox — cap the recursion
@@ -152,7 +165,14 @@ function decodeDrawingOrPict(
     blip?.getAttributeNS(OOXML_NAMESPACES.r, 'embed') ?? imagedata?.getAttributeNS(OOXML_NAMESPACES.r, 'id') ?? undefined
   if (relId) {
     const docPr = el.getElementsByTagNameNS(OOXML_NAMESPACES.wp, 'docPr')[0]
-    return { kind: 'image', imageRelId: relId, imageAlt: docPr?.getAttribute('name') ?? '' }
+    const extent = el.getElementsByTagNameNS(OOXML_NAMESPACES.wp, 'extent')[0]
+    return {
+      kind: 'image',
+      imageRelId: relId,
+      imageAlt: docPr?.getAttribute('name') ?? '',
+      imageWidth: emuAttrToPx(extent?.getAttribute('cx') ?? null),
+      imageHeight: emuAttrToPx(extent?.getAttribute('cy') ?? null),
+    }
   }
 
   const txbxContent = el.getElementsByTagNameNS(OOXML_NAMESPACES.w, 'txbxContent')[0]
@@ -266,7 +286,18 @@ function paragraphToBlocks(
     if (run.kind === 'image') {
       flush()
       const target = run.imageRelId ? imageRels.get(run.imageRelId) : undefined
-      blocks.push({ type: 'image', attrs: { src: target ?? '', alt: run.imageAlt ?? '' } })
+      blocks.push({
+        type: 'image',
+        attrs: {
+          src: target ?? '',
+          alt: run.imageAlt ?? '',
+          width: run.imageWidth ?? null,
+          height: run.imageHeight ?? null,
+          // the size read from the file is this image's "original" for reset-to-original
+          naturalWidth: run.imageWidth ?? null,
+          naturalHeight: run.imageHeight ?? null,
+        },
+      })
     } else if (run.kind === 'unsupported') {
       flush()
       const content = run.unsupportedBlocks?.length ? run.unsupportedBlocks : [emptyParagraph()]

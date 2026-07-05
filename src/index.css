@@ -41,6 +41,57 @@ body {
   height: auto;
 }
 
+/*
+ * Image resize NodeView (bild-groesse-aendern-req.md). The wrapper hugs the image so the
+ * eight handles line up with its edges; a selected image gets a visible outline (the
+ * missing selection feedback from §3.24) and reveals its handles. An explicitly sized image
+ * may exceed the page width (§2.7) — its wrapper's max-width is turned off in JS; the outer
+ * editor scroll area absorbs the overflow, so the overall layout never overflows.
+ */
+.ProseMirror .pm-image-wrap {
+  position: relative;
+  display: inline-block;
+  line-height: 0;
+  max-width: 100%;
+}
+.ProseMirror .pm-image-wrap.ProseMirror-selectednode {
+  outline: 2px solid #2563eb;
+  outline-offset: 2px;
+}
+.ProseMirror .pm-image-handle {
+  position: absolute;
+  width: 10px;
+  height: 10px;
+  background: #2563eb;
+  border: 1px solid #ffffff;
+  border-radius: 2px;
+  display: none;
+  z-index: 5;
+  touch-action: none; /* a touch-drag on a handle resizes, it does not scroll the page */
+}
+/* Enlarge the pointer/touch hit area to ~40px without enlarging the visible dot (§1.5). */
+.ProseMirror .pm-image-handle::before {
+  content: '';
+  position: absolute;
+  inset: -15px;
+}
+.ProseMirror .pm-image-wrap.pm-image-selected .pm-image-handle {
+  display: block;
+}
+/* Too small to place 10px handles on (they would cover the whole image and block clicks) —
+   such an image is resized via the panel's number fields instead. */
+.ProseMirror .pm-image-wrap.pm-image-no-handles .pm-image-handle {
+  display: none;
+}
+.ProseMirror .pm-image-handle-nw { top: -5px; left: -5px; cursor: nwse-resize; }
+.ProseMirror .pm-image-handle-n  { top: -5px; left: 50%; transform: translateX(-50%); cursor: ns-resize; }
+.ProseMirror .pm-image-handle-ne { top: -5px; right: -5px; cursor: nesw-resize; }
+.ProseMirror .pm-image-handle-e  { top: 50%; right: -5px; transform: translateY(-50%); cursor: ew-resize; }
+.ProseMirror .pm-image-handle-se { bottom: -5px; right: -5px; cursor: nwse-resize; }
+.ProseMirror .pm-image-handle-s  { bottom: -5px; left: 50%; transform: translateX(-50%); cursor: ns-resize; }
+.ProseMirror .pm-image-handle-sw { bottom: -5px; left: -5px; cursor: nesw-resize; }
+.ProseMirror .pm-image-handle-w  { top: 50%; left: -5px; transform: translateY(-50%); cursor: ew-resize; }
+
 .ProseMirror table {
   border-collapse: collapse;
   width: 100%;

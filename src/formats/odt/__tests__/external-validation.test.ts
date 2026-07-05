@@ -103,7 +103,9 @@ describe('ODT writer: external schema validation (speichern-exportieren-qa.md U1
               },
             ],
           },
-          { type: 'image', attrs: { src: TINY_PNG, alt: 'Diagramm' } },
+          // sized image: exercises svg:width/height in cm against the ODF schema
+          // (bild-groesse-aendern-req.md §4.3.7)
+          { type: 'image', attrs: { src: TINY_PNG, alt: 'Diagramm', width: 200, height: 150 } },
         ],
       },
       header: null,

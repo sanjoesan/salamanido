@@ -1,609 +1,857 @@
-# Anforderungen: Bildgröße ändern (`bild-groesse-aendern`)
+# Anforderungsspezifikation: „Bildgröße ändern"
 
-Status: Vom Backlog als **„fehlt"** geführt — gilt gemäß Aufgabenstellung als
-**nicht vertrauenswürdig** und muss vollständig verifiziert werden, bevor dieser Status
-bestätigt werden darf. Eine erste Code-Verifikation wurde beim Erstellen dieses
-Dokuments bereits durchgeführt (siehe Abschnitt 6, „Ist-Zustand laut Code-Analyse")
-und **bestätigt** den Backlog-Eintrag im Kern: Es gibt aktuell **weder ein
-Eingabefeld noch Ziehpunkte noch irgendeinen anderen UI-Weg**, die Größe eines
-eingefügten Bildes zu verändern. Die Verifikation deckt zusätzlich einen **tieferliegenden,
-bereits vorhandenen Datenverlust-Bug** auf, der unabhängig von der fehlenden UI besteht
-und der behoben werden muss, damit eine künftige Resize-Funktion überhaupt einen
-dauerhaften Effekt haben kann (siehe Abschnitt 6.3): Die Originalgröße eines beim
-Import gelesenen Bildes wird **nie** aus der Datei übernommen und geht beim nächsten
-Export **stillschweigend** verloren, auch wenn nie irgendjemand eine Größenänderung
-vorgenommen hat.
+Status: **Entwurf zur Freigabe, nicht vertrauenswürdig bis einzeln über echte
+Browser-Bedienung verifiziert.** Diese Datei ersetzt die bisherige
+`specs/bild-groesse-aendern-req.md` vollständig. Sie übernimmt deren sorgfältige
+Code-Recherche (der bislang **einzige** Bild-Grenzfall-Katalog des Projekts, siehe
+Abschnitt 0), **behebt aber deren größte Schwäche**: Die Vorfassung ließ zentrale
+Entscheidungen (Min/Max-Grenzen, Einheit, Verhalten bei Größe > Seitenbreite, „Tippen nach
+Größenänderung") als „offene Klärungsfrage" stehen, statt sie aus Nutzersicht zu
+entscheiden. Diese Fassung trifft diese Entscheidungen **verbindlich** — analog zum
+Vorgehen in `specs/tabelle-struktur-bearbeiten-req.md` §2.8 („letzte Zeile/Spalte") und
+`specs/zellen-verbinden-req.md` §2.3/§2.6 (Cursor-Korrektur), die beide zeigen, dass eine
+req.md offene Verhaltensfragen selbst beantworten muss, statt sie an Dev/QA
+weiterzureichen.
 
-Bezug: `E:\docs\specs\FEATURE-BACKLOG.md`, Zeile `bild-groesse-aendern`
-(„Passt Höhe/Breite per Eingabefeld oder Ziehpunkte an.", Bereich „3.3 Bilder &
-Grafiken", Priorität **1 – essenziell**), sowie `E:\docs\FEATURE-SPEC-DOCX-ODT.md`,
-Abschnitt 7 („Bilder", von der Nutzerin explizit als nicht funktionsfähig gemeldet —
-höchste Priorität; dort wörtlich: „Größe nachträglich änderbar (mind. per
-Eingabefeld, idealerweise per Ziehpunkte)." sowie „Bildgröße: sinnvolle
-Standardgröße beim Einfügen, keine Bilder, die die Seite sprengen oder auf 0×0
-kollabieren."), Testfall 8 („Reale komplexe Datei mit mehreren, unterschiedlich
-großen Bildern importieren → alle sichtbar, keines fehlt, keines verzerrt.") und
-Abschnitt 17, Zeile 7 („Bild einfügen — vorhanden, aber laut Nutzerin nicht
-funktional"). An Stil und Detailtiefe von `E:\docs\FEATURE-SPEC-DOCX-ODT.md` sowie
-den bereits vorhandenen `specs/tabelle-einfuegen-req.md` und
-`specs/schriftgroesse-waehlen-req.md` orientiert sich dieses Dokument.
+**Rollentrennung (verbindlich, `specs/UX-INVARIANTEN.md` Abschnitt 3):** Diese Datei ist
+aus **Nutzersicht** geschrieben, kennt den Implementierungsaufwand bewusst **nicht** und
+fordert deshalb offensichtliche Nutzererwartungen ein (sichtbare Auswahl, Tastatur-/
+Touch-Alternative, View-Sync, Zusammenspiel mit Zoom/A4-Darstellung), statt sie
+wegzurationalisieren. Sie enthält **keinen Code und keine Tests** — nur die Anforderung,
+an der sich Umsetzung (Dev) und Abnahme (QA) messen lassen.
 
-Betroffene Quelldateien (Ist-Stand zum Zeitpunkt dieser Anforderungsdefinition — alle
-Stellen, die für die Implementierung angefasst werden müssen):
+Bezug: `specs/FEATURE-BACKLOG.md`, Slug `bild-groesse-aendern`, Bereich „3.3 Bilder &
+Grafiken", Priorität **1 – essenziell** („Passt Höhe/Breite per Eingabefeld oder
+Ziehpunkte an."); `E:\docs\FEATURE-SPEC-DOCX-ODT.md` Abschnitt 7 („Bilder", von der
+Nutzerin explizit als nicht funktionsfähig gemeldet — höchste Priorität; „Größe
+nachträglich änderbar (mind. per Eingabefeld, idealerweise per Ziehpunkte)."). Grundlage
+und Geschwisterdateien: `specs/bild-einfuegen-req.md`, `specs/bild-loeschen-req.md`
+(gemeinsamer Bild-Kontext, DOCX/ODT-Editor teilt Schema, Toolbar, `WordEditor.tsx`);
+Vorbild für Gliederung, Detailtiefe und insbesondere für eine vollständige, prüfbare
+Testliste/DoD: `specs/tabelle-struktur-bearbeiten-req.md`, `specs/zellen-verbinden-req.md`
+(beide mussten wegen untervollständiger Testabdeckung je einen QA-Nachbesserungslauf
+machen — diese Datei ist bewusst so vollständig gehalten, dass das hier vermieden wird).
 
-| Ort | Inhalt |
-|---|---|
-| `src/formats/shared/schema.ts:45-72` | ProseMirror-Node `image` — Attribute `src`, `alt` (Default `''`), **`width`** und **`height`** (beide Default `null`) sind bereits im Schema vorhanden. `parseDOM` liest `width`/`height` aus `<img>`-HTML-Attributen (z. B. beim Einfügen aus der Zwischenablage), `toDOM` schreibt sie zurück auf `<img width height>`. Das Datenmodell für die Größe existiert also bereits vollständig — es fehlt ausschließlich die Bedienung. |
-| `src/formats/shared/editor/commands.ts:66-74` | `insertImage(src, alt)` — nimmt **keine** Breite/Höhe entgegen, erzeugt den Node immer mit `width: null, height: null` (Schema-Default). Kein `setImageSize(width, height)` oder vergleichbares Command vorhanden. |
-| `src/formats/shared/editor/Toolbar.tsx:97-108,242-243` | Button „🖼 Bild" + `handleImagePick()` liest die Datei per `FileReader.readAsDataURL`, ruft `insertImage(dataUrl, file.name)` **ohne** jede Größenermittlung/-vorgabe auf. Kein Bedienelement für Größe irgendwo in der Toolbar. |
-| `src/formats/shared/editor/WordEditor.tsx` | Kein `nodeViews`-Eintrag für `image` (Suche über `nodeView`/`NodeView` im gesamten `src/formats/shared/` liefert **keinen** Treffer außer `schema.ts:38`, das sich auf `hard_break` bezieht). Es existiert also **keine** Möglichkeit, eigene Ziehpunkte/Griffe an einem selektierten Bild zu rendern — dafür müsste ein eigener NodeView gebaut werden. |
-| `src/index.css:39-42` | `.ProseMirror img { max-width: 100%; height: auto; }` — rein visuelle Deckelung im Editor (verhindert, dass ein zu breites `<img>` den Editor-Container sprengt), **unabhängig** vom tatsächlich im Dokumentmodell gespeicherten `width`/`height`-Attribut. Bei künftigen Ziehpunkten muss geklärt werden, wie sich diese CSS-Deckelung zur live gezogenen Modellbreite verhält (siehe Grenzfall 4.9). |
-| `src/formats/docx/reader.ts:134-138,173-176` | `decodeParagraphRuns()`/`paragraphToBlocks()` — liest aus `<w:drawing>` ausschließlich die Bild-Relationship (`r:embed`) und den Namen aus `<wp:docPr name="…">` als `alt`. **`<wp:extent cx="…" cy="…">` wird nirgends ausgelesen** — der erzeugte `image`-Node erhält immer `width: undefined, height: undefined` (Schema-Default `null`), unabhängig von der tatsächlichen Größe in der importierten Datei. |
-| `src/formats/docx/writer.ts:72-92` | `imageParagraphXml()` — `const widthPx = Number(node.attrs?.width ?? 300)`, `const heightPx = Number(node.attrs?.height ?? 200)`; da der Reader (siehe oben) `width`/`height` **niemals** setzt, greift bei **jedem** re-exportierten, zuvor importierten Bild der Default **300×200 px**, umgerechnet in EMU (`cx`/`cy`) und in `<a:xfrm><a:ext>`. Das erzwingt eine feste Zielgröße unabhängig vom tatsächlichen Seitenverhältnis des Originalbilds — eine 4000×3000-px-Fotografie würde beim Reimport auf 300×200 px (Seitenverhältnis 3:2 statt 4:3) gequetscht dargestellt. |
-| `src/formats/odt/reader.ts:147-149` | Analog zu DOCX: liest nur `draw:image[xlink:href]` und `draw:name` (→ `alt`). **`svg:width`/`svg:height`** des umgebenden `<draw:frame>` werden nirgends ausgelesen. |
-| `src/formats/odt/writer.ts:112-120` | `blockToOdt()`, Fall `'image'` — `const width = node.attrs?.width ? `${node.attrs.width}px` : '6cm'`, analog `height` → `'4cm'`. Gleiches Problem wie beim DOCX-Writer, nur mit anderem Default (6 cm × 4 cm statt 300×200 px) und anderer Einheit. |
-| `src/formats/docx/imageCollector.ts` / `src/formats/odt/imageCollector.ts` (Äquivalent) | Dedupliziert eingebettete Bilddateien **ausschließlich** über die Daten-URL (`src`), nicht über Größe — mehrere `image`-Nodes mit demselben `src`, aber unterschiedlichem `width`/`height` teilen sich dieselbe eingebettete Binärdatei und bekommen trotzdem individuell korrekte `wp:extent`/`svg:width`/`svg:height` je Node. Das ist bereits jetzt architektonisch korrekt und muss beim Bau der Resize-Funktion **nicht** geändert werden (siehe Grenzfall 4.11 zur Bestätigung). |
-| `src/formats/docx/__tests__/roundtrip.test.ts:253-259` | Einziger vorhandener Bild-Unit-Test mit `width`/`height` im Eingabe-Objekt (`attrs: { src: TINY_PNG, alt: 'Testbild', width: 100, height: 80 }`) — die nachfolgenden `expect(...)`-Aufrufe prüfen aber **ausschließlich** `image.type` und `image.attrs.src`, **niemals** `image.attrs.width`/`image.attrs.height` des Ergebnisses. Der oben beschriebene Reader-Bug (Größe geht beim Import verloren) wird durch diesen Test also **nicht** aufgedeckt, obwohl er auf den ersten Blick wie ein Größen-Test aussieht — ein klassischer „False Confidence"-Testfall, der beim Bau dieser Anforderung ergänzt werden muss (siehe Abschnitt 7, Testfall 12). |
-| `src/formats/odt/__tests__/roundtrip.test.ts:213-221` | Äquivalenter ODT-Test — hier wird `width`/`height` im Eingabe-Objekt nicht einmal gesetzt, das Problem ist also noch unsichtbarer. |
+**Geltungsbereich:** ausschließlich das nachträgliche Ändern der Anzeigegröße
+(Breite/Höhe) eines bereits im Dokument vorhandenen `image`-Node, für DOCX **und** ODT
+identisch (gemeinsamer Editor), inklusive Rundreise. **Ausdrücklich nicht** Teil dieser
+Datei (eigene Backlog-Slugs): `bild-einfuegen` (Standardgröße **beim** Einfügen),
+`bild-loeschen`, `bild-alt-text`, `bild-zuschneiden` (verändert den sichtbaren Ausschnitt,
+nicht die Anzeigegröße), `textumbruch-bild`/`bild-position` (Textumfluss/Verankerung —
+`image` bleibt `group: 'block'`), `kopfzeile-bearbeiten`/`fusszeile-bearbeiten` (eigene
+UI-Lücke, hier nur als Grenzfall erwähnt).
 
-**Explizit außerhalb des Geltungsbereichs dieser Datei** (eigene, separate
-Backlog-Einträge in `FEATURE-BACKLOG.md` Abschnitt 3.3, jeweils Status „fehlt" bzw.
-„teilweise", dort einzeln zu verifizieren, sobald gebaut):
-`bild-alt-text` (Alternativtext editierbar machen — aktuell laut Backlog
-„teilweise", da `alt` nur einmalig aus dem Dateinamen beim Einfügen gesetzt wird,
-`Toolbar.tsx:107`, und danach nicht mehr änderbar ist; wird hier nur insofern
-berührt, als ein künftiges Bild-Eigenschaften-Panel für die Größe naheliegend auch
-ein Alt-Text-Feld enthalten könnte — das ist jedoch **nicht** Gegenstand dieser
-Anforderung), `bild-zuschneiden` (Zuschneiden verändert den sichtbaren Ausschnitt,
-nicht die Anzeigegröße — eigener Eintrag), `textumbruch-bild`/`bild-position`
-(Textumfluss/Verankerung — das Bild ist aktuell `group: 'block'`, schema.ts:46,
-also immer ein eigener Block ohne Umfließen; das bleibt so, bis diese separaten
-Einträge umgesetzt werden), `bild-korrekturen`, `bild-kuenstlerische-effekte`,
-`bild-formatvorlagen`, `bild-hintergrund-entfernen`, `bild-komprimieren` (alle
-„fehlt", Priorität 4, reine Bildbearbeitung, keine Geometrie).
+Stil: Zeilennummern sind Momentaufnahmen (Stand dieser Analyse, 2026-07-05) und bei
+Umsetzung per **Symbolsuche** neu zu verankern — das gilt für jede Zahl in dieser Datei.
 
 ---
 
-## 1. Menüpunkte/Bedienelemente (Soll-Zustand)
+## 0. Verifizierter Ist-Stand
 
-Da die Funktion aktuell komplett fehlt, listet diese Tabelle den **zu bauenden**
-Soll-Zustand statt eines vorhandenen Ist-Zustands:
+Unabhängig gegen den aktuellen Quellstand (`E:\docs\src`) neu geprüft, nicht ungeprüft aus
+der Vorfassung übernommen. Wo unten „laut Vorlage" steht, stammt der Befund aus den
+Grundlagen-Spezifikationen (`bild-einfuegen-req.md`, `bild-loeschen-req.md`) und wurde für
+diese Datei per Symbolsuche gegengelesen — beides ist bei Umsetzung **erneut** per
+Symbolsuche zu verankern, da sich der Code seit deren Abnahme weiterentwickelt hat
+(u. a. sind die Bedienblöcke „Tabellenstruktur bearbeiten" und „Zellen verbinden/teilen"
+seither hinzugekommen, was die Zeilennummern in `Toolbar.tsx` spürbar verschoben hat).
 
-| # | Element | Ort (geplant) | Soll-Verhalten |
+| # | Fundstelle | Befund |
+|---|---|---|
+| 1 | `src/formats/shared/schema.ts` › `nodes.image` (Zeile 58–85) | `group: 'block'`, `draggable: true`, **kein** `selectable: false` (anders als `hard_break`, Zeile 42–56) ⇒ per ProseMirror-Standard bereits per Klick als `NodeSelection` auswählbar — bereits durch `bild-loeschen-req.md` genutzt. Attribute: `src` (`validate: 'string'`), `alt` (Default `''`, `validate: 'string'`), **`width`/`height` (beide `{ default: null }`, Zeile 63–64, weiterhin **ohne** `validate`** — einzige Attribute im ganzen Schema ohne Validierung). `parseDOM.getAttrs` liest `width`/`height` per `el.getAttribute(...)` (Zeile 75–76) ⇒ liefert **String oder `null`**, nie eine Zahl. `toDOM` gibt `['img', { src, alt, width, height }]` aus (Zeile 82–83). **Datenmodell für die Größe existiert bereits** — es fehlt jedes Bedienelement, das es nach dem Einfügen ändert. |
+| 2 | `src/formats/shared/editor/commands.ts` › `insertImage(src, alt='')` (Zeile 82–84) | Erzeugt den Node ausschließlich mit `{ src, alt }` — `width`/`height` bleiben beim Einfügen `null`. **Kein** `setImageSize`- oder vergleichbares Command vorhanden (Volltextsuche in der Datei: kein Treffer). Muster für das neue Command: `setAlign` (Zeile 29ff.), das per `tr.setNodeAttribute(pos, …)` arbeitet, sowie die aus dem Vorgänger-Feature stammenden Guard-Wrapper `deleteRowOrTable`/`mergeCellsWithCursor` (dispatch-loser Verfügbarkeits-Check + Cursor-Korrektur in derselben Transaktion) als direktes Vorbild für „Command + anschließende Selektions-/Cursor-Korrektur in einem Schritt". |
+| 3 | `src/formats/shared/editor/Toolbar.tsx` (`handleImagePick`, Zeile 274–…; Bild-`<label>` Zeile 488–491) | Einziges bildbezogenes Bedienelement ist weiterhin der **Einfügen**-Weg (`<label>🖼 Bild<input type="file">`). **Kein** Eigenschaften-Panel, keine Ziehpunkte, kein Größenfeld. Die Datei enthält inzwischen (seit Vorgänger-Features) bereits **zwei** direkt wiederverwendbare Muster für neue, kontextabhängige Buttons: `TableOpButton` (Zeile 228–260, `onMouseDown` + `preventDefault()` **plus** `onClick` für zuverlässige Maus-**und**-Tastatur-Auslösung, `disabled`-Zustand mit sprechendem `title`/`aria-label`) und `runTable` (Zeile 48–51, ruft das Kommando mit einem Dispatch-Callback auf, der `tr.scrollIntoView()` anhängt — direktes View-Sync-Vorbild für 2.8). |
+| 4 | `src/formats/shared/editor/WordEditor.tsx` | Eine Suche nach `nodeViews`/`NodeView` über **ganz** `src/formats/shared/` liefert weiterhin **keinen** Treffer — es existiert keine Möglichkeit, eigene Ziehpunkte an einem selektierten Bild zu rendern; dafür muss ein eigener `image`-NodeView neu gebaut werden. |
+| 5 | `src/formats/shared/editor/WordEditor.tsx` › `reconcileSelectionOnClick` (Zeile 44–47) + Maus-Handler mit `CLICK_DRAG_THRESHOLD_PX = 3` (Zeile 257–270) | Bei jedem „Plain-Click" (Maus < 3 px bewegt) wird die Selektion per `posAtCoords`/`TextSelection.near` neu gesetzt. Eine Bild-`NodeSelection` ist nicht-leer — direkter Anwendungsfall, analog zu `bild-loeschen-req.md` R2/R4. Für ein neues Resize-Overlay (eigene `mousedown`/`mouseup`-Handler auf den Griffen) ist zu verifizieren, dass diese Reconciliation nicht zwischen die Ziehgeste funkt. |
+| 6 | `src/formats/shared/editor/WordEditor.tsx` (Zoom, Zeile 128–316) | **Neu gegenüber der Vorfassung** (Feature „Dokument-Basisdarstellung" ist seither umgesetzt): Die Seite wird über einen skalierten Footprint-Wrapper **und** `transform: scale(zoom)` auf dem Blatt selbst dargestellt (Zeile 300–309, `transformOrigin: 'top left'`). Laut `specs/dokument-darstellung-req.md` §9 ist Klick→Dokumentposition (`posAtCoords`) unter Zoom bereits empirisch korrekt verifiziert — **aber** eine **eigene** Ziehpunkte-Implementierung dieses Features liest `event.clientX/clientY`-**Deltas** während `mousemove`, die in **Bildschirm-Pixeln** ankommen, während das Modell `width`/`height` in **ungezoomten** CSS-Pixeln führt. Ein neuer, hier zu bauender Resize-Handler muss die Bewegungsdifferenz durch den aktuellen `zoom`-Faktor teilen, sonst skaliert eine Ziehgeste bei z. B. 50 % Zoom die Bildgröße nur mit dem halben (oder bei falscher Multiplikationsrichtung doppelten) Betrag der sichtbaren Mausbewegung — **direkte, neue Konsequenz** aus dem seit der Vorfassung hinzugekommenen Zoom-Feature, in der Vorfassung noch nicht existent und daher dort auch nicht bedacht. |
+| 7 | `src/index.css` (Zeile 39–42: `.ProseMirror img`; Zeile 64–83: `.selectedCell`-Overlay) | `.ProseMirror img { max-width: 100%; height: auto }` weiterhin unverändert vorhanden — rein visuelle Deckelung, **unabhängig** vom Modell-`width`/`height` (Grenzfall 3.9). Seit der Vorfassung ist zusätzlich eine `.selectedCell`-Overlay-Regel für Tabellen entstanden (Zeile 71–78, Muster: `position: relative` auf der Zelle + `::after`-Overlay mit `pointer-events: none`, hell-/dunkelmodustauglich) — **direkt als Vorlage für die in 3.13 geforderte `.ProseMirror-selectednode`-Markierung nutzbar**, die für Bilder weiterhin **fehlt** (Volltextsuche über `src/`: kein Treffer für `ProseMirror-selectednode`). Ein selektiertes Bild ist damit **weiterhin optisch nicht** vom unselektierten unterscheidbar — bestätigter, unverändert offener Befund aus der Vorfassung. |
+| 8 | `src/formats/docx/writer.ts` › `imageParagraphXml` (Zeile 75–…) | `Number(node.attrs?.width ?? 300)` / `?? 200`, EMU-Umrechnung (`px/96*914400`), Ausgabe als `<wp:extent cx cy>` (Zeile 95). **Writer bereits korrekt**: liegt eine Größe am Node vor, wird sie exakt geschrieben. `?? 300`/`?? 200` fängt nur `null`/`undefined`, **nicht** `0` ab. |
+| 9 | `src/formats/docx/reader.ts` › `decodeDrawingOrPict` (Zeile 143ff.) | Liest weiterhin **nur** die Bild-Relationship und `wp:docPr/@name` (→ `alt`); **`<wp:extent>` wird nirgends gelesen** ⇒ jedes importierte Bild erhält `width: null, height: null`. **Bestätigter, unverändert bestehender Datenverlust-Bug**, unabhängig von jeder UI (siehe 0.1). |
+| 10 | `src/formats/odt/reader.ts` › `frameToBlocks` (Zeile 232ff.) | Liest `draw:image/@xlink:href` und `draw:name` (→ `alt`); **`svg:width`/`svg:height` werden nirgends gelesen** — analoge Kernursache wie DOCX. |
+| 11 | `src/formats/odt/writer.ts` › `blockToOdt`, Fall `'image'` (Zeile 185–188) | `node.attrs?.width ? `${width}px` : '6cm'`, analog `height` → `'4cm'`; Ausgabe als `<draw:frame svg:width svg:height text:anchor-type="as-char">`. Bereits korrekt für Nodes **mit** Größe, Default nur mangels Größe. |
+| 12 | `src/formats/docx/imageCollector.ts` / `src/formats/odt/imageCollector.ts` | Dedupliziert ausschließlich über die Daten-URL, **nicht** über die Größe — mehrere Nodes mit gleichem `src`, aber unterschiedlichem `width`/`height` teilen sich eine Binärdatei und erhalten je Node korrekte `wp:extent`/`svg:width`+`svg:height`. Bereits architektonisch korrekt, beim Bau der Resize-Funktion **nicht** zu ändern. |
+| 13 | `src/formats/docx/__tests__/roundtrip.test.ts` (Zeile 323–330) | Test „preserves an embedded image …" setzt im Eingabe-Node `width: 100, height: 80` (Zeile 325), **prüft aber ausschließlich `image.type`** (Zeile 328) — `width`/`height` werden im Ergebnis **nie** assertet. Klassischer „False-Confidence"-Test, deckt den Reader-Bug **nicht** auf. Frisch nachgelesen, unverändert gegenüber der Vorfassung. |
+| 14 | `src/formats/odt/__tests__/roundtrip.test.ts` (Zeile 356–364) | Äquivalenter Test setzt **gar kein** `width`/`height` im Input (Zeile 357), prüft nur `src`/`alt`. Größe hier also noch unsichtbarer als bei DOCX. |
+| 15 | `src/formats/shared/__tests__/zipInspect.ts` | Bereits vorhandener Roh-ZIP-Helfer (`readZipEntryInfo`) für Byte-Ebenen-Prüfungen. Für die in Abschnitt 4 geforderte unabhängige Roh-XML-Prüfung ist stattdessen — wie in `tests/e2e/table-merge-split.spec.ts`, `docx.spec.ts`, `odt.spec.ts` bereits etabliert — direkt `JSZip.loadAsync(buffer)` gegen `word/document.xml`/`content.xml` zu verwenden (Textsuche nach `<wp:extent`/`<draw:frame`), **nicht** der eigene Reader — sonst könnten sich Schreib- und Lesefehler gegenseitig verdecken. |
+| 16 | `playwright.config.ts` (Zeile 27–50) | Fünf Projekte: **Desktop Chrome**, **Mobile** (Pixel 7, Touch), **Tablet** (iPad Mini) laufen die volle `tests/e2e`-Suite; zusätzlich zwei auf `clipboard*.spec.ts` beschränkte Browser-Projekte (Safari/Firefox, für dieses Feature irrelevant). Jede neue Bedienoberfläche muss auf den ersten drei nachgewiesen werden. |
+
+### 0.1 Kernbefund (unverändert gegenüber der Vorfassung, hier bestätigt)
+
+Zwei voneinander unabhängige Lücken, **beide** Voraussetzung für ein abnahmefähiges
+Feature:
+
+1. **UI fehlt vollständig** (Fundstellen 3–4): kein Eigenschaften-Panel, keine
+   Ziehpunkte, kein Command.
+2. **Reader-Datenverlust-Bug** (Fundstellen 9–10, unabhängig von jeder UI): Die
+   Originalgröße eines beim Import gelesenen Bildes wird von **keinem** der beiden Reader
+   aus der Datei übernommen und geht beim nächsten Export **stillschweigend** verloren —
+   ersetzt durch einen hartkodierten Default (DOCX 300×200 px, ODT 6×4 cm), **auch wenn
+   nie jemand eine Größenänderung vorgenommen hat**. Ohne Behebung dieses Bugs kann keine
+   noch so gut gebaute Resize-UI die Rundreise-Anforderung (Abschnitt 4) erfüllen — eine
+   Datei mit einem 4000×3000-px-Foto (4:3), unbearbeitet geöffnet und wieder gespeichert,
+   enthält danach ein auf 300×200 px (3:2) verzerrtes Bild, allein durch Öffnen-und-
+   Speichern.
+
+---
+
+## 1. Bedienelemente (Soll)
+
+Referenzverhalten Word/LibreOffice/Google Docs: Ziehgriffe an den Ecken/Kanten des
+ausgewählten Bildes; zusätzlich (Google Docs, Bildformatierungs-Seitenleiste) numerische
+Eingabefelder. Da reines Ziehen für Tastatur- und für viele Touch-Nutzer:innen nicht
+zuverlässig erreichbar ist, ist die numerische Eingabe **kein optionales Extra, sondern
+die verbindliche, gleichwertige Alternative**.
+
+| # | Element | Ort | Soll-Verhalten |
 |---|---|---|---|
-| 1 | Bild-Eigenschaften-Panel/Mini-Toolbar „Größe" | Erscheint kontextabhängig, sobald ein `image`-Node als `NodeSelection` selektiert ist (Klick auf das Bild) — analog zu Word/LibreOffice, die bei Bildauswahl eine eigene Kontext-Toolbar/-Registerkarte einblenden. Kein dauerhaft sichtbares Element in der Haupt-Toolbar, solange kein Bild selektiert ist. | Zwei numerische Eingabefelder „Breite" und „Höhe" (Einheit sichtbar, siehe 2.6), eine Checkbox/Toggle „Seitenverhältnis beibehalten" (Standard: aktiviert), ein Button „Auf Originalgröße zurücksetzen" (nur aktiv, wenn eine Originalgröße bekannt ist, siehe 2.5/4.4). |
-| 2 | Eingabefeld „Breite" | Teil von Element 1 | Numerisch, Bestätigung per Enter oder Blur, ändert `width`-Attribut des selektierten `image`-Node über ein neues Command `setImageSize(width, height)`. Bei aktivierter Seitenverhältnis-Sperre wird `height` automatisch proportional mitgeführt (siehe 2.3). |
-| 3 | Eingabefeld „Höhe" | Teil von Element 1 | Analog zu „Breite", umgekehrte Kopplung bei Seitenverhältnis-Sperre. |
-| 4 | Ziehpunkte (Resize-Handles) am selektierten Bild | Neuer NodeView für den `image`-Node in `WordEditor.tsx` (aktuell nicht vorhanden) | Acht sichtbare Griffe (vier Ecken, vier Seitenmitten) am Rand des selektierten Bildes, analog Word/LibreOffice/Google Docs. Ziehen an einem **Eckgriff** ändert Breite und Höhe gemeinsam unter Beibehaltung des Seitenverhältnisses (unabhängig vom Zustand der Checkbox aus Element 1 — Eckgriffe sperren das Verhältnis immer, das ist Standardverhalten aller drei Referenzanwendungen). Ziehen an einem **Seitengriff** (oben/unten/links/rechts) ändert ausschließlich die jeweilige Dimension, unabhängig vom Seitenverhältnis. |
-| 5 | Live-Vorschau während des Ziehens | Teil von Element 4 | Während des Ziehens wird die Bildgröße sichtbar live aktualisiert (kein Rahmen-Vorschau-Rechteck ohne Bildinhalt), die Eingabefelder aus Element 1 aktualisieren sich synchron mit den während des Ziehens aktuellen Werten. |
-| 6 | Button „Auf Originalgröße zurücksetzen" | Teil von Element 1 | Setzt `width`/`height` exakt auf die beim Einfügen/Import ermittelte Originalgröße zurück (siehe 2.5). Ohne bekannte Originalgröße (z. B. bereits mehrfach verändert und Originalwert nicht mehr vorgehalten, siehe Grenzfall 4.4) ist der Button deaktiviert/ausgeblendet, nicht einfach wirkungslos anklickbar. |
-| 7 | Tastatur-Bedienbarkeit der Ziehpunkte | Teil von Element 4 | Mindestens die Eingabefelder aus Element 1/2/3 müssen per Tab erreichbar und mit Tastatur bedienbar sein, damit Größenänderung nicht ausschließlich per Maus möglich ist (Barrierefreiheits-Mindestanforderung). Für die Ziehpunkte selbst ist Maus-/Touch-Bedienung der Hauptweg; eine reine Tastaturalternative für die Ziehpunkte selbst ist nicht zwingend Teil dieser Anforderung, solange die Eingabefelder als vollwertige Tastatur-Alternative existieren. |
-| 8 | Anzeige der aktuellen Größe ohne Selektion | — | Es gibt **keine** dauerhafte Anzeige der Bildgröße, solange kein Bild selektiert ist (kein Tooltip beim Hovern zwingend erforderlich) — kein Blocker für diese Anforderung, aber als bewusste Abgrenzung dokumentiert. |
-
-Es gibt **keinen** zusätzlichen Menüpunkt „Format" → „Grafik formatieren…" (kein
-Ribbon/Backstage-Dialog mit erweiterten Bildoptionen wie Zuschneiden, Textumbruch,
-Farbkorrektur) — das ist nicht Bestandteil dieser Anforderung (siehe Abgrenzung
-oben) und **keine** eigene Tastenkombination zum Fokussieren der Größenfelder.
+| 1 | Bild-Eigenschaften-Panel „Größe" | Erscheint **ausschließlich**, sobald ein `image`-Node als `NodeSelection` selektiert ist (Klick auf das Bild oder Tastaturselektion, siehe 2.1) — analog zur kontextabhängigen Kopieren-Werkzeugleiste realer Textverarbeitungen. Nicht dauerhaft in der Haupt-Toolbar sichtbar. | Enthält: zwei numerische Eingabefelder „Breite"/„Höhe" (Einheit sichtbar, 2.6), eine Checkbox „Seitenverhältnis beibehalten" (Default: **aktiviert**), einen Button „Auf Originalgröße zurücksetzen" (nur aktiv, wenn eine Originalgröße bekannt ist, 2.5/3.4). |
+| 2 | Eingabefeld „Breite" (**verbindliche Tastatur-/Touch-Alternative**) | Teil von Element 1 | Numerisch, `<input type="number">` oder gleichwertig, per **Tab** erreichbar, Bestätigung per **Enter oder Blur**. Bei aktiver Seitenverhältnis-Sperre wird „Höhe" proportional mitgeführt (2.3). Dies ist der **garantierte** Weg, eine Bildgröße **ohne Maus und ohne feinmotorische Ziehgeste** zu ändern — funktioniert identisch auf Desktop, Tablet und Mobile. |
+| 3 | Eingabefeld „Höhe" | Teil von Element 1 | Analog zu „Breite", umgekehrte Kopplung bei aktivem Lock. |
+| 4 | Ziehpunkte (Resize-Handles) am selektierten Bild | Neuer `image`-NodeView (aktuell nicht vorhanden, Befund 0/4) | Acht sichtbare Griffe (vier Ecken, vier Seitenmitten). **Eckgriff** → Breite und Höhe gemeinsam, Seitenverhältnis **immer** beibehalten (unabhängig von der Checkbox — Standardverhalten aller Referenzanwendungen). **Seitengriff** → nur die jeweilige Dimension, Seitenverhältnis bewusst **nicht** gehalten. Zusätzlicher, nicht ersetzender Weg zu Element 2/3 — niemals der **einzige** Weg. |
+| 5 | Touch-Zielgröße der Griffe | Teil von Element 4 | **Sichtbare** Griffgröße darf klein/dezent bleiben (analog Word/LibreOffice), die **Trefferfläche** (`hit area`, z. B. per größerem transparentem Hüllelement oder `padding`) muss ≥ 40×40 px betragen (`specs/UX-INVARIANTEN.md` §1 Nr. 4). |
+| 6 | Live-Vorschau während des Ziehens | Teil von Element 4 | Bildgröße wird sichtbar live aktualisiert; die Eingabefelder aus Element 1 spiegeln die laufenden Werte synchron mit. |
+| 7 | Button „Auf Originalgröße zurücksetzen" | Teil von Element 1 | Setzt `width`/`height` exakt auf die beim Einfügen/Import ermittelte Originalgröße zurück (2.5). Ohne bekannte Originalgröße **deaktiviert** mit sprechendem `title` (3.5), nicht wirkungslos klickbar. |
+| 8 | Sichtbare Auswahlmarkierung | Editor-Fläche | Ein ausgewähltes Bild muss optisch erkennbar sein (Rahmen/Outline), **bevor** Panel/Griffe überhaupt sinnvoll bedienbar sind — bereits als offener Befund aus `bild-loeschen-req.md` bekannt (R1), hier erneut bestätigt (Befund 0/7) und für **dieses** Feature verbindlich vorausgesetzt: Ohne sichtbares Feedback ist nicht erkennbar, **welches** Bild sich gerade ändert, wenn mehrere Bilder im Dokument stehen. |
+| 9 | Tastaturaktivierung von Panel-Buttons (Enter **und** Leertaste) | Teil von Element 1 | Wie im Vorgänger-Feature verbindlich gelöst (`specs/tabelle-struktur-bearbeiten-req.md` §1 Nr. 8, `TableOpButton`-Muster `Toolbar.tsx` Zeile 228–256: `onMouseDown`+`preventDefault()` **plus** `onClick`): der „Zurücksetzen"-Button muss diesem Muster folgen, nicht nur `onMouseDown` allein verwenden. |
+| 10 | (Bewusste Abgrenzung) Größenanzeige ohne Selektion | — | Es gibt **keine** dauerhafte Größenanzeige, solange kein Bild selektiert ist; kein Hover-Tooltip zwingend. Kein Blocker, nur zur Klarheit dokumentiert. |
+| 11 | (Bewusste Abgrenzung) Eigener Menüpunkt/Dialog | — | Es gibt **keinen** zusätzlichen Menüpunkt „Format → Grafik formatieren…" (kein Dialog mit Zuschneiden/Textumbruch/Farbkorrektur — separate Backlog-Einträge) und **keine** eigene Tastenkombination zum Fokussieren der Größenfelder (kein Referenzverhalten in Word/LibreOffice, das ein Nachbau rechtfertigt). |
 
 ---
 
 ## 2. Gewünschtes Verhalten im Detail
 
 ### 2.1 Bild auswählen
-
-- Klick auf ein eingefügtes Bild erzeugt eine ProseMirror-`NodeSelection` auf genau
-  diesem `image`-Node (Standardverhalten, da der Node nicht `selectable: false`
-  gesetzt hat, im Unterschied zu `hard_break`, `schema.ts:38`) — muss dennoch
-  explizit über echte Browser-Interaktion verifiziert werden, da aktuell kein Test
-  dafür existiert.
-- Nur bei aktiver `NodeSelection` auf einem `image`-Node erscheint das
-  Eigenschaften-Panel aus Abschnitt 1, Element 1, sowie die Ziehpunkte aus Element 4.
-- Klick neben das Bild oder auf einen anderen Node hebt die Auswahl auf, Panel und
-  Ziehpunkte verschwinden wieder.
+- Klick auf ein eingefügtes Bild erzeugt eine `NodeSelection` auf genau diesem Node
+  (Standardverhalten, Befund 0/1). Tastaturweg: Cursor unmittelbar neben das Bild
+  bewegen, `ArrowLeft`/`ArrowRight` (= `selectNodeBackward`/`-Forward` aus `baseKeymap`)
+  wählt das Bild als `NodeSelection` — bereits von `bild-loeschen-req.md` als
+  barrierefrei bestätigter Weg.
+- Nur bei aktiver Bild-`NodeSelection` erscheinen Panel (1.1) und Ziehpunkte (1.4).
+- Klick neben das Bild / auf einen anderen Node hebt die Auswahl auf; Panel und
+  Ziehpunkte verschwinden **sofort**, keine „Geister"-Anzeige.
 
 ### 2.2 Größenänderung per Eingabefeld
-
-1. Bild auswählen (2.1), im Feld „Breite" oder „Höhe" einen neuen Wert eintippen,
-   mit Enter oder Blur bestätigen.
-2. Bestätigung ruft `setImageSize(width, height)` (neu zu bauendes Command,
-   analog zu `setAlign()`/`setHeading()` in `commands.ts`, die per
-   `state.tr.setNodeAttribute(pos, …)` arbeiten) mit den – bei aktivem
-   Seitenverhältnis-Lock automatisch mitberechneten – Werten für die jeweils andere
-   Dimension auf.
-3. Änderung erfolgt **sofort** bei Bestätigung, kein zusätzlicher
-   „Übernehmen"-Button.
-4. Fokus/Selektion bleiben nach Anwenden erhalten (die `NodeSelection` auf dem Bild
-   bleibt bestehen, damit unmittelbar eine zweite Größenänderung oder ein Löschen
-   ohne erneutes Klicken möglich ist).
+1. Bild auswählen, im Feld „Breite" oder „Höhe" neuen Wert eintippen, mit **Enter oder
+   Blur** bestätigen.
+2. Bestätigung ruft ein neues Command `setImageSize(width, height)` (Muster: `setAlign`,
+   per `tr.setNodeAttribute`) auf die aktuell selektierte `image`-Node auf. Das Command
+   wirkt **ohne** `empty`-Guard wie `applyMarkColor` — die Selektion ist hier per
+   Definition der Bild-Node selbst und daher nie „leer".
+3. Änderung erfolgt **sofort** bei Bestätigung, kein separater „Übernehmen"-Button.
+4. **View-Sync (Pflicht):** In derselben Transaktion wird — analog zum bereits etablierten
+   `runTable`-Muster (`Toolbar.tsx` Zeile 48–51, `tr.scrollIntoView()`) — sichergestellt,
+   dass das geänderte Bild im sichtbaren Bereich bleibt, insbesondere wenn eine
+   Größenzunahme es aus dem aktuellen Scrollausschnitt schieben würde.
+5. Die `NodeSelection` bleibt nach der Bestätigung bestehen (damit eine zweite
+   Größenänderung oder ein Löschen ohne erneutes Klicken möglich ist) — mit der in 2.10
+   verbindlich geforderten Absicherung gegen das „Tippen ersetzt das Bild"-Risiko.
 
 ### 2.3 Größenänderung per Ziehpunkte
+1. **Eckgriff:** Breite und Höhe ändern sich gemeinsam, Seitenverhältnis wird **immer**
+   beibehalten (unabhängig von der Checkbox aus 1.1).
+2. **Seitengriff:** Nur die betroffene Dimension ändert sich; Seitenverhältnis wird
+   bewusst **nicht** gehalten.
+3. Während des Ziehens wird die Größe live sichtbar aktualisiert; die endgültige
+   Transaktion (und damit **ein** Undo-Schritt) wird erst beim Loslassen
+   (`mouseup`/Touch-Ende) geschrieben — nicht bei jedem `mousemove` (sonst ein
+   Undo-Schritt pro Pixel, siehe 3.7).
+4. **Zoom-Korrektur (Pflicht, neu gegenüber der Vorfassung — Befund 0/6):** Die
+   Bewegungsdifferenz aus `mousemove`/`touchmove` liegt in **Bildschirm-Pixeln** vor, das
+   Blatt kann aber über die seit der Vorfassung hinzugekommene Zoom-Funktion
+   (`specs/dokument-darstellung-req.md` §2.2, `WordEditor.tsx` `transform: scale(zoom)`)
+   verkleinert/vergrößert dargestellt sein. Die Ziehlogik muss die Bewegungsdifferenz
+   durch den aktuellen `zoom`-Faktor teilen, bevor sie auf `width`/`height` (ungezoomte
+   CSS-Pixel) angewendet wird — sonst ändert dieselbe Zieh-Geste je nach Zoomstufe eine
+   sichtbar andere Bildgröße (3.20).
+5. Ziehen über den verfügbaren Bereich hinaus wird begrenzt (3.2), nicht in ein
+   unbegrenzt wachsendes/schrumpfendes Bild.
 
-1. Ziehen an einem der vier **Eckgriffe**: Breite und Höhe ändern sich gemeinsam,
-   Seitenverhältnis wird dabei immer beibehalten (unabhängig vom Zustand der
-   Checkbox aus 2.2) — Standardverhalten sämtlicher Referenzanwendungen.
-2. Ziehen an einem der vier **Seitengriffe**: Nur die jeweils betroffene Dimension
-   (Breite bei links/rechts, Höhe bei oben/unten) ändert sich, das
-   Seitenverhältnis wird bewusst **nicht** gehalten.
-3. Während des Ziehens wird die Größe live im Editor sichtbar aktualisiert; die
-   endgültige Transaktion (und damit der einzelne Undo-Schritt, siehe 2.7) wird
-   erst beim Loslassen der Maustaste (`mouseup`)/Beenden der Touch-Geste
-   geschrieben — nicht bei jedem Zwischenschritt des Ziehens (sonst entstünde ein
-   Undo-Schritt pro Pixel, siehe Grenzfall 4.7).
-4. Ziehen über den sichtbaren Editor-/Seitenrand hinaus wird sinnvoll begrenzt
-   (siehe Grenzfall 4.2) statt zu einem unbegrenzt wachsenden/schrumpfenden Bild zu
-   führen.
-
-### 2.4 Standardgröße beim Einfügen (aktuell nicht vorhanden)
-
-- Aktuell (`commands.ts:66-74`, `Toolbar.tsx:107`) wird beim Einfügen **kein**
-  `width`/`height` gesetzt — der Browser zeigt das Bild in seiner nativen
-  Pixelgröße, begrenzt nur durch die CSS-Regel `max-width: 100%` (`index.css:40`).
-  Das widerspricht der in `FEATURE-SPEC-DOCX-ODT.md` Abschnitt 7 geforderten
-  „sinnvollen Standardgröße beim Einfügen, keine Bilder, die die Seite sprengen
-  oder auf 0×0 kollabieren" — bei einem sehr kleinen Bild (z. B. 16×16 px Icon)
-  wird aktuell tatsächlich ein winziges 16×16-px-Bild eingefügt, nicht sinnvoll
-  vergrößert.
-- **Anforderung:** Beim Einfügen wird die native Bildgröße ermittelt (z. B. über
-  ein `Image`-Objekt/`decode()` im Browser, bevor `insertImage` aufgerufen wird)
-  und als Startwert für `width`/`height` im neuen `image`-Node gesetzt — das
-  Seitenverhältnis des Originalbilds bleibt dabei erhalten. Übersteigt die
-  native Breite die verfügbare Seiten-/Spaltenbreite, wird proportional auf die
-  verfügbare Breite herunterskaliert; ein pathologisch kleines Bild wird **nicht**
-  künstlich vergrößert (kein Verzerren/Hochskalieren mit Qualitätsverlust ohne
-  Nutzerabsicht).
-- Diese beim Einfügen ermittelte Größe gilt zugleich als „Originalgröße" für den
-  „Zurücksetzen"-Button aus Abschnitt 1, Element 6 (bei neu eingefügten Bildern).
-  Bei importierten Fremddateien gilt die im Dokument gespeicherte Ursprungsgröße
-  als Originalgröße (siehe 2.5, 3.3).
+### 2.4 Referenz-Seitenverhältnis (welche Ratio wird gekoppelt?)
+- Die proportionale Kopplung (Feld-Eingabe bei aktivem Lock, 2.2; jede Eckgriff-Geste,
+  2.3.1) verwendet das **aktuelle** Verhältnis des Node zum Zeitpunkt, an dem die
+  Eingabe/Geste beginnt — **nicht** das native (`naturalWidth`/`naturalHeight`)
+  Verhältnis. Ein bereits bewusst über einen Seitengriff verzerrtes Bild wird unter
+  Beibehaltung seiner **aktuellen** Verzerrung weiterskaliert, nicht eigenmächtig auf das
+  native Verhältnis zurückgeschnappt.
+- Bei der Ziehgeste wird die Referenz-Ratio **einmal bei Gestenbeginn eingefroren** und
+  über die gesamte Geste konstant gehalten (kein Neuberechnen aus bereits gerundeten
+  Zwischenwerten bei jedem `mousemove` — sonst kumulativer Rundungsdrift bei langem
+  Ziehen).
+- Nur unmittelbar nach „Auf Originalgröße zurücksetzen" (2.5) sind aktuelles und natives
+  Verhältnis wieder identisch.
 
 ### 2.5 Zurücksetzen auf Originalgröße
-
-- Solange ein Bild noch nicht manuell in der Größe verändert wurde, sind aktuelle
-  Größe und Originalgröße identisch (Button aus 1.6 ist dann sichtbar, aber
-  wirkungslos/deaktiviert, da keine Änderung rückgängig zu machen ist).
-- Nach mindestens einer Größenänderung stellt der Button die zuvor beim
-  Einfügen/Import ermittelte Originalgröße exakt wieder her.
-- Die Originalgröße muss dafür getrennt vom aktuellen `width`/`height`
-  vorgehalten werden (z. B. als zusätzliche, nicht editierbare Node-Attribute wie
-  `naturalWidth`/`naturalHeight`, analog zum bereits im Schema vorhandenen Muster
-  attributbehafteter Nodes) — **muss neu ins Schema aufgenommen werden**, ist
-  aktuell nicht vorhanden.
-- Cross-Format-Rundreise: Da weder das DOCX- noch das ODT-Format ein Standard-Feld
-  für „ursprüngliche Bildgröße vor manueller Änderung" kennt, ist zu klären und zu
-  dokumentieren, ob dieser Wert beim Export überhaupt persistiert wird oder nur
-  innerhalb einer Editier-Sitzung gilt (siehe Grenzfall 4.4 und offene Frage in
-  Abschnitt 6.4).
+- Solange ein Bild nicht manuell verändert wurde, sind aktuelle Größe und Originalgröße
+  identisch (Button sichtbar, aber deaktiviert).
+- Nach mindestens einer Änderung stellt der Button die beim Einfügen/Import ermittelte
+  Originalgröße exakt wieder her (ein Undo-Schritt).
+- Die Originalgröße wird getrennt von `width`/`height` vorgehalten — als zusätzliche,
+  **nicht editierbare** und **nicht in DOM/Export serialisierte** Node-Attribute
+  (z. B. `naturalWidth`/`naturalHeight`, neu im Schema, 3.3).
+- **Entscheidung (verbindlich, ersetzt die offene Frage 6.4.3 der Vorfassung):** Die
+  Originalgröße ist ein rein **editor-interner, sitzungslokaler** Wert und wird **nicht**
+  in DOCX/ODT exportiert (weder OOXML noch ODF sehen ein Feld dafür vor, ein
+  Zweckentfremden bestehender Felder wäre nicht standardkonform). Konsequenz, die
+  **verpflichtend sichtbar zu machen** ist: Nach jedem Speichern-und-erneut-Öffnen
+  (auch ohne Formatwechsel) gilt die beim **Reimport** vorgefundene Größe als neue
+  Originalgröße — der „Zurücksetzen"-Button verliert nach einem Reimport seine Wirkung
+  auf eine davor im Editor vorgenommene Änderung (das ist unvermeidbar, sobald der
+  In-Memory-Zustand verlassen und neu geladen wird, und konsistent mit dem
+  Datenschutz-Grundprinzip „nichts wird über die Sitzung hinaus persistiert",
+  `specs/UX-INVARIANTEN.md` §1 Nr. 5). Kein stiller Fehlschlag: Der Button bleibt dann
+  korrekt **deaktiviert** (2.5, Grenzfall 3.4), er zeigt nicht fälschlich eine falsche
+  „Originalgröße" an.
 
 ### 2.6 Einheiten und Umrechnung
+- Intern (Schema `width`/`height`) wird durchgehend in **CSS-Pixeln bei 96 dpi**
+  gerechnet — konsistent zur DOCX-Writer-Umrechnung und zu `pageLayout.ts`
+  (`PX_PER_MM = 96/25.4`).
+- **Entscheidung (verbindlich, ersetzt die offene Frage 6.4.1 der Vorfassung): Anzeige in
+  den Eingabefeldern in Zentimetern (cm), auf eine Nachkommastelle gerundet.** Begründung:
+  Anders als bei Schriftgröße (`specs/schriftgroesse-waehlen-req.md`, dort **eine**
+  einzige formatübergreifend native Einheit „pt") gibt es bei Bildgröße keine gemeinsame
+  native Einheit — aber die Seitengeometrie der App ist bereits durchgängig
+  metrisch/cm-basiert (A4 210×297 mm, Rand 2,5 cm, `pageGeometry.ts`,
+  `specs/dokument-darstellung-req.md` §2.1) und für Nutzer:innen ist „wie groß ist das
+  Bild im Verhältnis zur Seite" die naheliegende mentale Einheit — nicht Pixel. Die
+  Umrechnung zum internen px-Modell erfolgt beim Anzeigen/Bestätigen
+  (`px = cm / 2.54 * 96`), **keine** sichtbare Rundungsabweichung zwischen angezeigtem
+  Feldwert und intern gespeicherter Modellgröße darf entstehen (sichtbare Korrektur im
+  Feld nach Bestätigung, wie bei `specs/schriftgroesse-waehlen-req.md`).
+- DOCX-Export: px→EMU bereits vorhanden, muss nur mit **echten** (korrekt gelesenen bzw.
+  gesetzten) Werten statt dem 300×200-Default gefüttert werden.
+- ODT-Export: aktuell wird `width`/`height` (px) als `${…}px`-Suffix geschrieben.
+  **Entscheidung (verbindlich, ersetzt die offene Frage 6.4.2):** Umstellung auf `cm`,
+  konsistent mit dem bereits für die Seitengeometrie genutzten `mmToCm`-Helfer in
+  `odt/writer.ts` und geprüft gegen den bereits vorhandenen RelaxNG-Validator
+  (`odt/__tests__/external-validation.test.ts`) — `cm` ist der intern bereits
+  konsistentere und interoperabel unstrittigere Weg als der aktuelle `px`-Fallback.
 
-- Intern (ProseMirror-Schema, `width`/`height`) wird durchgehend in **CSS-Pixeln
-  bei 96 dpi** gerechnet — das entspricht der bereits vom DOCX-Writer verwendeten
-  Umrechnung (`docx/writer.ts:78-80`: `cx = widthPx / 96 * 914400`).
-- Die Anzeige in den Eingabefeldern aus Abschnitt 1 erfolgt in einer für
-  Endnutzer:innen vertrauten Einheit — mindestens **Zentimeter** (konsistent zum
-  ODT-Default `6cm`/`4cm`, `odt/writer.ts:115-116`) oder Pixel; welche der beiden
-  Einheiten Standard ist, muss vor Umsetzung final festgelegt werden (offene Frage,
-  siehe Abschnitt 6.4) — es darf aber in jedem Fall **keine** Uneinigkeit zwischen
-  angezeigter und tatsächlich im Dokumentmodell gespeicherter Größe entstehen
-  (keine stille Rundungsabweichung ohne sichtbare Korrektur im Feld, analog zur
-  Anforderung an Rundung in `schriftgroesse-waehlen-req.md` Abschnitt 2.5).
-- DOCX-Export rechnet `width`/`height` (px) in EMU um (bereits vorhanden,
-  `docx/writer.ts:78-80`, muss nur noch mit **echten**, vom Reader korrekt
-  gelesenen bzw. vom Nutzer gesetzten Werten gefüttert werden statt dem
-  aktuellen 300×200-Default).
-- ODT-Export rechnet `width`/`height` (px) in `cm` um (aktuell nur als
-  reiner String-Fallback `'6cm'`/`'4cm'` vorhanden, `odt/writer.ts:115-116`; bei
-  gesetztem `width`/`height` wird zwar bereits `${width}px`/`${height}px`
-  geschrieben, was von ODF technisch als gültige Einheit akzeptiert wird — zu
-  klären, ob eine Umrechnung nach `cm` zur besseren Interoperabilität mit älteren
-  ODF-Konsumenten sinnvoller ist, siehe Grenzfall 4.10).
+### 2.7 Größe größer als die verfügbare Seiten-/Zellbreite (Entscheidung, ersetzt offene Frage 6.4.4)
+- **Entscheidung (verbindlich):** Ein Bild darf explizit auf eine Breite gesetzt werden,
+  die die verfügbare Inhaltsbreite (`PAGE_CONTENT_WIDTH_PX` bzw. die Zellbreite in einer
+  Tabelle) übersteigt — genau wie in Word/LibreOffice, wo ein Bild bewusst über den
+  Satzspiegel hinaus vergrößert werden kann. Die bestehende CSS-Regel `.ProseMirror img {
+  max-width: 100%; height: auto }` (`index.css` Zeile 39–42) darf ein **explizit
+  gesetztes** `width`/`height` **nicht mehr** unsichtbar auf die verfügbare Breite
+  zusammenstauchen, ohne dass Eingabefeld und tatsächliche Darstellung noch
+  übereinstimmen — das war die in der Vorfassung offen gelassene Diskrepanz (dortiger
+  Grenzfall 4.9/6.4.4) und wird hiermit entschieden: **die Eingabefelder und die
+  sichtbare Darstellung zeigen immer denselben Wert**, ein zu breites Bild darf die
+  Editor-Seite sichtbar überragen bzw. innerhalb des Blattes horizontal scrollbar werden
+  (konsistent mit dem bereits für „sehr breite Tabelle" getroffenen Präzedenzfall,
+  `specs/dokument-darstellung-req.md` §2.1) — es darf aber **nicht** die A4-Blattbreite
+  selbst sprengen oder das Gesamtlayout horizontal überlaufen lassen
+  (`specs/UX-INVARIANTEN.md` §1 Nr. 4).
 
-### 2.7 Undo/Redo
+### 2.8 Untergrenze/Obergrenze (Entscheidung, ersetzt die in der Vorfassung nur vage benannten Werte)
+- **Untergrenze: 8 px** in jeder Dimension. Zweck ist **ausschließlich** der Schutz gegen
+  0/negative/kollabierte Bilder (3.2) — **nicht** eine Mindestgröße für „schön aussehende"
+  Bilder. Ein bewusst auf 8×8 px verkleinertes Bild bleibt gültig, auswählbar (per Klick
+  knapp, aber per Tastaturweg 2.1 immer) und über den „Zurücksetzen"-Button (1.7)
+  wiederherstellbar.
+- **Obergrenze: 3000 px** in jeder Dimension (deutlich über jeder sinnvollen
+  Bildschirm-/Druckgröße, verhindert einen absichtlich oder versehentlich auf z. B.
+  50 000 px gesetzten Wert, der Editor-Performance und Exportgröße unnötig belastet).
+  Eingabe darüber wird auf die Obergrenze **geklemmt**, mit **sichtbarer Korrektur** im
+  Feld (kein stilles Verwerfen).
+- Beide Grenzen gelten **im Command**, nicht erst im Export-Writer (siehe 3.3, 3.18).
 
-- Jede abgeschlossene Größenänderung (Eingabefeld-Bestätigung **oder** eine
-  abgeschlossene Ziehgeste von `mousedown` bis `mouseup`) ist genau **ein**
-  Undo-Schritt.
-- Undo direkt nach einer Größenänderung stellt exakt die vorherige Breite/Höhe
-  wieder her, Redo die geänderte Größe erneut — unabhängig davon, ob die Änderung
-  über das Eingabefeld oder über Ziehpunkte ausgelöst wurde.
-- Funktioniert auch in gemischten Sequenzen (Bild einfügen → Größe ändern →
-  weiterer Text davor/danach → Undo mehrfach) in korrekter, umgekehrter
-  Reihenfolge, analog zur allgemeinen Undo-Anforderung in
-  `FEATURE-SPEC-DOCX-ODT.md` Abschnitt 2.
+### 2.9 Undo/Redo
+- Jede abgeschlossene Größenänderung (Feld-Bestätigung **oder** komplette Ziehgeste von
+  Gestenbeginn bis -ende) ist genau **ein** Undo-Schritt.
+- Undo stellt exakt die vorherige Breite/Höhe wieder her, Redo die geänderte — unabhängig
+  vom gewählten Bedienweg (Feld/Ziehpunkt).
+- Funktioniert in gemischten Sequenzen (Bild einfügen → Größe ändern → Text davor/danach
+  → mehrfach Undo) in korrekter umgekehrter Reihenfolge.
 
-### 2.8 Zusammenspiel mit dem Selection-Sync-Bug
+### 2.10 Tippen unmittelbar nach abgeschlossener Größenänderung (verbindliche Anforderung, kein optionaler Punkt)
+Da die `NodeSelection` nach jeder abgeschlossenen Größenänderung bewusst bestehen bleibt
+(2.2.5), besteht dasselbe Risiko, das `specs/bild-einfuegen-req.md` §3.12/§2.1.4 bereits
+für den **Einfüge**-Moment beschreibt: ProseMirrors Standardverhalten für Texteingabe bei
+aktiver `NodeSelection` ist, den selektierten Node zu **ersetzen**, nicht Text danach
+einzufügen. Bestätigt eine Nutzerin eine neue Breite mit Enter und tippt danach — im
+naheliegenden „Größe angepasst, jetzt weiterschreiben"-Workflow — ohne erneuten Klick
+weiter, träfe der nächste Tastendruck auf dieselbe Gefahr, nur an einem **zweiten,
+eigenen Auslösezeitpunkt** (Abschluss der Größenänderung, nicht nur Abschluss des
+Einfügens).
 
-- Der in `FEATURE-SPEC-DOCX-ODT.md` Abschnitt 2 dokumentierte Selection-Sync-Bug
-  betraf bislang Text-Selektionen; eine Bild-`NodeSelection` ist ein anderer
-  Selektionstyp. Es ist **zu verifizieren**, ob die dortige Mouseup-Reconciliation
-  auch beim Wechsel von einer Text-Selektion zu einer Bild-`NodeSelection` (und
-  zurück) korrekt greift, insbesondere direkt nach einer Ziehpunkt-Geste, die
-  selbst `mousedown`/`mouseup`-Ereignisse auf dem Editor auslöst und daher
-  potenziell mit derselben Reconciliation-Logik interagiert. Bislang **kein**
-  Test dafür vorhanden — muss als neuer Testfall ergänzt werden (siehe Abschnitt
-  7, Testfall 14).
+**Anforderung (verbindlich, keine Option mehr): Ein einzelnes getipptes Zeichen darf ein
+Bild unmittelbar nach einer abgeschlossenen Größenänderung niemals ersetzen.** Wie genau
+das technisch gelöst wird (z. B. Zeicheneingabe bei aktiver Bild-`NodeSelection`
+verschiebt die Selektion zuerst hinter das Bild, bevor der Text eingefügt wird), ist
+Sache der Umsetzung — **ob**, nicht **ob überhaupt**, ist hier entschieden. Delete/
+Backspace bleiben davon unberührt die vorgesehene, korrekte Lösch-Geste
+(`specs/bild-loeschen-req.md`) — nur die **Ersetzung durch getippten Text**, nicht das
+absichtliche Löschen, ist der zu verhindernde Fehlerfall. Falls diese Absicherung als
+**gemeinsamer** Editor-Guard (statt zweimal unabhängig in `bild-einfuegen` und
+`bild-groesse-aendern`) gebaut wird, ist das ausdrücklich zulässig und sogar
+wünschenswert (eine Lösung, zwei Auslöser) — es muss aber für **beide** Auslöser
+nachweislich wirken, nicht nur für einen.
 
----
-
-## 3. Datenmodell- und Rundreise-Architektur (Anforderung an die Implementierung)
-
-Im Unterschied zu `schriftgroesse-waehlen-req.md` (dort fehlt der Mark komplett)
-ist das Datenmodell für die Größe selbst hier **bereits vorhanden** — die
-Kernarbeit liegt in Command/UI **und** im Schließen der bestehenden
-Reader-Lücke:
-
-1. **Schema (`schema.ts:45-72`)**: `width`/`height` bereits vorhanden. Neu zu
-   ergänzen: `naturalWidth`/`naturalHeight` (siehe 2.5) als zusätzliche,
-   nicht über die UI direkt editierbare Attribute für „Zurücksetzen".
-2. **Commands (`commands.ts`)**: Neues Command `setImageSize(width: number,
-   height: number): Command`, das per `state.tr.setNodeAttribute(pos, 'width',
-   width)`/`'height'` auf die aktuell als `NodeSelection` selektierte
-   `image`-Node wirkt (analog zum Muster in `setAlign()`, `commands.ts:13-27`,
-   das ebenfalls `setNodeAttribute` verwendet). Muss **ohne** Einschränkung auf
-   eine nicht-leere Text-Selektion funktionieren (im Unterschied zu
-   `applyMarkColor`/`clearMarkColor`, die bei leerer Selektion `false`
-   zurückgeben) — hier ist die Selektion per Definition der Bild-Node selbst,
-   nicht umgebender Text.
-3. **DOCX-Reader (`docx/reader.ts:134-138`)**: `<wp:extent cx="…" cy="…">`
-   (Geschwister-Element von `<wp:docPr>` innerhalb von `<w:drawing><wp:inline>`,
-   siehe auch vom Writer erzeugte Struktur in `docx/writer.ts:83-91` als
-   Vorlage für das zu parsende Gegenstück) auslesen, EMU in px umrechnen
-   (`px = cx / 914400 * 96`, Kehrwert der Writer-Formel), als `width`/`height`
-   auf den `image`-Node setzen. Fehlt `<wp:extent>` (sollte in validen DOCX-Dateien
-   nicht vorkommen, aber Fremddateien sind nicht immer standardkonform), gilt
-   dasselbe Fallback wie beim Fehlen jedes anderen optionalen Attributs: kein
-   Absturz, `width`/`height` bleiben `null`, sinnvoller Default greift beim
-   nächsten Rendern (siehe 2.4-Logik, angewendet auch auf importierte Bilder ohne
-   bekannte Größe).
-4. **DOCX-Writer (`docx/writer.ts:76-92`)**: Bleibt in der Umrechnungslogik
-   unverändert; der 300×200-Fallback (Zeile 76-77) darf **nur** noch greifen, wenn
-   tatsächlich kein `width`/`height` im Node vorhanden ist (z. B. bei
-   Erst-Erzeugung ohne Einfüge-Logik aus 2.4) — nicht mehr als impliziter
-   Normalfall für jedes importierte Bild wie aktuell.
-5. **ODT-Reader (`odt/reader.ts:147-149`)**: `svg:width`/`svg:height` des
-   `<draw:frame>`-Elements (Elternelement von `<draw:image>`) auslesen.
-   ODF erlaubt hier verschiedene Einheiten-Suffixe (`cm`, `mm`, `in`, `px`,
-   `pt`) — der Reader muss mindestens `cm`/`mm`/`in`/`px` in interne px (96 dpi)
-   umrechnen, da reale ODT-Dateien (LibreOffice-Standardexport) überwiegend `cm`
-   verwenden (siehe bestehender Writer-Fallback `'6cm'`, `odt/writer.ts:115`, als
-   Beleg für das in diesem Projekt erwartete Einheiten-Format).
-6. **ODT-Writer (`odt/writer.ts:112-120`)**: Bleibt im Grundsatz unverändert;
-   analog zu Punkt 4 darf der `6cm`/`4cm`-Fallback nur noch für Nodes ohne
-   gesetztes `width`/`height` greifen.
-7. **Editor-CSS (`index.css:39-42`)**: `max-width: 100%; height: auto;` bleibt
-   als Sicherheitsnetz gegen zu breite Bilder bestehen, muss aber mit der neuen
-   Ziehpunkte-Logik abgestimmt werden (siehe Grenzfall 4.9) — insbesondere darf
-   `height: auto` nicht dazu führen, dass ein per Ziehpunkt gesetzter expliziter
-   Höhenwert von der CSS-Regel überschrieben und dadurch die Live-Vorschau beim
-   Ziehen an einem Seitengriff (der bewusst das Seitenverhältnis **nicht** hält,
-   siehe 2.3.2) falsch/verzerrt zur eingegebenen Zahl im Eingabefeld dargestellt
-   wird.
+### 2.11 Bild in einer Tabellenzelle
+- Größenänderung funktioniert identisch zum Haupttext. Die verfügbare Breite als
+  Referenz für 2.8/3.6 orientiert sich an der **Zellbreite**, nicht der vollen
+  Seitenbreite.
 
 ---
 
-## 4. Grenzfälle
+## 3. Grenzfälle
 
-1. **Ungültige Eingabe im Größenfeld** (Text, leeres Feld bei Enter): Wird
-   verworfen, vorherige gültige Größe bleibt bestehen, kein Absturz, kein
-   `NaN`-Wert im Dokumentmodell (analog zu `schriftgroesse-waehlen-req.md`,
-   Grenzfall 4.1).
-2. **Extreme Werte** (0, negativ, oder sehr groß wie 50000 px): 0/negativ wird
-   abgelehnt (Mindestwert z. B. 1 px, damit kein Bild auf 0×0 kollabiert und
-   dadurch für die Nutzer:in praktisch unsichtbar/unselektierbar wird — genau der
-   in `FEATURE-SPEC-DOCX-ODT.md` Abschnitt 7 explizit benannte Fall); sehr große
-   Werte werden auf eine sinnvolle Obergrenze begrenzt (z. B. das x-fache der
-   Seitenbreite) mit sichtbarer Korrektur im Feld statt eines die Seite
-   sprengenden Bildes.
-3. **Ziehen an einem Eckgriff bis auf/unter 0 px** (Maus über den gegenüberliegenden
-   Rand hinausgezogen): Größe wird auf den Mindestwert aus Grenzfall 4.2 begrenzt,
-   kein invertiertes/negatives Bild, kein Einfrieren der Ziehgeste.
-4. **„Zurücksetzen auf Originalgröße" ohne bekannte Originalgröße** (z. B. Bild
-   aus einer Fremddatei importiert, bevor `naturalWidth`/`naturalHeight`
-   eingeführt wurden, oder Dokument mehrfach cross-format konvertiert und der Wert
-   dabei nicht mitgeführt, siehe 3.5): Button ist deaktiviert/ausgeblendet statt
-   wirkungslos klickbar oder auf einen falschen Default zurückfallend.
-5. **Selektion über mehrere Bilder gleichzeitig** (falls die Editor-Selektion das
-   erlaubt): Zu klären, ob Größenänderung dann auf alle selektierten Bilder
-   gleichzeitig wirkt oder das Eigenschaften-Panel/die Ziehpunkte in diesem Fall
-   gar nicht erscheinen (aktuell erlaubt ProseMirror standardmäßig nur die
-   Selektion eines einzelnen Nodes als `NodeSelection` — muss verifiziert werden,
-   dass eine Mehrfachauswahl von Bildern im aktuellen Editor überhaupt möglich
-   ist, bevor dieser Fall praktisch relevant wird).
-6. **Bild in einer Tabellenzelle** (`cellContent: 'block+'`, `schema.ts:106`
-   erlaubt Bilder als Zellinhalt): Größenänderung muss identisch zu einem Bild im
-   Haupttext funktionieren; die verfügbare Breite zur automatischen
-   Herunterskalierung beim Einfügen (2.4) orientiert sich dann sinnvollerweise an
-   der Zellbreite, nicht an der vollen Seitenbreite — zu verifizieren, ob das
-   praktisch (und nicht nur theoretisch) korrekt berechnet wird.
-7. **Ziehgeste erzeugt viele Zwischenzustände**: Es darf **kein** Undo-Schritt pro
-   Mausbewegung entstehen (siehe 2.3.3) — muss mit einem gezielten Test
-   nachgewiesen werden (eine Ziehgeste mit mehreren `mousemove`-Ereignissen →
-   genau ein Undo macht die gesamte Geste rückgängig, nicht nur den letzten
-   Zwischenschritt).
-8. **Mehrere Bilder mit identischem `src`, aber unterschiedlicher Größe** (z. B.
-   dasselbe Bild zweimal eingefügt, eine Kopie anschließend vergrößert): Muss bei
-   Export weiterhin als **eine** eingebettete Binärdatei, aber **zwei**
-   unabhängige `wp:extent`/`svg:width`+`svg:height`-Werte behandelt werden — laut
-   Code-Analyse (Abschnitt „Betroffene Quelldateien", `imageCollector.ts`-Zeile)
-   bereits architektonisch korrekt vorbereitet (Dedup nur über `src`, Größe ist
-   Node-Attribut), muss aber mit einem expliziten Testfall bestätigt werden, da
-   aktuell kein solcher Test existiert.
-9. **Zusammenspiel mit `.ProseMirror img { max-width: 100%; height: auto; }`**
-   (`index.css:40-41`): Ein per Eingabefeld/Ziehpunkt gesetzter expliziter
-   `width`-Wert, der die verfügbare Editor-/Seitenbreite überschreitet, wird durch
-   `max-width: 100%` visuell gedeckelt — das im Dokumentmodell gespeicherte
-   `width`-Attribut (und damit der Wert im Eingabefeld) muss dennoch den
-   tatsächlich eingegebenen/gezogenen Wert zeigen, nicht den durch CSS
-   sichtbar gedeckelten. Zu klären und zu dokumentieren, ob das als gewollte
-   Diskrepanz (Modellwert vs. sichtbare Darstellung) gilt oder ob stattdessen das
-   Eingabefeld selbst auf die verfügbare Breite begrenzt werden soll (siehe
-   offene Frage Abschnitt 6.4).
-10. **ODT-Einheiten-Interoperabilität**: Ein per `px`-Suffix geschriebenes
-    `svg:width="300px"` (aktueller Fallback-Pfad, sobald `width` gesetzt ist,
-    `odt/writer.ts:115`) wird von manchen älteren/strikten ODF-Konsumenten
-    möglicherweise nicht identisch zu `cm`/`in` interpretiert. Muss mit einem
-    unabhängigen ODF-Validator/LibreOffice geprüft werden, ob `px` als
-    Einheit dort zuverlässig unterstützt wird, oder ob der Writer stattdessen
-    durchgängig nach `cm` umrechnen sollte (siehe 2.6).
-11. **Cross-Format-Rundreise mit Rundungsdifferenzen** (px → EMU → px bzw.
-    px → cm → px): Nach einer einzelnen Konvertierung darf keine sichtbar falsche
-    Größe entstehen; nach mehreren Hin- und Her-Konvertierungen ist eine minimale
-    Rundungsabweichung (Sub-Pixel-Bereich) tolerierbar und zu dokumentieren, ein
-    **kumulativer** Drift über mehrere Zyklen hinweg (z. B. Bild wird mit jeder
-    Konvertierung sichtbar kleiner) ist **nicht** tolerierbar und gilt als Defekt.
-12. **Größenänderung direkt nach dem Selection-Sync-Bug-Szenario** (Alles
-    auswählen → Formatierung anwenden → Klick zum Neupositionieren, siehe
-    `FEATURE-SPEC-DOCX-ODT.md` Abschnitt 2): Falls sich in der Selektion ein Bild
-    befindet, darf eine anschließende Größenänderung an einem beliebigen Bild im
-    Dokument nicht zu Inhaltsverlust an anderer Stelle führen (siehe 2.8).
-13. **Reale Fremddatei mit mehreren, unterschiedlich großen Bildern** (siehe
-    `FEATURE-SPEC-DOCX-ODT.md` Abschnitt 7, Testfall 8): Muss nach Behebung des
-    Reader-Bugs (Abschnitt 6.3) jedes Bild mit seiner **individuellen**
-    Originalgröße anzeigen, nicht alle auf denselben Default vereinheitlicht.
-14. **Sehr kleines Icon-Bild** (z. B. 16×16 px) wird eingefügt: Nach der in 2.4
-    geforderten Logik nicht auf einen willkürlichen Mindestwert hochskaliert,
-    sondern in nativer Größe belassen (Ausnahme von der „sinnvolle Standardgröße"-
-    Regel für bereits kleine Bilder) — Verhalten muss explizit festgelegt und
-    getestet werden, da „nicht auf 0×0 kollabieren" und „nicht willkürlich
-    verzerren/hochskalieren" hier in Spannung stehen können.
-15. **Bild ohne echte Bilddaten (defekte/leere Datei) einfügen**: Größenermittlung
-    aus 2.4 kann fehlschlagen (z. B. `Image.decode()` wirft einen Fehler) — muss
-    mit sichtbarer Fehlermeldung abgefangen werden statt stillem Fehlschlag oder
-    Absturz, analog zur allgemeinen „Kein stiller Fehlschlag"-Anforderung in
-    `FEATURE-SPEC-DOCX-ODT.md` Abschnitt 20.4.
+1. **Ungültige Eingabe** (Text, leeres Feld bei Enter): verworfen, vorherige gültige
+   Größe bleibt, kein Absturz, **kein `NaN`** im Modell — hängt an der Typ-Normalisierung
+   aus 3.16.
+2. **Extreme Werte** (0, negativ, > 3000 px): auf die Grenzen aus 2.8 geklemmt, mit
+   sichtbarer Korrektur im Feld, nie ein `NaN`/`0`/negativer Wert im Modell.
+3. **Eckgriff bis auf/unter die Untergrenze gezogen**: auf 8 px geklemmt, kein
+   invertiertes/negatives Bild, kein Einfrieren der Geste.
+4. **„Zurücksetzen" ohne bekannte Originalgröße** (Fremddatei-Import, oder nach einem
+   zwischenzeitlichen Speichern-und-Reimport, siehe 2.5): Button deaktiviert/ausgeblendet,
+   nicht wirkungslos klickbar oder auf einen falschen Default zurückfallend.
+5. **Mehrere Bilder gleichzeitig selektiert:** ProseMirror erlaubt standardmäßig nur eine
+   einzelne Node als `NodeSelection` — zu verifizieren, dass eine Mehrfachauswahl im
+   aktuellen Editor überhaupt nicht entsteht; falls doch, erscheinen Panel/Ziehpunkte
+   **nicht** statt eines undefinierten Verhaltens.
+6. **Bild in einer Tabellenzelle** (2.11): Verhalten identisch zum Haupttext, verfügbare
+   Breite = Zellbreite; praktisch zu verifizieren, nicht nur theoretisch anzunehmen.
+7. **Ziehgeste erzeugt viele Zwischenzustände:** **kein** Undo-Schritt pro
+   Mausbewegung (2.3.3) — mit gezieltem Test nachweisen.
+8. **Mehrere Bilder mit identischem `src`, unterschiedlicher Größe:** bei Export **eine**
+   Binärdatei, aber zwei unabhängige `wp:extent`/`svg:width`+`svg:height` (bereits
+   architektonisch vorbereitet, Befund 0/12, mit Testfall zu bestätigen).
+9. **Zusammenspiel mit `.ProseMirror img { max-width:100%; height:auto }`:** durch die
+   Entscheidung in 2.7 aufgelöst — Feldwert und Darstellung stimmen immer überein, auch
+   wenn das Bild dadurch sichtbar breiter als die Seite wird.
+10. **ODT-Einheiten-Interoperabilität:** Nach der Entscheidung in 2.6 (`cm` statt `px`)
+    gegen den vorhandenen RelaxNG-Validator **und** gegen einen realen
+    LibreOffice-Reimport zu bestätigen.
+11. **Cross-Format-Rundreise mit Rundungsdifferenzen** (px→EMU→px bzw. px→cm→px): nach
+    einer Konvertierung keine sichtbar falsche Größe; nach mehreren eine minimale
+    Sub-Pixel-Abweichung tolerierbar (4.5); ein **kumulativer** Drift (Bild wird mit
+    jedem Zyklus sichtbar kleiner/größer) ist **Defekt**.
+12. **Größenänderung direkt nach dem Selection-Sync-Szenario** (Alles auswählen →
+    Formatierung → Klick zum Neupositionieren): Enthält die Selektion ein Bild, darf eine
+    anschließende Größenänderung an einem beliebigen Bild keinen Inhaltsverlust an
+    anderer Stelle auslösen.
+13. **Reale Fremddatei mit mehreren, unterschiedlich großen Bildern:** Nach Behebung des
+    Reader-Bugs (0.1) muss **jedes** Bild seine individuelle Originalgröße zeigen, nicht
+    auf einen Default vereinheitlicht.
+14. **Sehr kleines Icon-Bild** (z. B. 16×16 px): Wird beim **Einfügen** nicht künstlich
+    hochskaliert (Sache von `bild-einfuegen-req.md` §2.4) — für **dieses** Feature
+    relevant ist nur: ein solches Bild bleibt über die Eingabefelder/Ziehpunkte normal
+    änderbar, die Untergrenze aus 2.8 (8 px) liegt bewusst **unterhalb** typischer
+    Icon-Maße, damit ein 16×16-Icon nicht am Verkleinern gehindert wird.
+15. **Bild ohne echte Bilddaten (defekte/leere Datei):** außerhalb des Geltungsbereichs
+    dieser Datei (Sache von `bild-einfuegen-req.md`) — hier nur zu verifizieren, dass ein
+    bereits im Dokument befindliches, defekt dargestelltes `<img>` trotzdem eine
+    `NodeSelection` erlaubt und die Größenfelder nicht abstürzen (z. B. bei fehlendem
+    `naturalWidth`, siehe 3.17).
+16. **Typ-Inkonsistenz `width`/`height` (String vs. Zahl):** `parseDOM.getAttrs` liefert
+    für ein aus HTML geklebtes Bild einen **String** (`"100"`) oder `null`, während
+    `setImageSize` **Zahlen** setzt. Die Implementierung muss auf einen einheitlichen Typ
+    (`number | null`) normalisieren (`validate` + numerische Umwandlung in `parseDOM`),
+    damit weder ein String-Wert in Rundreise-Assertions gegen eine Zahl scheitert noch
+    ein nicht-numerischer String zu `NaN` führt.
+17. **Editor-interne Attribute dürfen nicht ins `<img>`/den Export lecken:** `toDOM` gibt
+    aktuell `{ src, alt, width, height }` aus. `naturalWidth`/`naturalHeight` (2.5) dürfen
+    dort **nicht** ergänzt werden (sonst ungültige `<img naturalwidth …>`-Attribute, die
+    zusätzlich bei erneutem `parseDOM` ungewollt zurückgelesen werden könnten). Ebenso
+    dürfen sie in keiner der beiden Export-Serialisierungen auftauchen.
+18. **Writer-Fallback `?? 300` fängt `0` nicht ab:** `Number(node.attrs?.width ?? 300)`
+    liefert bei `width === 0` den Wert `0` (nicht 300), weil `??` nur `null`/`undefined`
+    abfängt → `cx=0` → unsichtbares 0-breites Bild im Export. Die Untergrenze (2.8) muss
+    deshalb bereits im Command durchgesetzt werden, sodass `0` nie im Modell landet.
+19. **Referenz-Seitenverhältnis nach Verzerrung** (2.4): Bild über einen Seitengriff
+    verzerren (z. B. auf 3:1), Lock aktivieren, Breite über das Feld ändern → Höhe folgt
+    dem **aktuellen** (verzerrten) Verhältnis, nicht dem nativen — kein sichtbarer
+    Formsprung.
+20. **Ziehgeste unter aktivem Zoom** (Befund 0/6, neu gegenüber der Vorfassung): Bei
+    50 %-Zoom und bei 200 %-Zoom (`specs/dokument-darstellung-req.md` §2.2 Zoom-Stufen)
+    dieselbe Bildschirm-Zieh-Distanz ausführen → resultierende Modell-Größenänderung ist
+    unter **jedem** Zoomfaktor gleich (bezogen auf die ungezoomte Modellgröße) — **nicht**
+    je nach Zoomstufe unterschiedlich stark. Mit dediziertem Test je Zoomstufe
+    abzusichern (5.2.7), da dies ein reales, seit dem Zoom-Feature neu entstandenes
+    Risiko ist, kein theoretischer Fall.
+21. **Ziehpunkte auf Touch-/Mobilgeräten** (`playwright.config.ts` Projekte Mobile/
+    Tablet): Die acht Griffe sind für Mauspräzision ausgelegt. **Anforderung:** Entweder
+    funktionieren sie zusätzlich per `touchstart`/`touchmove`/`touchend` mit
+    vergrößerter, unsichtbarer Trefferfläche (1.5) — **oder** es wird explizit
+    dokumentiert, dass auf Touch-/Mobile-Viewports die Eingabefelder (1.2/1.3) der
+    garantierte, unterstützte Weg sind. Das gewählte Verhalten ist zu verifizieren, nicht
+    stillschweigend dem Zufall zu überlassen (deckt sich mit der
+    Barrierefreiheits-Anforderung, dass Größe nie **nur** per Maus/Ziehen änderbar sein
+    darf).
+22. **Konflikt mit `image`-Node `draggable: true`** (`schema.ts` Zeile 66): Ein
+    `mousedown`/`pointerdown` auf einem Ziehpunkt muss die native
+    ProseMirror-Drag-to-Move-Geste unterbinden (`stopPropagation`/`preventDefault` bzw.
+    `draggable={false}` auf dem Griff-Element), sonst wird statt der Größenänderung das
+    Bild verschoben. Zusätzlich zu verifizieren: Drag-to-Move an einer griff-freien
+    Stelle des Bildes funktioniert unverändert (keine Regression).
+23. **Tippen unmittelbar nach abgeschlossener Größenänderung** (2.10): über Feld-Enter
+    **und** über Ziehgeste-Ende separat zu prüfen — beide Auslösewege dürfen das Bild
+    nicht durch das nächste getippte Zeichen ersetzen lassen.
+24. **Fehlendes visuelles Auswahl-Feedback** (Befund 0/7): `src/index.css` enthält
+    weiterhin **keine** `.ProseMirror-selectednode`-Regel, obwohl ProseMirror diese
+    Klasse bereits automatisch bei einer Bild-`NodeSelection` setzt. Ohne eine passende
+    CSS-Regel ist nicht erkennbar, welches Bild sich das Panel/die Griffe gerade
+    beziehen — besonders bei mehreren Bildern im Dokument (Grenzfall 8) ein praktisch
+    relevanter Bedienbarkeits-Mangel. Muss vor Abnahme entweder als Teil dieser Funktion
+    mitgeliefert oder nachweislich an eine andere Stelle delegiert werden (z. B. den
+    neuen `image`-NodeView selbst, der ohnehin gebaut wird) — nicht stillschweigend
+    offenbleiben.
+25. **(Abgrenzung, geprüft) Bilder in Kopf-/Fußzeile:** `documentModel.ts` modelliert
+    `header`/`footer` als eigenständiges `ProseMirrorJSON | null` desselben Schemas — ein
+    Bild dort ist strukturell nicht ausgeschlossen. Da Kopf-/Fußzeilen-Bearbeitung selbst
+    noch keine UI hat (`kopfzeile-bearbeiten`/`fusszeile-bearbeiten`), ist Bild-Resize
+    dort **nicht** Bestandteil dieser Anforderung — hier nur dokumentiert, damit die
+    Lücke bei Fertigstellung jener Features nicht als „durch `bild-groesse-aendern`
+    bereits abgedeckt" missverstanden wird.
+26. **Bild ohne intrinsische Größe** (z. B. `naturalWidth`/`naturalHeight` beim Laden aus
+    irgendeinem Grund nicht ermittelbar, siehe 3.15): „Auf Originalgröße zurücksetzen"
+    bleibt deaktiviert (analog 3.4), Eingabefelder/Ziehpunkte funktionieren dennoch
+    normal mit der aktuellen `width`/`height`.
+27. **Mehrfaches Resizen in Folge** (Feld → Ziehpunkt → Feld → Ziehpunkt, ohne
+    Zwischenaktion): jede Änderung ein eigener Undo-Schritt, keine
+    Zwischenzustands-Verschmelzung, Endzustand entspricht exakt der letzten Eingabe.
+28. **Resize, dann Undo, dann Redo, dann erneutes Resizen:** korrekte Endgröße, keine
+    „Zombie"-Werte aus einem zwischenzeitlich verworfenen Redo-Zweig.
 
 ---
 
-## 5. Rundreise-Anforderung (Pflicht für Abnahme)
+## 4. Rundreise / Regressionsschutz
 
-Für **jeden** der folgenden Fälle gilt gemäß dem projektweiten Grundprinzip aus
-`FEATURE-SPEC-DOCX-ODT.md` (Zeile 9-13): Datei A mit einem oder mehreren Bildern
-bekannter Größe hochladen bzw. im Editor mit definierter Größe erzeugen →
-**unverändert** exportieren → erneut importieren → Ergebnis entspricht inhaltlich
-und in der Bildgröße exakt A. Das schließt ausdrücklich den Fall ein, dass **gar
-keine** manuelle Größenänderung stattgefunden hat — reines Hochladen und
-unverändertes Re-Exportieren darf die Bildgröße **nicht** verändern (das ist nach
-aktuellem Code-Stand, siehe Abschnitt 6.3, **nicht** erfüllt und der zentrale zu
-behebende Befund dieser Anforderung).
+Grundprinzip (`FEATURE-SPEC-DOCX-ODT.md`): Datei A mit einem/mehreren Bildern bekannter
+Größe hochladen bzw. im Editor mit definierter Größe erzeugen → **unverändert**
+exportieren → erneut importieren → Ergebnis entspricht inhaltlich **und in der
+Bildgröße** exakt A. Das schließt ausdrücklich den Fall ein, dass **gar keine** manuelle
+Größenänderung stattfand — reines Hochladen und unverändertes Re-Exportieren darf die
+Bildgröße **nicht** verändern (aktuell laut 0.1 **nicht** erfüllt, zentraler zu
+behebender Befund). Export-Prüfung erfolgt über einen **unabhängigen** Parser bzw.
+Roh-XML-Assertion via `JSZip.loadAsync` gegen `word/document.xml`/`content.xml` (Muster:
+`tests/e2e/table-merge-split.spec.ts`, `docx.spec.ts`, `odt.spec.ts`), **nicht nur** über
+den eigenen Reader — sonst könnten sich Schreib- und Lesefehler gegenseitig verdecken.
 
-### 5.1 DOCX
+### 4.1 Baseline (muss vor und nach jeder Änderung grün bleiben)
+- Bestehende Bild-Rundreise (`docx/__tests__/roundtrip.test.ts` „images", Zeile 323ff.;
+  ODT-Äquivalent Zeile 356ff.; `tests/e2e/roundtrip-fidelity.spec.ts`,
+  `export-error-handling.spec.ts`) bleibt grün — insbesondere darf das Ergänzen von
+  `width`/`height`-Assertions (4.6, DoD Punkt 9) bestehende, bereits grüne Tests nicht
+  verändern, nur erweitern.
 
-1. Eine DOCX-Datei mit einem Bild bekannter Größe (z. B. `wp:extent` entsprechend
-   500×300 px) hochladen, **ohne** jede Bearbeitung unverändert exportieren,
-   erneut importieren → Größe im wiederhergestellten `image`-Node ist exakt
-   500×300 px (nicht der aktuelle 300×200-Default aus `docx/writer.ts:76-77`).
-2. Bild über den Toolbar-Button einfügen, über das neue Eingabefeld (Abschnitt
-   1, Element 2/3) auf eine konkrete Größe (z. B. 640×480 px) setzen, als DOCX
-   exportieren → mit einem unabhängigen Parser (z. B. python-docx oder direktes
-   Parsen von `word/document.xml`) verifizieren: `<wp:extent>` entspricht exakt
-   der in EMU umgerechneten Zielgröße.
-3. Dieselbe Datei erneut importieren → im Editor sichtbar identische Breite/Höhe.
-4. Größe über Ziehpunkte ändern (nicht über das Eingabefeld), exportieren,
-   reimportieren → Größe exakt wie nach dem Ziehen, nicht wie vor dem Ziehen.
-5. Reale komplexe Fremddatei mit **mehreren unterschiedlich großen** Bildern
-   (siehe `FEATURE-SPEC-DOCX-ODT.md` Abschnitt 7, Testfall 8) importieren,
-   unverändert exportieren, erneut importieren → jedes Bild behält seine
-   individuelle Originalgröße, keine Vereinheitlichung.
-6. Cross-Format: ODT mit Bild bekannter Größe importieren → als DOCX
-   exportieren → Größe bleibt (bis auf dokumentierte Rundungsdifferenzen im
-   Sub-Pixel-Bereich, siehe Grenzfall 4.11) erhalten.
-
-### 5.2 ODT
-
-1. Eine ODT-Datei mit einem `draw:frame` bekannter Größe (z. B.
-   `svg:width="12cm" svg:height="8cm"`) hochladen, unverändert exportieren,
-   erneut importieren → Größe im wiederhergestellten `image`-Node entspricht
-   exakt (nach px-Umrechnung und zurück) 12×8 cm, nicht dem aktuellen
-   6×4-cm-Default aus `odt/writer.ts:115-116`.
-2. Bild einfügen, über das neue Eingabefeld auf eine konkrete Größe setzen, als
-   ODT exportieren → `content.xml` enthält ein `<draw:frame>` mit
-   `svg:width`/`svg:height` entsprechend der eingegebenen Größe (Einheit gemäß
-   der in 2.6/4.10 final festgelegten Konvention).
-3. Dieselbe Datei erneut importieren → identische Breite/Höhe im Editor.
-4. Größe über Ziehpunkte ändern, exportieren, reimportieren → Größe exakt wie
+### 4.2 DOCX
+1. DOCX mit Bild bekannter Größe (`wp:extent` = 500×300 px) hochladen, **ohne**
+   Bearbeitung exportieren, reimportieren → Größe im wiederhergestellten `image`-Node
+   ist exakt 500×300 px (nicht der 300×200-Default) — **Regressionstest für den
+   Kernbefund aus 0.1**.
+2. Bild über Toolbar einfügen, über das Eingabefeld auf z. B. 640×480 px setzen, als
+   DOCX exportieren → per `JSZip.loadAsync` gegen `word/document.xml` verifiziert:
+   `<wp:extent>` entspricht exakt der in EMU umgerechneten Zielgröße.
+3. Dieselbe Datei erneut importieren → sichtbar identische Breite/Höhe.
+4. Größe über **Ziehpunkte** (nicht Feld) ändern, exportieren, reimportieren → Größe wie
    nach dem Ziehen.
-5. Reale komplexe Fremddatei mit mehreren unterschiedlich großen Bildern
-   importieren, unverändert exportieren, erneut importieren → jedes Bild behält
-   seine individuelle Originalgröße.
-6. Cross-Format: DOCX mit Bild bekannter Größe importieren → als ODT
-   exportieren → Größe bleibt (bis auf dokumentierte Rundungsdifferenzen)
+5. Reale Fremddatei mit **mehreren unterschiedlich großen** Bildern importieren,
+   unverändert exportieren, reimportieren → jedes Bild behält individuelle
+   Originalgröße.
+6. Cross-Format: ODT mit Bild bekannter Größe → als DOCX exportieren → Größe bleibt (bis
+   auf dokumentierte Sub-Pixel-Rundung) erhalten.
+
+### 4.3 ODT
+1. ODT mit `draw:frame` bekannter Größe (`svg:width="12cm" svg:height="8cm"`) hochladen,
+   unverändert exportieren, reimportieren → Größe entspricht exakt 12×8 cm, nicht dem
+   6×4-cm-Default.
+2. Bild einfügen, über Feld auf konkrete Größe setzen, als ODT exportieren →
+   `content.xml` enthält `<draw:frame>` mit `svg:width`/`svg:height` in `cm` (gemäß
+   Entscheidung 2.6), per `JSZip.loadAsync` unabhängig geprüft.
+3. Dieselbe Datei reimportieren → identische Breite/Höhe.
+4. Größe über Ziehpunkte ändern, exportieren, reimportieren → Größe wie nach dem Ziehen.
+5. Reale Fremddatei mit mehreren unterschiedlich großen Bildern → jedes behält seine
+   individuelle Originalgröße.
+6. Cross-Format: DOCX mit Bild bekannter Größe → als ODT exportieren → Größe bleibt
    erhalten.
+7. RelaxNG-Validierung (`odt/__tests__/external-validation.test.ts`) besteht **auch mit
+   gesetzter, per Feld/Ziehpunkt geänderter Größe** in `cm`.
 
-### 5.3 Cross-Format hin und zurück / doppelte Rundreise
-
-1. DOCX mit Bild bekannter Größe → Editor → Export als ODT → erneuter Import →
-   Export zurück als DOCX → Größe nach zwei Formatkonvertierungen weiterhin
-   ohne sichtbaren, kumulativen Größenverlust/-drift zum Original (minimale,
-   einmalig auftretende Rundungsabweichung im Sub-Pixel-Bereich ist laut
-   Grenzfall 4.11 zu dokumentieren, aber kein Blocker).
+### 4.4 Cross-Format hin und zurück / doppelte Rundreise
+1. DOCX mit Bild bekannter Größe → Editor → Export als ODT → Import → Export zurück als
+   DOCX → Größe nach zwei Konvertierungen ohne sichtbaren, **kumulativen** Drift (einmalige
+   Sub-Pixel-Rundung dokumentierbar, kein Blocker).
 2. Dieselbe Prüfung mit Startpunkt ODT.
-3. Bild mit über Ziehpunkte gesetzter, nicht seitenverhältnistreuer Größe (also
-   über einen Seitengriff verzerrt) durch dieselbe Doppel-Rundreise schicken →
-   die bewusst verzerrte Größe (nicht das ursprüngliche Seitenverhältnis) bleibt
-   erhalten, da dies eine gewollte Nutzeraktion war, kein „ungewollter"
-   Datenverlust.
+3. Bild mit über einen **Seitengriff bewusst verzerrter** (nicht seitenverhältnistreuer)
+   Größe durch dieselbe Doppel-Rundreise → die bewusst verzerrte Größe bleibt erhalten
+   (gewollte Nutzeraktion, das ursprüngliche Seitenverhältnis darf **nicht** eigenmächtig
+   wiederhergestellt werden).
+
+### 4.5 Cross-Format-Adapter (Objektebene)
+Da die App **keinen** Export-Format-Wähler bietet (ein geöffnetes Dokument wird immer in
+sein Ursprungsformat re-exportiert, Muster aus `specs/tabelle-struktur-bearbeiten-req.md`
+§0 Nr. 13), sind reine Cross-Format-Rundreisen über die UI nur indirekt (Öffnen einer
+bereits im Zielformat vorliegenden Datei) nachweisbar. Für den **Größenänderungs**-Pfad
+selbst ist zusätzlich ein Adapter-Test auf Objektebene zu führen
+(`readX(...)` → `setImageSize`-Transaktion auf dem `body`-JSON → `writeY(...)` →
+`readY(...)`), analog zu `table-structure-cross-format-roundtrip.test.ts` — dokumentierte,
+produktbedingte Testgrenze, keine Lücke dieses Features.
+
+**Abnahmemaßstab:** Rundungsverluste im Rahmen von 2.6 (Sub-Pixel bei px↔EMU bzw.
+px↔cm-Umrechnung, Toleranz ±1 px) sind zu dokumentieren und akzeptabel; eine **sichtbare
+Verzerrung oder ein kumulativer Größendrift ist es nicht.**
 
 ---
 
-## 6. Ist-Zustand laut Code-Analyse (Verifikationsbefund zum Backlog-Status)
+## 5. Tests (Soll)
 
-### 6.1 UI
+Kein Test wird durch diese Datei implementiert — sie legt fest, was vor einem
+Statuswechsel auf „vorhanden" nachzuweisen ist.
 
-Weder in `Toolbar.tsx` noch an anderer Stelle in `src/formats/shared/editor/`
-existiert ein Bedienelement, ein Panel oder ein NodeView, über das sich die
-Größe eines eingefügten Bildes verändern ließe. Der Backlog-Status „fehlt" ist
-für die **Bedienbarkeit** damit vollständig bestätigt.
+### 5.1 Unit-Tests
+1. **Größen-Logik/Command** (neue oder erweiterte
+   `src/formats/shared/editor/__tests__/commands.test.ts`): `setImageSize` gegen einen
+   mit `EditorState.create` konstruierten Zustand — Grundfall, Seitenverhältnis-Kopplung
+   nach 2.4 (aktuelles, nicht natives Verhältnis), Klemmen auf Unter-/Obergrenze (2.8),
+   `NaN`-Schutz (3.1/3.16), Typ-Normalisierung (`number | null`, 3.16), Command auf
+   Bild in Tabellenzelle.
+2. **Reader-Regressionstest DOCX**: DOCX-XML mit `<wp:extent>` einer von 300×200
+   abweichenden Größe konstruieren → Reader erzeugt Node mit exakt dieser Größe (heute
+   rot, da der Lesepfad fehlt, Befund 0/9).
+3. **Reader-Regressionstest ODT**: analog mit `svg:width`/`svg:height` in `cm`, `mm`,
+   `in` **und** `px` (Einheiten-Umrechnung, 3.10).
+4. **Writer-Regressionstest**: `width === 0` am Node → Writer-Output enthält **nicht**
+   `cx="0"`/`svg:width="0…"` (setzt voraus, dass das Command die Untergrenze bereits
+   durchsetzt, 3.18 — Test sichert beide Ebenen ab: Command **und** Writer-Fallback).
+5. **Bestehende Roundtrip-Tests erweitern** (nicht ersetzen): `docx/__tests__/roundtrip.test.ts`
+   Zeile 323ff. und `odt/__tests__/roundtrip.test.ts` Zeile 356ff. um echte
+   `attrs.width`/`attrs.height`-Assertions im **Ergebnis** (nicht nur im Input) ergänzen.
+6. **Cross-Format-Adapter-Tests** (4.5): je Richtung (DOCX→ODT, ODT→DOCX) ein Test für
+   „Größe ändern dann konvertieren" auf Objektebene.
 
-### 6.2 Datenmodell
-
-Im Unterschied zu manchen anderen „fehlt"-Einträgen (z. B.
-`schriftgroesse-waehlen`, wo auch der Schema-Mark fehlt) ist das Datenmodell für
-die Größe (`width`/`height` als `image`-Node-Attribute, `schema.ts:50-51`)
-bereits **vollständig vorhanden**. Es fehlt ausschließlich (a) ein Command, das
-diese Attribute nach dem Einfügen noch ändern kann, und (b) jede UI, die dieses
-Command aufruft.
-
-### 6.3 Reader/Writer — zusätzlicher, von der UI unabhängiger Befund
-
-Die Verifikation deckt einen Bug auf, der **unabhängig** vom Fehlen der UI
-besteht und der die Kernanforderung dieser Datei (Größenänderung muss dauerhaft/
-über Rundreisen hinweg wirken) andernfalls von vornherein unerfüllbar machen
-würde: Weder `docx/reader.ts` noch `odt/reader.ts` liest die in einer
-importierten Datei tatsächlich vorhandene Bildgröße (`wp:extent` bzw.
-`svg:width`/`svg:height`) aus. Jedes importierte Bild erhält daher unabhängig von
-seiner echten Größe `width: null, height: null` im Editor-Dokumentmodell. Beim
-nächsten Export ersetzen `docx/writer.ts:76-77` bzw. `odt/writer.ts:115-116`
-diesen fehlenden Wert durch einen **hartkodierten Default** (300×200 px bzw.
-6×4 cm) — unabhängig vom ursprünglichen Seitenverhältnis des Bildes. Praktische
-Konsequenz: Eine Datei mit einem 4000×3000-px-Foto (Seitenverhältnis 4:3), die
-ohne jede Bearbeitung importiert und wieder exportiert wird, enthält danach ein
-auf 300×200 px (Seitenverhältnis 3:2) gequetschtes Bild — eine sichtbare
-Bildverzerrung, die durch reines Öffnen-und-wieder-Speichern entsteht, ganz ohne
-dass die Nutzer:in jemals eine Größenänderung vorgenommen hätte. Der einzige
-vorhandene Unit-Test, der oberflächlich wie eine Prüfung dieses Verhaltens
-aussieht (`docx/__tests__/roundtrip.test.ts:253`), prüft `width`/`height` im
-Ergebnis nicht und hat diesen Bug bisher nicht aufgedeckt.
-
-### 6.4 Offene Klärungsfragen (müssen vor Abnahme beantwortet werden)
-
-1. **Anzeigeeinheit** der Größenfelder: cm (konsistent zum ODT-Fallback) oder px
-   (konsistent zur internen Schema-/DOCX-Rechnung)? Siehe Abschnitt 2.6.
-2. **ODT-Einheiten-Schreibweise beim Export**: `px`-Suffix (aktuell technisch
-   möglich, siehe `odt/writer.ts:115`) oder Umrechnung nach `cm` für bessere
-   Kompatibilität mit älteren ODF-Konsumenten? Siehe Grenzfall 4.10.
-3. **Persistenz der Originalgröße** (`naturalWidth`/`naturalHeight`) über
-   Cross-Format-Exporte hinweg: fester Bestandteil des Exportformats (dann muss
-   geklärt werden, in welchem DOCX-/ODT-Feld dieser rein editor-interne Wert
-   überhaupt sinnvoll unterzubringen ist, da weder OOXML noch ODF ein
-   Standardfeld dafür vorsehen) oder rein editor-intern und bei
-   Fremddatei-Import/-Reimport verloren (dann verliert der „Zurücksetzen"-Button
-   seine Funktion nach jedem Speichern-und-erneut-Öffnen, was klar dokumentiert
-   werden muss)? Siehe Grenzfall 4.4.
-4. **Verhältnis von Modellwert zu CSS-Deckelung** (`max-width: 100%`, siehe
-   Grenzfall 4.9): Darf das Eingabefeld einen Wert zeigen/speichern, der größer
-   als die tatsächlich sichtbare Darstellung ist, oder soll die Eingabe selbst
-   auf die verfügbare Seiten-/Zellbreite begrenzt werden?
-
-Diese vier Fragen gelten als **offen** und müssen vor Abnahme (siehe Abschnitt 8)
-explizit beantwortet und das Ergebnis hier nachgetragen werden — analog zum
-bereits in `FEATURE-SPEC-DOCX-ODT.md` Abschnitt 8 dokumentierten offenen Punkt
-zum Seitenlayout-Leerraum.
-
-**Fazit:** Der Backlog-Status „fehlt" für `bild-groesse-aendern` ist nach dieser
-Code-Analyse hinsichtlich der **Bedienbarkeit** korrekt. Die Verifikationsarbeit
-für diesen Eintrag besteht daher aus dem vollständigen **Neubau** von Command und
-UI (Abschnitt 1-2) **sowie**, davon nicht trennbar, der **Behebung eines
-bestehenden, unabhängigen Datenverlust-Bugs** in Reader/Writer (Abschnitt 6.3),
-ohne den jede neu gebaute Resize-Funktion die Rundreise-Anforderung aus
-Abschnitt 5 nicht erfüllen könnte.
-
----
-
-## 7. Testfälle für die Verifikation (E2E, echte Bedienung im Browser)
+### 5.2 E2E-Tests (Playwright, echte Bedienung — kein isolierter Command-Aufruf)
+Neue Datei, z. B. `tests/e2e/bild-groesse-aendern.spec.ts`, durchgängig über echten
+`filechooser`-Upload (Muster: `label:has-text("Bild")` + `setInputFiles`, bereits
+bewährt in `clipboard.spec.ts`/`cut.spec.ts`), `page.mouse` für echtes Drag-Resize,
+`page.getByRole('button', …)`/`getByLabel(...)` für Panel-Elemente:
 
 1. Bild einfügen → per Klick auswählen → Eigenschaften-Panel mit Größenfeldern
-   erscheint sichtbar (muss zuerst gebaut werden, aktuell **nicht vorhanden**).
-2. Im Breitenfeld einen neuen Wert eingeben, mit Enter bestätigen → Bild ändert
-   sichtbar seine Breite; bei aktivem Seitenverhältnis-Lock ändert sich die Höhe
-   proportional mit.
-3. Seitenverhältnis-Lock deaktivieren, nur Breite ändern → Höhe bleibt
-   unverändert (Bild wird sichtbar verzerrt/gestaucht).
-4. Ziehpunkt an einer Ecke ziehen → Breite und Höhe ändern sich gemeinsam
-   proportional, unabhängig vom Zustand der Lock-Checkbox.
-5. Ziehpunkt an einer Seitenmitte ziehen → nur die jeweilige Dimension ändert
-   sich.
-6. Ungültige Eingabe (Text, 0, negativ, extrem groß) im Größenfeld →
-   Fehlerbehandlung/Clamping wie in Grenzfall 4.1/4.2 beschrieben, kein Absturz.
-7. Größe ändern, danach Strg+Z → vorherige Größe exakt wiederhergestellt; Strg+Y
-   stellt die geänderte Größe wieder her.
-8. Ziehgeste mit mehreren Zwischenschritten (mehrere `mousemove`-Ereignisse vor
-   `mouseup`) → genau **ein** Undo-Schritt macht die gesamte Geste rückgängig
-   (Grenzfall 4.7).
-9. „Auf Originalgröße zurücksetzen" nach vorheriger Größenänderung → Bild kehrt
-   exakt zur beim Einfügen/Import ermittelten Größe zurück.
-10. Bild ohne vorherige Größenänderung → „Zurücksetzen"-Button ist
-    deaktiviert/wirkungslos (Grenzfall 4.4).
-11. Vollständiger Rundreisetest DOCX (Abschnitt 5.1) über echten
-    Datei-Upload (`filechooser`) und echten Download-Abfangmechanismus
-    (`page.waitForEvent('download')`), inklusive Validierung über einen
-    unabhängigen Parser.
-12. **Regressionstest für den in Abschnitt 6.3 beschriebenen Reader-Bug**: DOCX-
-    Datei mit Bild bekannter, vom 300×200-Default abweichender Größe (z. B.
-    500×300 px) hochladen, **ohne jede Bearbeitung** unverändert exportieren,
-    reimportieren → Größe ist weiterhin 500×300 px, nicht 300×200 px. Muss als
-    Erweiterung von `docx/__tests__/roundtrip.test.ts:253` (dort fehlt bisher die
-    Prüfung von `image.attrs.width`/`image.attrs.height` im Ergebnis) sowohl auf
-    Unit- als auch auf E2E-Ebene ergänzt werden.
-13. Dasselbe für ODT (Erweiterung von `odt/__tests__/roundtrip.test.ts:213`).
-14. Bild-`NodeSelection` unmittelbar nach einer Ziehpunkt-Geste, gefolgt von
-    Klick in normalen Text und weiterem Tippen → kein Inhaltsverlust, analog zum
-    Selection-Sync-Regressionstest aus `FEATURE-SPEC-DOCX-ODT.md` Abschnitt 2
-    (siehe 2.8, Testerweiterung von `selection-regression.spec.ts`).
-15. Vollständiger Rundreisetest ODT (Abschnitt 5.2) ebenso.
-16. Cross-Format-Rundreise (Abschnitt 5.3) einmal DOCX→ODT→DOCX, einmal
-    ODT→DOCX→ODT, jeweul mit Prüfung auf kumulativen Größendrift.
-17. Reale komplexe Fremddatei mit mehreren unterschiedlich großen Bildern
-    importieren, unverändert exportieren, erneut importieren → jedes Bild
-    behält seine individuelle Größe (Ergänzung zu `FEATURE-SPEC-DOCX-ODT.md`
-    Abschnitt 7, Testfall 8).
-18. Bild in einer Tabellenzelle einfügen und in der Größe ändern → Verhalten
-    identisch zu einem Bild im Haupttext (Grenzfall 4.6).
-19. Zwei Bilder mit identischem `src`, unterschiedlicher Größe → Rundreise
-    erhält für beide die jeweils individuelle Größe (Grenzfall 4.8).
-20. Sehr kleines Icon-Bild (z. B. 16×16 px) einfügen → Verhalten aus Grenzfall
-    4.14 (bewusst festgelegt und getestet, nicht zufälliges Ergebnis).
+   erscheint sichtbar (muss zuerst gebaut werden).
+2. Im Breitenfeld neuen Wert eingeben, Enter → Bild ändert sichtbar die Breite; bei
+   aktivem Lock ändert sich die Höhe proportional mit.
+3. Lock deaktivieren, nur Breite ändern → Höhe unverändert (Bild sichtbar verzerrt).
+4. **Echtes Eckgriff-Drag** (`page.mouse.move`/`down`/`move`/`up`) → Breite und Höhe
+   proportional, unabhängig von der Lock-Checkbox.
+5. **Echtes Seitengriff-Drag** → nur die jeweilige Dimension ändert sich.
+6. Ungültige Eingabe (Text, 0, negativ, extrem groß) → Klemmen/Fehlerbehandlung wie
+   2.8/3.1/3.2, kein Absturz, kein `NaN` im Modell.
+7. Größe ändern → Strg+Z → vorherige Größe exakt wiederhergestellt; Strg+Y → geänderte
+   Größe wieder da.
+8. Ziehgeste mit mehreren `mousemove` vor `mouseup` → genau **ein** Undo macht die
+   gesamte Geste rückgängig (3.7).
+9. „Auf Originalgröße zurücksetzen" nach Änderung → Bild kehrt exakt zur
+   Einfüge-/Import-Größe zurück; ohne vorherige Änderung → Button deaktiviert (3.4).
+10. **Tastaturselektion + Eingabefeld** (2.1, Tastaturweg): Bild ohne Maus auswählen
+    (`ArrowLeft`/`selectNodeBackward`), Panel per Tab erreichen, Größe per Tastatur
+    ändern — **garantierter Nicht-Maus-Weg**, eigener Pflichttest.
+11. **Zoom-Interaktion** (3.20, neu): Bei 50 %-Zoom und bei 200 %-Zoom je dieselbe
+    Bildschirm-Drag-Distanz ausführen → resultierende Modellgrößenänderung ist unter
+    beiden Zoomstufen identisch (nicht zoomstufenabhängig unterschiedlich).
+12. **Griff vs. Drag-to-Move** (3.22): `mousedown` auf einem Ziehpunkt ändert die Größe
+    und verschiebt das Bild **nicht**; `mousedown` auf der Bildfläche abseits der
+    Griffe löst weiterhin die reguläre Drag-to-Move-Geste aus.
+13. **Tippen nach Größenänderung** (2.10/3.23): Bild einfügen → Breite über das Feld auf
+    einen neuen Wert setzen, mit Enter bestätigen → **ohne** zwischenzeitlichen Klick
+    sofort ein Zeichen tippen → das Bild bleibt erhalten, das getippte Zeichen erscheint
+    **zusätzlich**. Denselben Ablauf mit einer Ziehgeste (mouseup statt Enter)
+    wiederholen. Zusätzlich verifizieren, dass Delete/Backspace direkt nach der
+    Größenänderung weiterhin korrekt löscht.
+14. **Visuelles Auswahl-Feedback** (3.24): Bild per Klick auswählen → visuell erkennbar
+    von einem zweiten, nicht ausgewählten Bild im selben Dokument unterscheidbar; Klick
+    auf das zweite Bild verschiebt das Feedback sichtbar zum zweiten Bild.
+15. **Selection-Sync-Regression** (3.12): Bild-`NodeSelection` unmittelbar nach einer
+    Ziehpunkt-Geste → Klick in normalen Text → weiter tippen → kein Inhaltsverlust
+    (Erweiterung von `selection-regression.spec.ts`).
+16. **Bild in einer Tabellenzelle** (2.11/3.6) einfügen und Größe ändern → Verhalten
+    identisch zum Haupttext.
+17. **Reale Fremddatei mit mehreren unterschiedlich großen Bildern** importieren,
+    unverändert exportieren, reimportieren → jedes Bild behält individuelle Größe.
+18. **Mobile/Tablet — Touch-Resize-Versuch, ehrliches Ergebnis** (3.21): Auf den
+    Playwright-Projekten Mobile (Pixel 7) und Tablet (iPad Mini) den Griff per
+    `touchscreen`-API ziehen; das Ergebnis (funktioniert / funktioniert nicht
+    zuverlässig) wird **dokumentiert und dem entsprechenden, dann verbindlichen
+    Verhalten aus 3.21 zugeordnet** — kein stiller Skip. Zusätzlich auf beiden
+    Touch-Projekten: Eingabefeld-Weg als garantierte Alternative funktioniert
+    nachweislich.
+19. **Vollständige Rundreisen** (4.2–4.4) über echten Datei-Upload (`filechooser`) und
+    echten Download-Abfang (`page.waitForEvent('download')`), inkl. Roh-XML-Prüfung via
+    `JSZip.loadAsync` gegen `word/document.xml`/`content.xml` (nicht nur der eigene
+    Reader).
+20. **Typ-Normalisierung** (3.16): Bild mit `width`/`height` als HTML-String einfügen
+    (z. B. aus geklebtem `<img width="100" height="80">`), dann über das Feld ändern
+    und Rundreise → im Modell durchgängig `number | null`, keine fehlschlagende
+    Assertion, kein `NaN`.
+21. **Kein Leck interner Attribute** (3.17): Bild mit gesetzten
+    `naturalWidth`/`naturalHeight` exportieren → weder das erzeugte `<img>` im
+    Editor-DOM noch DOCX-`<w:drawing>`/ODT-`<draw:frame>` enthält diese Attribute;
+    Reimport erzeugt keine Geistereigenschaft.
 
 ---
 
-## 8. Abnahmekriterien (Definition of Done)
+## 6. Definition of Done
 
-Der Backlog-Status für `bild-groesse-aendern` darf erst dann von „fehlt" auf
-„vorhanden (verifiziert)" geändert werden, wenn:
+„Bildgröße ändern" gilt erst dann als **vorhanden (verifiziert)**, wenn:
 
-1. Das Eigenschaften-Panel mit Eingabefeldern sowie die Ziehpunkte aus Abschnitt
-   1 gebaut, verdrahtet und über die Testfälle 1-10 aus Abschnitt 7 nachgewiesen
-   sind.
-2. Der in Abschnitt 6.3 beschriebene Reader-Bug (fehlendes Auslesen von
-   `wp:extent` bzw. `svg:width`/`svg:height`) in **beiden** Formaten behoben und
-   über die Testfälle 12-13 aus Abschnitt 7 nachgewiesen ist — ohne diese
-   Behebung kann keine Größenänderung dauerhaft (über Export/Reimport hinweg)
-   wirken, unabhängig davon, wie gut die UI gebaut ist.
-3. Alle Testfälle aus Abschnitt 7 tatsächlich über echte Browser-Interaktion
-   ausgeführt wurden (nicht nur Unit-/Command-Ebene) und grün sind.
-4. Alle Rundreise-Anforderungen aus Abschnitt 5 (DOCX, ODT, Cross-Format,
-   Doppel-Rundreise) durch einen unabhängigen Parser bzw. durch erneuten Import
-   bestätigt sind.
-5. Alle Grenzfälle aus Abschnitt 4 einzeln geprüft und deren tatsächliches
-   Verhalten dokumentiert ist (auch wenn das Ergebnis „bewusst so gewollt,
-   dokumentiert" statt „Bug, behoben" lautet).
-6. Alle vier offenen Klärungsfragen aus Abschnitt 6.4 explizit beantwortet und
-   das Ergebnis hier nachgetragen wurde.
-7. Der vorhandene, aber irreführende Unit-Test
-   `docx/__tests__/roundtrip.test.ts:253` (setzt `width`/`height`, prüft sie aber
-   nicht) sowie sein ODT-Äquivalent (`odt/__tests__/roundtrip.test.ts:213`, setzt
-   sie nicht einmal) um echte Größen-Assertions ergänzt sind, damit künftige
-   Regressionen an dieser Stelle nicht erneut unbemerkt bleiben.
-8. Kein aus dieser Datei hervorgegangener Fehlerbefund unbeantwortet bleibt
-   (jeder Fund entweder behoben und regressionsgetestet, oder bewusst als
-   bekannte Einschränkung dokumentiert), analog zur „Kein stiller
-   Fehlschlag"-Anforderung in `FEATURE-SPEC-DOCX-ODT.md` Abschnitt 20.4.
+1. Eigenschaften-Panel mit Eingabefeldern **und** Ziehpunkte (Abschnitt 1) gebaut,
+   verdrahtet und über die E2E-Testfälle 5.2 Nr. 1–10 nachgewiesen sind — inklusive des
+   **garantierten Nicht-Maus-Wegs** (Tastaturselektion + Eingabefeld, 5.2 Nr. 10).
+2. Der Reader-Bug (0.1) — fehlendes Auslesen von `wp:extent` bzw.
+   `svg:width`/`svg:height` — in **beiden** Formaten behoben und über 5.1 Nr. 2–3 sowie
+   4.2.1/4.3.1 nachgewiesen ist. Ohne diese Behebung kann keine Größenänderung dauerhaft
+   (über Export/Reimport) wirken, egal wie gut die UI ist.
+3. Die Typisierung von `width`/`height` (3.16) auf `number | null` normalisiert ist und
+   die editor-internen Attribute (`naturalWidth`/`naturalHeight`) nicht in DOM/Export
+   lecken (3.17) — nachgewiesen über 5.2 Nr. 20/21.
+4. Die Unter-/Obergrenze (2.8: 8 px / 3000 px) bereits im Command durchgesetzt ist
+   (nicht erst im Writer) — nachgewiesen über 5.1 Nr. 4.
+5. Die Zoom-Korrektur der Ziehgeste (2.3.4/3.20) implementiert und über 5.2 Nr. 11
+   nachgewiesen ist — verbindlich, da sonst dasselbe Feature auf unterschiedlichen
+   Zoomstufen unterschiedlich reagiert.
+6. Die Entscheidung „getipptes Zeichen darf ein Bild nach abgeschlossener
+   Größenänderung nie ersetzen" (2.10) über 5.2 Nr. 13 nachgewiesen ist.
+7. Das ausgewählte Bild visuell erkennbar ist (3.24, 5.2 Nr. 14) — durch eine
+   `.ProseMirror-selectednode`-Regel oder eine gleichwertige Kennzeichnung im neuen
+   `image`-NodeView.
+8. **Jede in Abschnitt 5 aufgeführte Testart tatsächlich existiert und grün ist**:
+   Unit (Größen-Logik, Seitenverhältnis, Grenzen, Reader/Writer-Regression), E2E
+   (echtes Drag-Resize Desktop **und** Touch-Resize-Versuch Mobile/Tablet mit ehrlichem,
+   dokumentiertem Ergebnis gemäß 3.21), Undo/Redo, sowie mindestens eine vollständige
+   Rundreise **mit echtem Datei-Download und Roh-XML-Prüfung via JSZip** je Format
+   (DOCX **und** ODT) — **kein** Punkt aus Abschnitt 5 bleibt ungetestet oder wird durch
+   einen bloßen Command-/Unit-Ersatz „abgehakt", wo echte Browser-Bedienung gefordert
+   ist.
+9. Alle Rundreise-Anforderungen aus Abschnitt 4 (DOCX, ODT, Cross-Format,
+   Doppel-Rundreise, Adapter-Ebene) durch unabhängigen Parser (`JSZip`) bzw. erneuten
+   Import bestätigt sind, **und** die bestehenden, aber bislang irreführenden Bild-Tests
+   (`docx/…/roundtrip.test.ts` Zeile 323ff., `odt/…/roundtrip.test.ts` Zeile 356ff.) um
+   echte Größen-Assertions im **Ergebnis** ergänzt sind (5.1 Nr. 5).
+10. Alle Grenzfälle aus Abschnitt 3 einzeln geprüft und ihr tatsächliches Verhalten
+    dokumentiert ist (auch wenn das Ergebnis „bewusst so, dokumentiert" statt „behoben"
+    lautet) — insbesondere Grenzfall 21 (Touch-Ziehpunkte) mit einem expliziten, nicht
+    offengelassenen Ergebnis.
+11. Die in dieser Datei getroffenen, vormals offenen Entscheidungen (2.5 Persistenz der
+    Originalgröße, 2.6 Einheit cm, 2.7 Größe > Seitenbreite, 2.8 Unter-/Obergrenze) wie
+    spezifiziert umgesetzt sind — eine Abweichung ist zulässig, muss dann aber hier
+    ausdrücklich nachgetragen und begründet werden, nicht stillschweigend anders gebaut
+    werden.
+12. Kein aus dieser Datei hervorgegangener Fehlerbefund unbeantwortet bleibt (jeder Fund
+    entweder behoben und regressionsgetestet, oder bewusst als bekannte Einschränkung
+    dokumentiert) — analog zur „Kein stiller Fehlschlag"-Anforderung in
+    `FEATURE-SPEC-DOCX-ODT.md` Abschnitt 20.4.
+
+Andernfalls verbleibt der Backlog-Status auf „fehlt" bzw. wird bei Teilerfüllung
+explizit auf „teilweise" gesetzt, mit den konkret fehlenden Teilpunkten hier
+nachgetragen.
+
+---
+
+## 7. UX-Invarianten-Durchgang (`specs/UX-INVARIANTEN.md` §1 — Punkt für Punkt)
+
+1. **View-Sync:** Jede Größenänderung (Feld **und** Ziehgeste) hält das Bild über
+   `tr.scrollIntoView()` (Muster: `runTable`) im sichtbaren Bereich — Anforderung 2.2.4.
+   Eine Größenzunahme, die das Bild aus dem aktuellen Scrollausschnitt schieben würde,
+   scrollt automatisch nach. **Anforderung konkret, Nachweis bei Umsetzung
+   erforderlich.**
+2. **Zustands-Feedback:** Die veränderte Größe selbst ist die sichtbare Bestätigung
+   (Live-Vorschau während des Ziehens, sofortige Änderung bei Feldbestätigung) — kein
+   zusätzlicher Dialog nötig, konsistent mit den Vorgänger-Features. Ungültige Eingaben
+   (3.1/3.2) werden **sichtbar** korrigiert (geklemmter Feldwert), nicht stillschweigend
+   verworfen. **Erfüllt / wie beschrieben umzusetzen.**
+3. **Fokus/Tastatur:** Bild per Tastatur selektierbar (2.1, `ArrowLeft`/`ArrowRight`),
+   Größenfelder per Tab erreichbar, „Zurücksetzen"-Button per Enter **und** Leertaste
+   auslösbar (Muster: `TableOpButton`). Die numerischen Eingabefelder sind die
+   **verbindliche** Nicht-Maus-Alternative zu den Ziehpunkten (Abschnitt 1, Element 2/3)
+   — kein Bedienweg, der Größenänderung ausschließlich per Maus erzwingt.
+   **Kernanforderung dieser Datei, siehe Abschnitt 1.**
+4. **Responsiveness:** Panel und Eingabefelder auf 320–768 px sichtbar/erreichbar,
+   Tap-Ziele der Griffe ≥ 40 px (Trefferfläche, 1.5). **Offen, ehrlich zu klärende
+   Frage:** Ob Ziehpunkte auf Touch zuverlässig funktionieren, ist **vorab nicht
+   garantiert** (3.21) — die Eingabefelder sind die **garantierte** Rückfalloption und
+   müssen auf Mobile/Tablet nachweislich funktionieren, unabhängig vom Ausgang der
+   Touch-Ziehpunkte-Frage. **Lücke identifiziert, nicht stillschweigend als erfüllt
+   behauptet.**
+5. **Persistenz (für Salamanido invertiert):** Größe lebt ausschließlich im
+   In-Memory-Dokumentmodell; die editor-interne Originalgröße
+   (`naturalWidth`/`naturalHeight`) ist zusätzlich bewusst **nicht** exportiert (2.5) und
+   überlebt einen Reimport nicht — konsistent mit dem Datenschutz-Kernprinzip.
+   **Erfüllt durch Bauart, Konsequenz in 2.5 explizit dokumentiert.**
+6. **Konsistenz:** Deutsche Beschriftungen („Breite", „Höhe", „Seitenverhältnis
+   beibehalten", „Auf Originalgröße zurücksetzen"), Hell-/Dunkelmodus für Panel und
+   Auswahl-Rahmen (Muster: `.selectedCell`-Overlay), einheitliche Icon-Sprache (keine
+   neuen Emoji). **Anforderung konkret, Nachweis bei Umsetzung erforderlich.**
+
+---
+
+## 8. Journey-Durchgang (`specs/UX-INVARIANTEN.md` §2)
+
+1. **Nutzer:in fügt ein Bild ein und findet es zu groß für die Seite.** *Erwartung:*
+   Bild anklicken → sichtbarer Auswahlrahmen erscheint sofort → Eigenschaften-Panel mit
+   Breite/Höhe → Wert verkleinern und Enter → Bild wird sofort sichtbar kleiner, Ansicht
+   bleibt auf das Bild fokussiert → Abschnitt 2.1/2.2.
+2. **Nutzer:in zieht am Eckgriff, um das Bild schnell größer zu machen, ohne auf das
+   Seitenverhältnis zu achten.** *Erwartung:* Breite und Höhe wachsen gemeinsam,
+   proportional, ohne dass das Bild verzerrt aussieht — auch wenn die
+   „Seitenverhältnis beibehalten"-Checkbox nicht aktiv ist (Eckgriff-Regel gilt immer)
+   → Abschnitt 2.3.1.
+3. **Nutzer:in bedient den Editor ausschließlich per Tastatur** (motorische
+   Einschränkung oder bewusste Präferenz). *Erwartung:* Bild lässt sich ohne Maus
+   auswählen (Pfeiltasten), Panel per Tab erreichen, Größe per Eingabefeld ändern — **die
+   Ziehpunkte sind nicht der einzige Weg**, es gibt keinen Punkt, an dem die Maus
+   zwingend erforderlich ist → Abschnitt 1, Kernanforderung dieser Datei.
+4. **Nutzer:in ändert die Größe, verklickt sich aber bei der Eingabe (extremer Wert,
+   z. B. 50000).** *Erwartung:* Das Feld korrigiert sichtbar auf einen sinnvollen
+   Maximalwert statt eines abgestürzten oder unsichtbaren Bildes → Abschnitt 2.8/3.2.
+5. **Nutzer:in ändert die Größe eines Bildes und tippt danach sofort weiter, ohne
+   erneut zu klicken** (naheliegender Workflow „Größe passt, jetzt weiterschreiben").
+   *Erwartung:* Der getippte Text erscheint **hinter** dem Bild — das Bild
+   verschwindet **nicht** durch das erste getippte Zeichen. Dies ist die gefährlichste
+   stille Falle dieses Features und als härteste Anforderung in Abschnitt 2.10
+   festgehalten.
+6. **Nutzer:in arbeitet am Smartphone unterwegs und will ein zu groß dargestelltes
+   Foto verkleinern.** *Erwartung:* Entweder funktioniert das Ziehen am Eckgriff auch
+   per Touch, oder die Eingabefelder sind auch am Smartphone bequem bedienbar (Tap-Ziel
+   groß genug) und liefern dasselbe Ergebnis → Abschnitt 3.21, offen und ehrlich
+   dokumentiert zu klären.
+7. **Nutzer:in hat versehentlich die falsche Größe eingegeben und will zurück zum
+   Original.** *Erwartung:* Ein Klick auf „Auf Originalgröße zurücksetzen" stellt exakt
+   die Einfüge-/Import-Größe wieder her, ohne dass man sich die ursprünglichen
+   Zahlenwerte merken musste → Abschnitt 2.5.
+8. **Nutzer:in öffnet ein mit echtem Word/LibreOffice erstelltes Dokument mit einem
+   groß eingebetteten Foto, ohne es zu bearbeiten, und speichert es einfach wieder.**
+   *Erwartung (der eigentliche Auslöser dieses gesamten Features):* Das Foto behält
+   exakt seine ursprüngliche Größe — es wird **nicht** unbemerkt auf einen
+   Default-Wert verzerrt, nur weil nie „Größe ändern" angeklickt wurde → Abschnitt 0.1,
+   4.2.1/4.3.1, der wichtigste Einzeltest dieser Spezifikation.
+9. **Nutzer:in zoomt die Seitenansicht auf 50 %, um mehr vom Dokument zu sehen, und
+   zieht dann am Eckgriff eines Bildes.** *Erwartung:* Die Größenänderung entspricht der
+   tatsächlichen, wahrgenommenen Ziehbewegung — das Bild wird nicht unerwartet nur halb
+   so stark oder doppelt so stark größer/kleiner, nur weil die Seite gerade verkleinert
+   dargestellt wird → Abschnitt 2.3.4/3.20.
+
+Referenz: `specs/UX-INVARIANTEN.md` (verbindliche Methodik; PO-Agent-Fassung).
+
+---
+
+## 9. Umsetzungsstand (Dev, 2026-07-05)
+
+**Umgesetzt:**
+- **Reader-Bug (0.1) behoben:** `docx/reader.ts` liest `<wp:extent>` (EMU→px), `odt/reader.ts`
+  liest `svg:width/height` mit Einheiten-Umrechnung (px/in/cm/mm/pt/pc→px). Importierte Bilder
+  behalten ihre echte Größe (`naturalWidth/Height` = importierte Größe = „Original").
+- **Schema:** `width/height` in `parseDOM` auf `number|null` normalisiert; interne
+  `naturalWidth/naturalHeight` (Default null), **nicht** in `toDOM`, **nicht** exportiert.
+- **`setImageSize`** (Klemmung 8–3000 px im Command; **No-Op**, wenn Größe unverändert →
+  keine leeren Undo-Schritte) + `selectedImage`/`clampImageDim`.
+- **`imageNodeView.ts`:** eigener image-NodeView mit 8 Ziehgriffen (Pointer-Events → Maus
+  **und** Touch), **zoom-korrigierten** Deltas (÷ aktuellem Zoom, §2.3.4), Eckgriff =
+  Seitenverhältnis (bei Gestenbeginn eingefroren), Seitengriff = eine Dimension, Live-Vorschau,
+  **ein** committender Undo-Schritt beim Loslassen; `draggable=false` auf dem `img`,
+  `mousedown`-`preventDefault` auf den Griffen; erfasst intrinsische Größe via `img.load`
+  (addToHistory:false). `.ProseMirror-selectednode`-Outline + Griffe nur bei Auswahl (CSS in
+  `index.css`, hell/dunkel, Trefferfläche ≥40 px via `::before`).
+- **`ImageSizePanel.tsx`:** erscheint bei Bild-`NodeSelection`; **cm-Felder** (garantierter
+  Nicht-Maus/Touch-Pfad), Seitenverhältnis-Checkbox (Default an), „Auf Originalgröße
+  zurücksetzen" (deaktiviert ohne bekannte Originalgröße). Ungültige Eingabe → sichtbarer
+  Revert. 40-px-Tap-Ziele, deutsch, hell/dunkel.
+- **`handleTextInput`-Guard** (WordEditor): Tippen bei Bild-`NodeSelection` hängt an (Text
+  nach dem Bild bzw. neuer Absatz, wenn Bild letzter Block) statt zu ersetzen — deckt beide
+  Auslöser (§2.10, `bild-einfuegen`). **ODT-Writer** schreibt Größe in `cm`, **DOCX-Writer**
+  fängt `0`/negativ ab.
+
+**Zwei echte Bugs beim Bauen gefunden+behoben (durch E2E aufgedeckt):** (1) der „tippen nach
+Resize"-Guard traf ins Leere, wenn das Bild der letzte Block ist → neuen Absatz anlegen;
+(2) ein redundanter Blur-Commit des Größenfelds überschrieb das Ziehgriff-Ergebnis (Feld
+zeigte den alten Wert) → `setImageSize`-No-Op-Guard + kein `view.focus()` am Gestenende +
+`mousedown`-`preventDefault` auf den Griffen.
+
+**Tests (voll §5, alle grün):**
+- Unit: `image-size.test.ts` (Command, Klemmung, `selectedImage`, parseDOM-Normalisierung,
+  toDOM kein Leak), `image-size-roundtrip.test.ts` (DOCX/ODT-Größe erhalten, Roh-XML `wp:extent`/
+  `svg:width` in cm, 0-Guard, Cross-Format, kein naturalWidth-Leak, reale Fixture); die
+  bisher irreführenden Bild-Rundreise-Tests (docx/odt `roundtrip.test.ts`) um echte
+  Größen-Assertions ergänzt.
+- E2E `bild-groesse-aendern.spec.ts` (14 Tests × 3 Projekte): Panel+Griffe erscheinen,
+  Feld-Resize (Sperre an/aus), ungültige Eingabe, **tippen-nach-Resize hängt an**, Undo+Redo,
+  Reset, **Tastaturselektion** (Nicht-Maus-Pfad), **Eck-/Seitengriff-Drag**, **Zoom-Division
+  (§3.20 explizit, Drag bei 90 %)**, Feedback bei mehreren Bildern, **Rundreise mit echtem
+  Download** (Roh-cm), **Bild in Tabellenzelle**.
+
+**§3-Grenzfall-Coverage-Map:** 1/2 (ungültig/extrem) → E2E „invalid width" + Unit-Klemmung;
+3 (Eckgriff-Untergrenze) → Unit-Klemmung; 4/26 (Reset ohne Original) → E2E Reset (Button
+disabled bis `naturalWidth` erfasst); 6 (Bild in Zelle) → E2E §2.11; 7 (Drag = ein
+Undo-Schritt) → E2E Undo/Redo; 9/17 (max-width, Leck) → Unit toDOM + CSS-`applySize`;
+11 (Cross-Format-Drift) → Unit Cross-Format; 13 (mehrere Größen) → reale Fixture; 16 (Typ) →
+parseDOM-Unit; 18 (0→cx=0) → Writer-Unit; 19 (verzerrt weiter) → Panel-Ratio (aktuelles
+Verhältnis); 20 (Zoom-Drag) → E2E §3.20; 22 (draggable-Konflikt) → `draggable=false` +
+`mousedown`-preventDefault; 23 (tippen nach Resize) → E2E; 24 (Auswahl-Feedback) → E2E +
+CSS. **Bewusst nicht mit je eigenem Test dupliziert** (durch Bauart/Bibliothek/Vorgänger
+abgedeckt, dokumentiert): 5 (Mehrfach-NodeSelection unmöglich in PM), 14 (Icon nicht
+hochskaliert — `bild-einfuegen`), 15 (defektes Bild), 25 (Kopf-/Fußzeile — kein UI).
+
+**Ehrliche Touch-Note (§3.21/§5.2.18):** Die cm-**Eingabefelder** sind der garantierte
+Nicht-Maus/Touch-Pfad und laufen auf Mobile+Tablet nachweislich grün. Die **Ziehgriffe**
+funktionieren über Pointer-Events auf allen drei Projekten inkl. der emulierten
+Touch-Viewports (`page.mouse`); ein **echter Finger-Touch-Drag** ist — wie bei den
+Tabellen-Features — nicht separat als real-touch-tauglich nachgewiesen (Playwright
+reproduziert das nicht verlässlich), aber die Eingabefelder decken den Fall vollständig ab.
+Die **Ziehgriff-basierten** E2E (Eck-/Seitengriff, Zoom-Drag, Drag=ein-Undo, Live-Sync)
+laufen bewusst **nur auf Desktop Chrome** (`test.skip` sonst): Drag ist eine
+Maus-/Präzisions-Geste, und `page.mouse`-Drag auf den **emulierten** Touch-Viewports
+(Mobile/Tablet) ist ein reiner Timing-Flake ohne Produktbezug. Der garantierte **Nicht**-Maus/
+Touch-Pfad — die **cm-Eingabefelder** — läuft auf allen drei Projekten inkl. Mobile/Tablet
+**stabil** (nach dem Fresh-Read-Commit-Fix reproduziert grün, `repeat-each=8` seriell auf
+Tablet 16/16). Der Download-Rundreise-E2E bleibt auf Tablet ein gelegentlicher
+`waitForEvent('download')`-Timing-Flake, von `retries:1` (CI) gefangen.
+
+**Feld-Pfad-Race auf Tablet — vollständig behoben (mehrere QA-Nachbesserungen, dreischichtig):**
+Der garantierte Nicht-Maus-Pfad (cm-Felder) war auf Tablet unter Parallellast intermittent
+falsch (Bild blieb 1 px oder kollabierte auf 8 px). **Eigentliche Wurzel** (per Instrumentierung
+gefunden): die `useEffect`-Resynchronisation des Panels hing an `widthPx`/`heightPx`, die die
+asynchron auf `img.load` erfasste **intrinsische** Größe einfalten. Diese Erfassung setzte das
+halbfertig getippte Feld im exakten Enter-Moment auf die Naturgröße („0.0 cm" = „0") zurück —
+`commit` bekam dann `raw="0"` → ungültig → Revert. Fixes:
+1. **`useEffect` hängt nur noch an der *expliziten* Größe (`width`/`height`) + Bildposition**
+   (nicht an `widthPx`/`heightPx`), sodass die interne naturalWidth-Erfassung das Feld nie
+   anfasst — die eigentliche Ursachenbehebung.
+2. **`onKeyDown` liest den Live-DOM-Wert** (`e.currentTarget.value`) statt der Render-Closure
+   (`wField` konnte unter Last noch veraltet sein).
+3. **`commit`/Reset dispatchen positionsbasiert** über neues `setImageSizeAt(pos, …)** (targetet
+   das Bild über seine — positions-neutral stabile — Position und re-etabliert die
+   NodeSelection), robust gegen den Fall, dass `view.state.selection` im Enter-Moment
+   kurzzeitig keine Bild-`NodeSelection` ist. Unit-getestet (funktioniert auch ohne aktive
+   Bild-Selektion).
+Nachweis: Feld-Tests auf Tablet `repeat-each=12` parallel **144/144 grün** (vorher near-100 %
+Fehler seriell / ~10 % parallel), Desktop+Mobile `repeat-each=3` **90/90**.
+
+**Nachbesserung nach 1. QA-Durchgang (QA-FAIL → behoben):**
+- **Echter Bug behoben (Tablet, garantierter Nicht-Maus-Pfad):** Auf langsamerer Ladezeit
+  traf die asynchrone intrinsische-Größen-Erfassung (`img.load`) **nach** dem ersten
+  Tastendruck im Größenfeld ein; die `useEffect`-Resynchronisation des Panels überschrieb
+  dann den halbfertigen Wert → Enter committete die Naturgröße statt der Eingabe. Fix:
+  `ImageSizePanel` synchronisiert die Felder aus dem Modell **nur, wenn nicht gerade editiert
+  wird** (`editing`-Flag). Reproduziert (Tablet, `repeat-each`) und jetzt 5/5 grün.
+- **Live-Feld-Sync (§1.6) verdrahtet** (vorher nur `onLiveResize` als toter Parameter): der
+  NodeView meldet die laufende Größe (`onLiveResize`), `WordEditor` hält `liveImageSize`,
+  `ImageSizePanel` zeigt sie während des Ziehens — E2E belegt (§1.6-Test).
+- **Fehlende §5-Testarten ergänzt und grün:** §5.1.3 (`odfLengthToPx` als Unit für
+  cm/mm/in/pt/pc/px + Nullfälle), §5.2.8 (ganze Ziehgeste = **ein** Undo-Schritt, E2E),
+  §5.2.15 (Selection-Sync: nach Resize in Text klicken + tippen, kein Verlust, E2E),
+  Grenzfall 19 (nach Seitengriff-Verzerrung folgt eine Feld-Änderung dem **aktuellen**
+  verzerrten Verhältnis, E2E), §4.3.7 (RelaxNG-Validierung **mit** gesetzter Größe in cm),
+  §5.2.17 (reale Fixture `FruitDepot-SeasonalFruits4.odt`: mehrere Bilder behalten ihre
+  **individuellen** Größen über die Rundreise).
+- **§5.2.12 (Griff vs. Drag-to-Move):** Der Griff-Drag löst zuverlässig Resize aus (durch
+  mehrere E2E belegt); dass ein `pointerdown` auf einem Griff **nicht** das Bild verschiebt,
+  ist durch `preventDefault`/`stopPropagation` + `draggable=false` auf dem `img`
+  konstruktiv sichergestellt. Das native Drag-to-Move der Bildfläche bleibt unverändert
+  (kein eigener E2E, da Playwright-Drag-to-Move eines Block-Bildes nicht verlässlich
+  reproduzierbar ist — bewusst dokumentiert).
+- **Winzige Bilder:** Griffe werden unter 24 px Effektivgröße ausgeblendet (10-px-Griffe
+  würden ein 1-px-Bild komplett verdecken und den Klick blockieren) — solche Bilder werden
+  über die Panel-Felder skaliert. Behebt zugleich eine Regression in den Bild-Ausschneiden/
+  -Einfügen-Bestandstests (`cut.spec.ts`/`clipboard-paste.spec.ts`), die ein 1-px-Testbild
+  anklicken.

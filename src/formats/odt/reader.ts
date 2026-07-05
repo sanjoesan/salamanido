@@ -229,12 +229,34 @@ const MAX_NESTING_DEPTH = 25
  * Also used directly from `elementToBlocks` for page-anchored frames, which may
  * appear as a direct child of `office:text` (not nested inside a `text:p`).
  */
+// ODF lengths carry an explicit unit (svg:width="12cm"). Convert to CSS px at 96 dpi so
+// an imported image keeps its real size instead of falling back to a default on export.
+const PX_PER_UNIT: Record<string, number> = {
+  px: 1,
+  in: 96,
+  cm: 96 / 2.54,
+  mm: 96 / 25.4,
+  pt: 96 / 72,
+  pc: 96 / 6,
+}
+export function odfLengthToPx(value: string | null): number | null {
+  if (!value) return null
+  const m = /^\s*([\d.]+)\s*(px|in|cm|mm|pt|pc)\s*$/.exec(value)
+  if (!m) return null
+  const n = Number(m[1])
+  if (!Number.isFinite(n) || n <= 0) return null
+  return Math.round(n * PX_PER_UNIT[m[2]])
+}
+
 function frameToBlocks(frameEl: Element, styles: ParsedStyles, depth: number): JsonNode[] {
   const imageEl = firstChildNS(frameEl, ODF_NAMESPACES.draw, 'image')
   if (imageEl) {
     const href = imageEl.getAttributeNS(ODF_NAMESPACES.xlink, 'href') ?? ''
     const alt = frameEl.getAttributeNS(ODF_NAMESPACES.draw, 'name') ?? ''
-    return [{ type: 'image', attrs: { src: href, alt } }]
+    const width = odfLengthToPx(frameEl.getAttributeNS(ODF_NAMESPACES.svg, 'width'))
+    const height = odfLengthToPx(frameEl.getAttributeNS(ODF_NAMESPACES.svg, 'height'))
+    // the size read from the file is this image's "original" for reset-to-original
+    return [{ type: 'image', attrs: { src: href, alt, width, height, naturalWidth: width, naturalHeight: height } }]
   }
 
   const textBoxEl = firstChildNS(frameEl, ODF_NAMESPACES.draw, 'text-box')

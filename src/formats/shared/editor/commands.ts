@@ -1,5 +1,6 @@
 import type { Command, EditorState, Transaction } from 'prosemirror-state'
-import { TextSelection } from 'prosemirror-state'
+import { TextSelection, NodeSelection } from 'prosemirror-state'
+import type { Node as PMNode } from 'prosemirror-model'
 import { wrapInList, liftListItem } from 'prosemirror-schema-list'
 import {
   isInTable,
@@ -84,6 +85,80 @@ export function insertImage(src: string, alt = ''): Command {
     const node = wordSchema.nodes.image.create({ src, alt })
     if (dispatch) {
       dispatch(state.tr.replaceSelectionWith(node))
+    }
+    return true
+  }
+}
+
+// Image display-size bounds (CSS px). The lower bound only guards against 0/negative/
+// collapsed images (not a "nice size" minimum); the upper bound stops an accidental
+// 50000px value from bloating the editor/export. Enforced here in the command, not just
+// the writer, so 0 never reaches the model. See bild-groesse-aendern-req.md §2.8 / §3.18.
+export const IMAGE_MIN_PX = 8
+export const IMAGE_MAX_PX = 3000
+
+/** Clamps a raw dimension to [IMAGE_MIN_PX, IMAGE_MAX_PX]; NaN/≤0 → the floor. */
+export function clampImageDim(n: number): number {
+  if (!Number.isFinite(n) || n <= 0) return IMAGE_MIN_PX
+  return Math.max(IMAGE_MIN_PX, Math.min(IMAGE_MAX_PX, Math.round(n)))
+}
+
+/** The image node + its position when the current selection is a NodeSelection on an
+ * image, else null. Drives the size properties panel and the resize handles. */
+export function selectedImage(state: EditorState): { node: PMNode; pos: number } | null {
+  const sel = state.selection
+  if (sel instanceof NodeSelection && sel.node.type.name === 'image') {
+    return { node: sel.node, pos: sel.from }
+  }
+  return null
+}
+
+/**
+ * Sets the display width/height (px) of the currently selected image, clamped to
+ * [IMAGE_MIN_PX, IMAGE_MAX_PX]. The NodeSelection is preserved (setNodeAttribute keeps it),
+ * so a second resize or a delete needs no re-click; the view scrolls the image into view
+ * (View-Sync, §2.2.4). Returns false when the selection is not an image.
+ */
+export function setImageSize(width: number, height: number): Command {
+  const image = wordSchema.nodes.image
+  return (state, dispatch) => {
+    const sel = state.selection
+    if (!(sel instanceof NodeSelection) || sel.node.type !== image) return false
+    const w = clampImageDim(width)
+    const h = clampImageDim(height)
+    // No-op when the size is unchanged — otherwise a redundant commit (e.g. an input's blur
+    // firing right after its Enter) would add an empty, confusing extra undo step.
+    if (sel.node.attrs.width === w && sel.node.attrs.height === h) return true
+    if (dispatch) {
+      const tr = state.tr.setNodeAttribute(sel.from, 'width', w).setNodeAttribute(sel.from, 'height', h)
+      dispatch(tr.scrollIntoView())
+    }
+    return true
+  }
+}
+
+/**
+ * Sets an image's size by its DOCUMENT POSITION rather than the current selection. The size
+ * panel captured this position when it rendered; it stays valid because the only intervening
+ * transaction (the async intrinsic-size capture) is a position-neutral attribute step. This
+ * is robust against a Tablet-timing race where, at the moment the user presses Enter in a
+ * size field, `view.state.selection` momentarily is no longer the image's NodeSelection
+ * (field focus / DOM-selection sync) — the selection-based {@link setImageSize} would then
+ * silently no-op. Re-establishes the NodeSelection on the image so further edits keep working.
+ * See bild-groesse-aendern-req.md §2.2 (2. QA-Nachbesserung).
+ */
+export function setImageSizeAt(pos: number, width: number, height: number): Command {
+  const image = wordSchema.nodes.image
+  return (state, dispatch) => {
+    const node = state.doc.nodeAt(pos)
+    if (!node || node.type !== image) return false
+    const w = clampImageDim(width)
+    const h = clampImageDim(height)
+    if (node.attrs.width === w && node.attrs.height === h) return true // no-op → no extra undo step
+    if (dispatch) {
+      const tr = state.tr.setNodeAttribute(pos, 'width', w).setNodeAttribute(pos, 'height', h)
+      tr.setSelection(NodeSelection.create(tr.doc, pos)) // re-establish selection on the image
+      dispatch(tr.scrollIntoView())
     }
     return true
   }

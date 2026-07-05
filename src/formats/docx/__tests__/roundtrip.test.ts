@@ -328,6 +328,10 @@ describe('DOCX round trip: images', () => {
     expect(image.type).toBe('image')
     expect(image.attrs.src).toMatch(/^data:image\/png;base64,/)
     expect(image.attrs.src.split(',')[1]).toBe(TINY_PNG.split(',')[1])
+    // the display size must survive the round trip too (was previously never asserted —
+    // the reader used to drop wp:extent, bild-groesse-aendern-req.md §0.1/§5.1.5)
+    expect(image.attrs.width).toBe(100)
+    expect(image.attrs.height).toBe(80)
   })
 
   it('splits a paragraph containing both text and an image into separate blocks', async () => {
