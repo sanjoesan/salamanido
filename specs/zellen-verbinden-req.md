@@ -1,500 +1,551 @@
-# Anforderungen: „Zellen verbinden“ (Tabellen, horizontal & vertikal)
+# Anforderungsspezifikation: „Zellen verbinden und teilen“ (Tabellen)
 
-Status: **fehlt — gilt aktuell als nicht vertrauenswürdig, muss vollständig verifiziert
-werden.** Diese Datei ist die verbindliche Anforderungsgrundlage für die Verifikation
-des Features „Zellen verbinden“ aus `specs/FEATURE-BACKLOG.md` (Slug `zellen-verbinden`,
-Abschnitt 3.2 „Tabellen“, Zeile 187, Priorität 1, Beschreibung: „Führt mehrere markierte
-Zellen zu einer zusammen."). Sie ergänzt `FEATURE-SPEC-DOCX-ODT.md` Abschnitt 6
-(Tabellen) um die für dieses eine Feature nötige Detailtiefe: jedes Bedienelement, jedes
-Detailverhalten, jeder Grenzfall und die Rundreise-Pflicht (DOCX **und** ODT).
+Status: **Entwurf zur Freigabe, nicht vertrauenswürdig bis einzeln über echte
+Browser-Bedienung verifiziert.** Diese Datei ersetzt die bisherige
+`specs/zellen-verbinden-req.md` vollständig und deckt zusätzlich das bisher nur als
+Abgrenzung erwähnte Gegenstück **„Zelle teilen“** ab (eigener Backlog-Slug
+`zellen-teilen`, `specs/FEATURE-BACKLOG.md` Zeile 188, Priorität 2). Beide Aktionen bilden
+zusammen **einen** Bedienblock „Zellen verbinden/teilen“ in der Editor-Toolbar, unmittelbar
+neben dem frisch abgenommenen Bedienblock „Tabellenstruktur bearbeiten“
+(`specs/tabelle-struktur-bearbeiten-req.md`: Zeile/Spalte einfügen & löschen).
 
-Architektur-Grundprinzip bleibt wie im Hauptdokument: DOCX und ODT teilen sich einen
-gemeinsamen internen Editor (ProseMirror-Schema, Tabellen-Nodes aus dem Paket
-`prosemirror-tables`). „Zellen verbinden" ist untrennbar mit dem benachbarten,
-ebenfalls fehlenden Backlog-Eintrag „Zellen teilen" (`zellen-teilen`, Priorität 2)
-sowie mit „Zeile einfügen/löschen" und „Spalte einfügen/löschen" (beide Priorität 1,
-Status `fehlt`) verzahnt — diese Datei behandelt ausschließlich das Verbinden, weist
-aber an den relevanten Stellen explizit auf die Wechselwirkung hin.
+**Rollentrennung (verbindlich, `specs/UX-INVARIANTEN.md` Abschnitt 3):** Diese Datei ist
+aus **Nutzersicht** geschrieben. Sie fordert offensichtliche Nutzererwartungen ein (sichtbare
+Auswahl, sinnvoller Cursor nach der Aktion, Undo als Sicherheitsnetz, Tastatur- und
+Mobile-Bedienbarkeit), ohne den Implementierungsaufwand zu bewerten oder Abstriche
+vorwegzunehmen. Sie enthält **keinen Code und keine Tests** — nur die Anforderung, an der
+sich Umsetzung (Dev) und Abnahme (QA) messen lassen.
+
+**Ausgangslage laut Vorgänger-Feature:** `specs/tabelle-struktur-bearbeiten-req.md`
+klammert „Zellen verbinden/teilen“ ausdrücklich als **separates Folgefeature** aus
+(dortiger Kopfabschnitt, Aufzählungspunkt 1) und behandelt bereits verbundene Zellen nur
+als Grenzfall für Zeilen-/Spalteneinfügen/-löschen. Diese Datei holt das Verbinden/Teilen
+selbst nach.
 
 ---
 
-## 1. Kontext & Ist-Zustand (Codeanalyse)
+## 0. Verifizierter Ist-Stand
 
-Der aktuelle Code wurde vor Erstellung dieser Anforderungen gesichtet, damit die
-Verifikation zielgerichtet an den tatsächlich vorhandenen Mechanismen ansetzt:
+Gegen den aktuellen Quellcode geprüft (Stand 2026-07-05; die Vorgänger-Feature-Umsetzung
+aus `specs/tabelle-struktur-bearbeiten-req.md` §9 ist bereits im Code, das ändert mehrere
+Aussagen der ursprünglichen `zellen-verbinden-req.md` substanziell — siehe insbesondere
+Zeile 4 der folgenden Tabelle). **Zeilennummern sind Momentaufnahmen** und bei Umsetzung
+per Symbolsuche neu zu verankern.
 
-| Ebene | Fundstelle | Befund |
+| # | Fundstelle | Befund |
 |---|---|---|
-| Datenmodell | `src/formats/shared/schema.ts` (Zeile 106) | Tabellen-Nodes werden komplett von `tableNodes({ tableGroup: 'block', cellContent: 'block+', cellAttributes: {} })` (Paket `prosemirror-tables`) erzeugt. Dadurch existieren `colspan`, `rowspan`, `colwidth` als Standard-Attribute auf `table_cell`/`table_header` bereits **out of the box**. `cellAttributes: {}` bedeutet: **keine** eigenen Zusatzattribute (z. B. Zellhintergrund/-schattierung) — für „Zellen verbinden" selbst irrelevant, aber relevant für Grenzfall 5 (Abschnitt 4). |
-| Editor-Plugins | `src/formats/shared/editor/WordEditor.tsx` (Zeile 8, 81–82) | `columnResizing()` und `tableEditing()` aus `prosemirror-tables` sind in die Plugin-Liste eingehängt. `tableEditing()` ist die Voraussetzung dafür, dass eine Maus-Ziehauswahl über mehrere Zellen überhaupt eine `CellSelection` erzeugt statt einer normalen Text-Selektion — der technische Unterbau für Mehrzellen-Auswahl ist also aktiv, auch ohne dass irgendeine Merge-Funktion ihn nutzt. |
-| Fehlendes CSS für Zellauswahl | `src/index.css` (komplette Datei, 72 Zeilen) | Enthält **keinen** Import des von `prosemirror-tables` mitgelieferten Standard-Stylesheets (üblicherweise `prosemirror-tables/style/tables.css` mit `.selectedCell:after`-Overlay und `.column-resize-handle`). Es existieren nur eigene, minimale Regeln für `.ProseMirror table/td/th` (Zeile 44–61: `border-collapse`, feste `border: 1px solid`, `min-width: 2em`). **Konsequenz:** Selbst wenn eine `CellSelection` intern entsteht, ist sie aktuell vermutlich **visuell nicht erkennbar** — kein Rahmen, keine Hervorhebung der markierten Zellen. |
-| Befehle | `src/formats/shared/editor/commands.ts` (vollständig gelesen, 108 Zeilen) | Enthält Befehle für Ausrichtung, Formatvorlagen, Listen, Bild-Einfügen, Tabelle-Einfügen (`insertTable`, Zeile 76–86) und Zeichenfarben — **keine einzige Zeile** importiert oder verwendet `mergeCells`/`splitCell`. Einzig `isInTable` wird aus `prosemirror-tables` re-exportiert (Zeile 3, 6) und nur für den Aktiv-Zustand des „Tabelle einfügen"-Buttons benutzt. |
-| Bibliotheks-Fähigkeit ungenutzt | `node_modules/prosemirror-tables/dist/index.d.ts` (Export-Zeile) | Das Paket exportiert `mergeCells` und `splitCell` fix und fertig — die Merge-Logik selbst muss **nicht neu geschrieben** werden, sie liegt bereits vollständig in der Abhängigkeit vor und ist nur nirgends verdrahtet. Eine projektweite Suche nach `mergeCells`/`splitCell` in `src/` ergibt **null Treffer**. |
-| Toolbar | `src/formats/shared/editor/Toolbar.tsx` (vollständig gelesen, 247 Zeilen; Tabellen-Button Zeile 228–239) | Die einzige tabellenbezogene Bedienmöglichkeit ist der Button „⊞ Tabelle" (`insertTable(2, 2)`, feste 2×2-Größe, siehe `FEATURE-SPEC-DOCX-ODT.md` Abschnitt 6/17 Punkt 6). Es gibt **keinen** Button, keinen Menüeintrag, kein Kontextmenü und kein Tastenkürzel für Zeile/Spalte einfügen/löschen **oder** Zellen verbinden/teilen — das gesamte Tabellen-Bearbeitungsmenü aus `FEATURE-SPEC-DOCX-ODT.md` Abschnitt 17 Zeile 373 fehlt geschlossen. |
-| DOCX-Import | `src/formats/docx/reader.ts` (Funktion `parseTable`, Zeile 210–256) | Liest `<w:gridSpan>` (→ `colspan`) und die `<w:vMerge>`-Kette (→ `rowspan`) korrekt: Ein Array `anchors` verfolgt pro Gitterspalte, welche Zelle eine `vMerge`-Fortsetzung verlängert; `isContinuation` erkennt sowohl `w:val="continue"` als auch ein **wertloses** `<w:vMerge/>` (ECMA-376: fehlendes `val` bedeutet ebenfalls „continue") über die Bedingung `vMergeVal !== 'restart'` (Zeile 227). Schutz gegen absurd tief verschachtelte Tabellen via `MAX_TABLE_NESTING_DEPTH = 25` (Zeile 208, mit explizitem Kommentar zur `deep-table-cell.docx`-Fuzzing-Fixture). |
-| DOCX-Export | `src/formats/docx/writer.ts` (Funktion `tableToDocx`, Zeile 128–171) | Schreibt `<w:gridSpan>` bei `colspan > 1` und `<w:vMerge w:val="restart"/>` bei `rowspan > 1` auf die Ankerzelle; ein `pending`-Array (Zeile 133, 161–163) erzeugt für jede weitere von `rowspan` betroffene Zeile eine eigene `<w:tc><w:tcPr><w:vMerge/></w:tcPr><w:p/></w:tc>`-Fortsetzungszelle **ohne** `val`-Attribut (impliziert „continue", siehe Zeile 144). Schreiber und Leser sind also intern konsistent zueinander. |
-| ODT-Import | `src/formats/odt/reader.ts` (Zeile 189–203, `childElements`-Hilfsfunktion Zeile 28–30) | Liest `table:number-columns-spanned`/`table:number-rows-spanned` direkt von jedem `<table:table-cell>`. Es gibt **keine** explizite Behandlung von `<table:covered-table-cell>` — der Filter `childElements(rowEl, ODF_NAMESPACES.table, 'table-cell')` matched aber ausschließlich den exakten Local-Name `table-cell`, wodurch `covered-table-cell`-Geschwisterelemente automatisch übersprungen werden, ohne eigens erkannt werden zu müssen. Das **dürfte** für wohlgeformte externe ODF-Dateien korrekt funktionieren, ist aber durch **keinen** Test mit einer echten Datei belegt (siehe Verdachtsmoment 8). |
-| ODT-Export | `src/formats/odt/writer.ts` (Zeile 86–109) | Schreibt `table:number-columns-spanned`/`table:number-rows-spanned` ausschließlich auf die Ankerzelle; erzeugt an keiner Stelle im Code ein `<table:covered-table-cell/>`-Element für die durch den Merge verdeckten Positionen (projektweite Suche nach `covered-table-cell` in `src/` ergibt **null Treffer**, sowohl Reader als auch Writer). Laut ODF-1.2-Schema ist `table:covered-table-cell` für jede von `number-columns-spanned`/`number-rows-spanned` verdeckte Zellposition **pflichtig** — der aktuelle Export erzeugt damit vermutlich strukturell nicht konforme ODT-Dateien, sobald verbundene Zellen exportiert werden (siehe Verdachtsmoment 7). |
-| Unit-/Roundtrip-Tests | `src/formats/docx/__tests__/roundtrip.test.ts` (Zeile 205–244), `src/formats/odt/__tests__/roundtrip.test.ts` (Zeile 194–208) | Je ein Test „preserves merged cells (colspan)"/„… (rowspan)" (DOCX) bzw. „preserves merged cells (colspan/rowspan)" (ODT). Alle konstruieren das `table_cell`-JSON mit `colspan`/`rowspan` **direkt von Hand** und prüfen nur Writer→eigener-Reader — **nie** über eine tatsächliche Zellauswahl + Merge-Befehl, und **nie** gegen eine echte, extern erzeugte Datei mit `covered-table-cell`. |
-| E2E-Tests (Browser) | `tests/e2e/*.spec.ts` (`docx.spec.ts`, `odt.spec.ts`, `lifecycle.spec.ts`, `selection-regression.spec.ts`) | Volltextsuche nach `colspan`, `rowspan`, `merge`, `verbinden`, `Zelle` ergibt **einen** Treffer, und der ist keine Test-Assertion, sondern nur der Dateiname der Fixture `table-column-delete-with-merge-2-times.odt`. Es existiert **kein einziger** Playwright-Test, der Zellen im Browser auswählt und verbindet — diese Aktion existiert in der UI schlicht noch nicht. |
-| Reale Testfixtures | `tests/fixtures/external/odt/` | Enthält bereits mehrere einschlägige, bisher ungenutzte Dateien: `mergedCells.odt` (Haupt-Kandidat), `tableCoveredContent.odt` (Name legt explizit `covered-table-cell`-Inhalt nahe), `table-column-delete-with-merge.odt` und `table-column-delete-with-merge-2-times.odt` (Wechselwirkung Merge + Spalte löschen), außerdem `crazyTable.odt`, `subTables3-nested.odt`, `subTables4.odt`, `BigTable.odt` für Grenzfälle. |
-| Reale Testfixtures (DOCX) | `tests/fixtures/external/docx/` | **Keine** Datei trägt einen Namen, der eindeutig auf verbundene Zellen hindeutet (`TestTableCellAlign.docx`, `TestTableColumns.docx`, `table-alignment.docx`, `table-indent.docx`, `deep-table-cell.docx` sind die einzigen tabellenbezogenen Kandidaten) — muss vor der Verifikation geprüft werden, ob eine dieser Dateien tatsächlich `gridSpan`/`vMerge` enthält, oder ob eine zusätzliche externe Testdatei beschafft werden muss (siehe Abschnitt 5, Punkt 1). |
-| Backlog-Status vs. Realität | `specs/FEATURE-BACKLOG.md` (Zeile 187, Status-Legende Zeile 33–39) | Backlog stuft „zellen-verbinden" pauschal als **fehlt** ein (Legende: „weder UI noch Datenmodell vorhanden"). Laut obiger Analyse ist das **nur zur Hälfte zutreffend**: Datenmodell samt Reader/Writer für DOCX **und** ODT existiert bereits und ist sogar per Unit-Test abgedeckt; **ausschließlich** die Bedienoberfläche (Button, sichtbare Mehrzellen-Selektion, Command-Verdrahtung) fehlt komplett. Für die Abnahme ist diese Unterscheidung wichtig: Es handelt sich nicht um eine Neuentwicklung von Null, sondern um „UI + reale Dateien nachrüsten" auf einem bereits vorhandenen, aber ungetesteten Unterbau. |
+| 1 | `src/formats/shared/editor/Toolbar.tsx` · `TableOpButton` (Zeile 204–230), `runTable` (Zeile 39–47) | Der Bedienblock „Tabellenstruktur bearbeiten“ (sechs Buttons, Zeile 396–429) existiert bereits und liefert ein **direkt wiederverwendbares Muster**: `onMouseDown={(e) => e.preventDefault()}` **plus** `onClick={() => runTable(view, command)}` — Klick, Leertaste **und** Enter lösen zuverlässig aus, ohne Doppelauslösung (Dokumentationskommentar Zeile 197–203). `runTable` ruft das Kommando mit einem eigenen Dispatch-Callback auf, der `tr.scrollIntoView()` anhängt (View-Sync). **Achtung für den Dev:** `TableOpButton`s `enabled`-Prop ist fest auf `isInTable(view.state)` verdrahtet (Zeile 215) — das passt für Zeile/Spalte, aber **nicht** unverändert für Verbinden/Teilen, die eine feinere Bedingung brauchen (Abschnitt 1). Muss entweder generalisiert oder als eigene Geschwister-Komponente mit identischem Aktivierungs-/Stil-Muster gebaut werden. Weder „Zellen verbinden“ noch „Zelle teilen“ existiert bisher (Volltextsuche nach „verbinden“/„teilen“/`mergeCells`/`splitCell` in der Datei: null Treffer). |
+| 2 | `src/formats/shared/editor/commands.ts` · Import/Re-Export Zeile 4–19, `deleteRowOrTable`/`deleteColumnOrTable` (Zeile 144–170), `canCut` (Zeile 194–196) | Zwei direkt übertragbare Muster: (a) der Guard-Stil von `deleteRowOrTable` — eigene Vorprüfung über `selectedRect(state)`, dann Delegation an die Bibliotheksfunktion; (b) `canCut(state)` als reiner Verfügbarkeits-Check für einen Toolbar-Button. **`mergeCells`/`splitCell` sind weiterhin an keiner Stelle in `src/` importiert oder verwendet** (Volltextsuche über den gesamten Baum: null Treffer) — unverändert gegenüber dem Vorzustand. |
+| 3 | `src/formats/shared/editor/WordEditor.tsx` · Plugins `columnResizing()`/`tableEditing()` (Zeile 220–221), Keymap (Zeile 196–218), `reconcileSelectionOnClick` (Zeile 44–51) + Maus-Handler mit `CLICK_DRAG_THRESHOLD_PX = 3` (Zeile 254–271), Kein-Kontextmenü-Kommentar (Zeile 233–237) | `tableEditing()` ist aktiv, Mehrzellen-`CellSelection` per Maus-Drag entsteht also technisch bereits. Die Keymap bindet weiterhin **kein** `Tab`/`Shift-Tab`/`goToNextCell`. Der 3-px-Reconcile-Mechanismus ist unverändert vorhanden — ein sehr kurzer Cross-Zellen-Drag zwischen schmalen Nachbarzellen könnte weiterhin fälschlich zu einem Text-Cursor kollabieren, **bevor** eine `CellSelection` entsteht (Verdachtsmoment, siehe Abschnitt 3). Der Kein-Kontextmenü-Kommentar bezieht sich konkret auf natives Ausschneiden, gilt aber als **Projektkonvention** durchgängig: kein eigener `contextmenu`-Handler irgendwo im Editor. |
+| 4 | `src/index.css` · `.selectedCell`-Overlay (Zeile 64–83) | **Wichtigste Änderung gegenüber der alten Spec-Grundlage:** Die früher als „Voraussetzung, die zuerst geschaffen werden muss“ geforderte sichtbare Mehrzellen-Auswahl **existiert bereits** — ein `.ProseMirror .selectedCell::after`-Overlay (halbtransparentes Blau, `pointer-events: none`, mit eigener Dunkelmodus-Variante Zeile 79–83), gebaut für das Vorgänger-Feature. Diese Spec **muss diese Regel nicht neu bauen**, sondern kann sie direkt für die Verbinden-Auswahl wiederverwenden — die Blockade aus der Vorversion ist damit **aufgelöst**. Weiterhin **kein** `.tableWrapper`/`overflow-x`-Regel vorhanden — bei sehr breiten, durch Verbinden entstandenen Zellen ggf. relevant (Abschnitt 3, Grenzfall „sehr große verbundene Fläche“). |
+| 5 | `src/formats/shared/schema.ts` · `tableNodes(...)` (Zeile 154) | `cellAttributes: {}` — keine eigenen Zusatzattribute (z. B. Zellhintergrund). `table_header` wird von `tableNodes()` bibliotheksseitig erzeugt, aber nirgends in `src/` referenziert (der „⊞ Tabelle“-Button erzeugt ausschließlich `table_cell`) — Kopfzeilen-Interaktion mit Verbinden/Teilen ist damit ein theoretischer, kein praktisch von dieser App erzeugter Fall (bleibt aber für importierte Dokumente relevant, siehe Abschnitt 3). |
+| 6 | `src/formats/docx/reader.ts` · `parseTable` (Zeile 311–364), `src/formats/docx/writer.ts` · `tableToDocx` (Zeile 167–210) | `gridSpan`/`vMerge`-Lesen über ein `anchors[]`-Array bzw. -Schreiben über ein `pending[]`-Array sind vorhanden, intern konsistent und für **von Hand konstruierte** Daten getestet (siehe Punkt 10). Unverändert korrekt, keine Neuentwicklung nötig — diese Spec braucht nur den **UI-erzeugten** Merge/Split auf denselben, bereits geprüften Pfad zu bringen. |
+| 7 | `src/formats/odt/reader.ts` · Tabellenparsing (Zeile 301–321), `childElements` (Zeile 29–31), `src/formats/odt/writer.ts` · Tabellenfall (Zeile ~111–177) | `covered-table-cell` wird beim Lesen implizit übersprungen (exakter Namensfilter auf `table-cell`, kein `covered-table-cell`-Sonderfall nötig) und beim Schreiben an zwei Stellen erzeugt (horizontal Zeile 162, vertikal Zeile 138, über einen `pending[]`-Tracker Zeile 127). Strukturkonform zu ODF 1.3, bereits getestet für Handdaten. |
+| 8 | `node_modules/prosemirror-tables` 1.8.5 · `mergeCells` (`dist/index.js` Zeile 1548–1587), `splitCell`/`splitCellWithType` (Zeile 1594–1663), `cellsOverlapRectangle` (Zeile 1527–1541, **nicht exportiert**) | Beide Kommandos sind fix und fertig vorhanden. **Wichtig für Aktivierungslogik (Abschnitt 1):** Beide folgen der ProseMirror-Konvention „Aufruf ohne `dispatch`-Argument = reiner Verfügbarkeits-Check, kein Seiteneffekt“ — `mergeCells(state)` bzw. `splitCell(state)` liefern `true`/`false`, **ohne** etwas zu verändern. Das ist ein direkt nutzbarer Ersatz für einen selbst gebauten „ist die Auswahl ein Rechteck?“-Check (die Bibliotheksfunktion `cellsOverlapRectangle`, die genau das intern prüft, ist nicht exportierbar — der Dry-Run-Aufruf umgeht dieses Problem elegant und mit **derselben**, bereits durch die Bibliothek getesteten Logik, die dann auch beim echten Klick läuft). **Verhalten beim echten Aufruf** (verifiziert durch Lesen des Quellcodes): `mergeCells` hängt den Inhalt aller nicht-leeren beteiligten Zellen in Lesereihenfolge an die am weitesten oben-links liegende Zelle an und setzt danach eine `CellSelection` auf **genau diese eine Zelle** (Zeile 1583) — **keinen** Text-Cursor. `splitCell` belässt den ursprünglichen Inhalt unverändert in der obersten-linken Teilzelle, füllt alle übrigen neu entstehenden Zellen mit einem leeren Standardabsatz (`createAndFill`) und setzt danach eine `CellSelection`, die **alle** neu entstandenen Zellen umfasst (Zeile 1658) — ebenfalls **kein** Text-Cursor. Beide Zustände sind das zentrale, in Abschnitt 2.3/2.6 behandelte UX-Risiko dieser Spezifikation. |
+| 9 | `specs/FEATURE-BACKLOG.md` Zeile 187 (`zellen-verbinden`, Priorität 1, `fehlt`), Zeile 188 (`zellen-teilen`, Priorität 2, `fehlt`) | Beide Einträge weiterhin `fehlt` — zutreffend für die Bedienoberfläche. **Achtung:** Die Backlog-Datei ist auch für die bereits abgenommenen Zeilen-/Spalten-Einträge (Zeile 183–186) nicht auf „vorhanden“ aktualisiert — die Statusspalte dieser Datei ist generell **nicht** vertrauenswürdig als Nachweis, nur der tatsächliche Quellcode. |
+| 10 | Tests: `docx/__tests__/roundtrip.test.ts` (Zeile 277, 295), `odt/__tests__/roundtrip.test.ts` (Zeile 265, 289, 324), `tests/e2e/docx.spec.ts` (Zeile 164, 253), `tests/e2e/odt.spec.ts` (Zeile 138, 229), `table-structure.test.ts`, `table-structure-roundtrip.test.ts`, `table-structure-cross-format-roundtrip.test.ts` | Umfangreiche, bereits grüne Testabdeckung für **bereits verbundene** Zellen (Lesen/Schreiben/Rundreise) sowie dafür, dass Zeile/Spalte einfügen/löschen eine **bestehende** Verbindung korrekt behandelt. **Kein einziger** dieser Tests löst einen Merge/Split über eine echte Bedienhandlung aus — diese Lücke ist der Kern der vorliegenden Feature-Abnahme. Die genannten Dateien sind wertvolle **Vorlagen** (Testinfrastruktur, `JSZip`-Rohprüfung, Fixture-Sätze), keine Ersatz-Nachweise. |
+| 11 | `tests/fixtures/external/docx/bug57031.docx`; `tests/fixtures/external/odt/tableCoveredContent.odt`, `mergedCells.odt`, `table-column-delete-with-merge.odt`, `table-column-delete-with-merge-2-times.odt`, `TestTextTable.odt`, `BigTable.odt`, `tableRowDeletionTest.odt` | Alle real vorhanden (per Glob bestätigt) — keine zusätzliche Testdatei muss beschafft werden. `bug57031.docx` bleibt die geeignetste reale DOCX-Rundreise-Grundlage (horizontale **und** vertikale Merges gemischt); `tableCoveredContent.odt` das ODT-Gegenstück. `TestTextTable.odt` bleibt mit Vorsicht zu verwenden — laut der Verifikation der Vorgänger-Spec verliert der ODT-Reader dort Kopfzeilentext aus einem `<table:table-header-rows>`-Wrapper (ein **eigenständiger, von diesem Feature unabhängiger** Reader-Fehler, hier nicht neu geprüft, aber als Fußnote übernommen, damit er bei der Abnahme nicht fälschlich als Merge/Split-Regression gewertet wird). |
+| 12 | `playwright.config.ts` (Zeile 21–46) | Fünf Projekte, nicht drei: **Desktop Chrome**, **Mobile** (Pixel 7, Touch), **Tablet** (iPad Mini) laufen die volle `tests/e2e`-Suite ungefiltert; zusätzlich zwei auf `clipboard*.spec.ts` beschränkte Browser-Projekte (Safari/Firefox), für dieses Feature irrelevant. Jede neue Bedienoberfläche muss auf den ersten drei nachgewiesen werden. |
 
-**Konsequenz:** Der Backlog-Status „fehlt" ist für die Bedienoberfläche zutreffend,
-unterschätzt aber den bereits vorhandenen (wenn auch unverifizierten) Datenmodell- und
-Bibliotheks-Unterbau. Abschnitt 6 dieser Datei listet die aus der Codeanalyse
-abgeleiteten konkreten Verdachtsmomente — insbesondere den mutmaßlichen ODF-Schema-
-Verstoß beim Export (fehlendes `table:covered-table-cell`) und die fehlende visuelle
-Rückmeldung bei Mehrzellen-Selektion, ohne die eine Merge-Funktion praktisch unbedienbar
-wäre.
+**Fazit:** Der größte Blocker der ursprünglichen Spec-Fassung (fehlende sichtbare
+Mehrzellen-Auswahl) ist bereits gelöst. Verbleibend zu bauen: die beiden Buttons selbst,
+ihre — von den bestehenden sechs Buttons abweichende — Aktivierungslogik, die
+Cursor-Korrektur nach Merge/Split (Abschnitt 2.3/2.6), und der vollständige Nachweis über
+echte Bedienung inklusive Rundreise.
 
 ---
 
-## 2. Menüpunkte / Bedienelemente (Soll)
+## 1. Bedienelemente
 
-| # | Element | Ort | Soll-Verhalten |
-|---|---|---|---|
-| 1 | Toolbar-Button „Zellen verbinden" | Formatierungsleiste, neue Tabellen-Kontextgruppe (neben „⊞ Tabelle") **oder** ausschließlich sichtbar/aktiv, wenn Cursor sich in einer Tabelle befindet (analog zum bestehenden `isInTable`-Muster des „⊞ Tabelle"-Buttons) | Muss **neu gebaut werden** — aktuell nicht vorhanden. Klick führt die aktuell ausgewählten Zellen (`CellSelection` mit ≥ 2 Zellen) zu einer einzigen Zelle zusammen. |
-| 2 | Aktivierungs-/Deaktivierungslogik des Buttons | derselbe Button | **Muss** deaktiviert (oder zumindest wirkungslos mit sichtbarer Rückmeldung) sein, wenn (a) keine Tabelle fokussiert ist, (b) nur eine einzelne Zelle markiert ist, oder (c) die Auswahl keine rechteckige Zellfläche bildet (siehe `cellsOverlapRectangle`-Guard in `mergeCells`, Verdachtsmoment 3). Ein Klick, der aus einem dieser Gründe nichts bewirkt, verstößt sonst gegen das „kein stiller Fehlschlag"-Prinzip aus `FEATURE-SPEC-DOCX-ODT.md` Abschnitt 20 Punkt 4. |
-| 3 | Sichtbare Mehrzellen-Selektion | Tabellen-Editor-Oberfläche, alle Zellen | **Voraussetzung, die zuerst geschaffen werden muss:** Ein Ziehen der Maus über mehrere Zellen (oder Umschalt+Pfeiltasten) muss die betroffenen Zellen sichtbar hervorheben (Rahmen/Hintergrund), bevor „Verbinden" überhaupt sinnvoll bedienbar ist. Aktuell laut Codeanalyse (Abschnitt 1, „Fehlendes CSS für Zellauswahl") vermutlich **nicht** der Fall. |
-| 4 | Icon/Beschriftung des Buttons | derselbe Button | Muss auf allen Zielsystemen eindeutig als „Zellen verbinden" erkennbar sein (siehe `FEATURE-SPEC-DOCX-ODT.md` Abschnitt 17/20, Icon-Rendering-Vorbehalt) — bevorzugt eingebettetes SVG-Icon statt Unicode-Symbol, konsistent mit den übrigen Toolbar-Icons dieser App. |
-| 5 | Tooltip/`title` und `aria-label` | derselbe Button | Deutschsprachiger, klarer Text (z. B. „Zellen verbinden"), zusätzlich explizites `aria-label` (nicht nur `title`), analog zu `MarkButton` in `Toolbar.tsx` (Zeile 47), **nicht** analog zum inkonsistenten `AlignButton` (kein eigenes `aria-label`, siehe `ausrichtung-zentriert-req.md` Abschnitt 6 Punkt 7 desselben Projekts als bekanntes Gegenbeispiel). |
-| 6 | Gegenstück „Zellen teilen" | eigener Button, direkt neben „Zellen verbinden" | **Nicht Bestandteil der Abnahme dieser Datei** (separates Backlog-Item `zellen-teilen`, Priorität 2), muss aber spätestens dann existieren, wenn Nutzerinnen eine fehlerhafte Verbindung rückgängig machen wollen, ohne auf Strg+Z angewiesen zu sein — wird hier nur als Randbedingung/Abgrenzung vermerkt. |
-| 7 | Tastenkürzel | Editor, global während Fokus in einer Tabelle | Weder Word noch LibreOffice bieten hierfür standardmäßig ein globales Tastenkürzel an (anders als z. B. Strg+E für Zentrieren) — **muss explizit entschieden werden**, ob eines ergänzt wird oder der Menü-/Toolbar-Zugriff als ausreichend dokumentiert wird. Darf nicht stillschweigend offenbleiben. |
-| 8 | Kontextmenü/Rechtsklick | — | Word/LibreOffice bieten „Zellen verbinden" standardmäßig im Tabellen-Rechtsklick-Kontextmenü an. Diese App hat aktuell **kein** Rechtsklick-Kontextmenü (siehe `FEATURE-SPEC-DOCX-ODT.md` Abschnitt 17 Zeile 361 ff., generelles Fehlen). Muss für V1 entweder bewusst zurückgestellt (Toolbar-Button genügt) oder explizit gefordert werden. |
-| 9 | Zusammenspiel mit Tab-Navigation | Tabellen-Editor | Nach dem Verbinden muss die Tab-Taste (siehe `FEATURE-SPEC-DOCX-ODT.md` Abschnitt 6) die zusammengeführte Zelle als **eine** Tab-Stopp-Position behandeln, nicht als mehrere ehemalige Einzelzellen. |
-| 10 | Zusammenspiel mit Zeile/Spalte einfügen/löschen | Tabellen-Editor (separate Backlog-Items `zeile-einfuegen`/`zeile-loeschen`/`spalte-einfuegen`/`spalte-loeschen`, alle ebenfalls Status `fehlt`) | Löschen einer Zeile/Spalte, die eine verbundene Zelle kreuzt, muss `colspan`/`rowspan` der betroffenen Zelle korrekt verkleinern (nicht auf einen ungültigen Wert stehen lassen, nicht abstürzen) — siehe exakt zu diesem Szenario passende Fixtures `table-column-delete-with-merge.odt`/`table-column-delete-with-merge-2-times.odt` in Abschnitt 5. |
+Zwei neue Buttons bilden **einen** Bedienblock, direkt im Anschluss an den bestehenden
+Block „Tabellenstruktur bearbeiten“ (`Toolbar.tsx` Zeile 396–429), durch denselben
+Trenner-Stil optisch abgesetzt.
 
----
-
-## 3. Gewünschtes Verhalten im Detail
-
-### 3.1 Horizontales Verbinden (zwei oder mehr Zellen in derselben Zeile)
-- Zwei oder mehr **nebeneinanderliegende** Zellen derselben Zeile markieren (Maus-Ziehen
-  über die Zellgrenze hinweg oder Umschalt+Pfeil-rechts, sobald eine `CellSelection`
-  aktiv ist) → Klick auf „Zellen verbinden" → die Zellen werden zu einer einzigen Zelle
-  mit `colspan = Summe der ursprünglichen Spaltenbreiten` zusammengeführt.
-- Die neue Zelle beginnt an der Position der am weitesten links stehenden markierten
-  Zelle (der „Anker", siehe `mergeCells`-Implementierung, `node_modules/prosemirror-tables/dist/index.js:1564–1566`).
-
-### 3.2 Vertikales Verbinden (zwei oder mehr Zellen derselben Spalte über mehrere Zeilen)
-- Analog zu 3.1, jedoch über Zeilengrenzen hinweg innerhalb einer Spalte → Ergebnis ist
-  eine Zelle mit `rowspan = Anzahl der zusammengeführten Zeilen`.
-- Nachfolgende Zeilen dürfen an dieser Spaltenposition **keine** eigene, weiterhin
-  eingebbare Zelle mehr zeigen (die Position ist „verdeckt").
-
-### 3.3 Rechteckiges Verbinden (mehrere Zeilen UND mehrere Spalten gleichzeitig)
-- Eine Auswahl, die ein Rechteck aus z. B. 2 Zeilen × 2 Spalten (oder größer) umfasst →
-  eine einzige resultierende Zelle mit sowohl `colspan > 1` **als auch** `rowspan > 1`.
-- Muss mit mindestens 2×2, 2×3 und 3×3 getestet werden.
-
-### 3.4 Inhaltszusammenführung beim Verbinden
-- Laut Bibliotheksverhalten (`mergeCells`, `dist/index.js:1556–1582`) werden die
-  Inhalte **aller** nicht-leeren markierten Zellen erhalten, nicht nur der Anker-Zelle:
-  Sie werden in **Lesereihenfolge** (zeilenweise von oben nach unten, innerhalb einer
-  Zeile von links nach rechts, mit Deduplizierung bereits verdeckter Positionen über
-  `seen`) als zusätzliche Absätze an den Inhalt der Anker-Zelle angehängt. Vollständig
-  leere Zellen tragen nichts bei (`isEmpty(cell)`-Prüfung).
-- **Dies ist als Standardverhalten zu bestätigen und zu dokumentieren**, nicht nur
-  stillschweigend aus der Bibliothek zu übernehmen — es ist die in Word/LibreOffice
-  übliche Konvention, muss aber für dieses Produkt explizit als gewünscht freigegeben
-  werden (Alternative wäre „nur Anker-Inhalt behalten, Rest verwerfen").
-- Zeichenformatierung (fett, Farbe usw.) **innerhalb** jedes ursprünglichen Absatzes
-  bleibt dabei erhalten, auch nach dem Zusammenführen mehrerer Zellen mit
-  unterschiedlicher Formatierung.
-
-### 3.5 Cursor-/Selektionszustand nach dem Verbinden
-- Laut Bibliothek (`dist/index.js:1583`, `tr.setSelection(new CellSelection(...))`)
-  steht nach einem erfolgreichen Merge eine **`CellSelection`** auf der neuen Zelle,
-  **kein** Text-Cursor am Ende des zusammengeführten Inhalts.
-- **Explizit zu verifizieren (siehe Verdachtsmoment 5):** Führt sofortiges Weitertippen
-  direkt nach dem Merge dazu, dass der gesamte gerade zusammengeführte Zelleninhalt
-  ersetzt wird (typisches ProseMirror-Verhalten beim Tippen über eine aktive
-  Nicht-Text-Selektion)? Falls ja, muss die App die Selektion nach dem Merge aktiv auf
-  einen Text-Cursor (z. B. Ende des letzten Absatzes der neuen Zelle) umsetzen — analog
-  zur bereits bekannten Selection-Sync-Problematik aus `FEATURE-SPEC-DOCX-ODT.md`
-  Abschnitt 2.
-
-### 3.6 Nicht-rechteckige oder überlappende Auswahl
-- Eine Auswahl, die keine geschlossene Rechteckfläche bildet (z. B. weil sie eine
-  bereits teilweise verbundene Zelle nur anschneidet, statt sie vollständig
-  einzuschließen) → `mergeCells` liefert laut `cellsOverlapRectangle`-Prüfung
-  (`dist/index.js:1552`) `false` zurück, es wird **keine** Transaktion ausgelöst.
-- Die UI muss diesen Fall sichtbar behandeln (Button deaktiviert **oder** Fehlermeldung
-  nach Klick) — ein Klick, der erkennbar nichts tut, ist laut
-  `FEATURE-SPEC-DOCX-ODT.md` Abschnitt 20 Punkt 4 explizit unzulässig.
-
-### 3.7 Einzelzelle markiert (keine echte Mehrzellen-Selektion)
-- `mergeCells` verlangt `sel.$anchorCell.pos != sel.$headCell.pos` (`dist/index.js:1550`)
-  — bei nur einer markierten Zelle liefert der Befehl `false`. Der Button muss in diesem
-  Zustand deaktiviert sein, nicht erst nach Klick scheitern.
-
-### 3.8 Erweitern einer bereits verbundenen Zelle
-- Eine bereits verbundene Zelle (z. B. 2×1) zusammen mit einer weiteren Nachbarzelle neu
-  markieren und erneut „Verbinden" klicken → muss wie ein frischer Merge über das nun
-  größere Rechteck funktionieren (z. B. Ergebnis 2×2), nicht abstürzen oder eine
-  inkonsistente Gitterstruktur erzeugen.
-
-### 3.9 Formatierung/Ausrichtung der zusammengeführten Zelle
-- Absatzausrichtung, Zeichenformatierung usw. jedes einzelnen, ursprünglich
-  eigenständigen Absatzes bleiben unverändert erhalten (siehe 3.4) — der Merge-Vorgang
-  selbst verändert keine Zeichen- oder Absatzformatierung, nur die Zellstruktur.
-
-### 3.10 Tab-Navigation nach dem Verbinden
-- Siehe Menüpunkt 9 (Abschnitt 2): Tab/Umschalt+Tab dürfen nach dem Verbinden nicht mehr
-  in die jetzt verdeckten ehemaligen Einzelzellen springen können.
-
-### 3.11 Visuelle Darstellung im Editor
-- Die verbundene Zelle muss sichtbar über die volle zusammengeführte Breite/Höhe
-  gerendert werden (natives HTML-`colspan`/`rowspan`-Verhalten des `<td>`/`<th>`, siehe
-  `schema.ts` `toDOM` der `tableNodes`-Zellen) — ungetestet, ob das bestehende, sehr
-  einfache CSS (`src/index.css` Zeile 50–56: feste `min-width: 2em`, `border`) mit
-  großen verbundenen Zellen visuell sauber zusammenspielt (z. B. keine doppelten
-  Innenränder, kein optisches „Zerreißen" des Rahmens).
-
-### 3.12 Undo/Redo
-- Der Merge-Befehl baut **eine einzige** Transaktion auf (`const tr = state.tr` am
-  Anfang, ein `dispatch(tr)` am Ende, `dist/index.js:1554–1584`) — im Unterschied zum
-  bekannten Mehrfach-Transaktions-Verdacht bei `setAlign` über mehrere Absätze (siehe
-  `ausrichtung-zentriert-req.md` Abschnitt 6 Punkt 4) ist hier **ein** Klick vermutlich
-  auch **ein** Undo-Schritt. Muss dennoch mit einem expliziten Test bestätigt werden,
-  nicht nur aus dem Quellcode angenommen.
-- Strg+Z direkt nach dem Merge muss die ursprünglichen Einzelzellen mit exakt ihrem
-  jeweiligen Originalinhalt wiederherstellen (kein Inhaltsverlust, keine Duplizierung).
-
-### 3.13 Selection-Sync-Regressionsgefahr
-- Analog zur in `FEATURE-SPEC-DOCX-ODT.md` Abschnitt 2 dokumentierten
-  Selection-Sync-Regression: Toolbar-Aktion „Verbinden" auf eine Mehrzellen-Auswahl,
-  danach Klick zur Neupositionierung außerhalb der Tabelle, danach Enter/weiter tippen
-  → darf keinen Dokumentinhalt verschlucken. Tabellen gelten laut Hauptdokument bereits
-  als „Hauptverdachtsfall" für diesen Bug-Typ.
+| # | Element | Soll |
+|---|---|---|
+| 1 | „Zellen verbinden“ | Führt die aktuell markierten Zellen zu einer zusammen (`mergeCells`). Eigenes, eindeutig unterscheidbares Inline-SVG-Icon (kein Emoji/Unicode — Vorbild: die sechs vorhandenen Tabellen-Icons, `Toolbar.tsx` Zeile 129–195, gemeinsame `TableIcon`-Hülle), z. B. mehrere Zellen mit nach innen zeigenden Pfeilen. |
+| 2 | „Zelle teilen“ | Löst eine verbundene Zelle (`colspan`/`rowspan` > 1) wieder in ihre Einzelzellen auf (`splitCell`). Eigenes Icon, optisch das Gegenstück zu Nr. 1 (z. B. nach außen zeigende Pfeile), damit „verbinden“ und „teilen“ auch ohne Tooltip klar unterscheidbar sind. |
+| 3 | Aktivierung „Zellen verbinden“ | Aktiv **ausschließlich**, wenn die aktuelle Auswahl eine echte Mehrzellen-`CellSelection` ist, deren Umriss ein geschlossenes Rechteck bildet — exakt die Bedingung, die `mergeCells` selbst prüft. Ein einzelner Cursor, eine reine Textauswahl, eine Einzelzellen-Auswahl oder eine nicht-rechteckige/über eine bestehende Verbindung hinausragende Auswahl → **deaktiviert**. Empfohlene Umsetzung: den Button-Zustand direkt aus einem dispatch-losen Aufruf `mergeCells(view.state)` ableiten (liefert `true`/`false`, ohne etwas zu verändern) — dieselbe Logik, die beim Klick tatsächlich ausgeführt wird, macht Vorschau und Ausführung untrennbar konsistent. |
+| 4 | Aktivierung „Zelle teilen“ | Aktiv **ausschließlich**, wenn Cursor/Auswahl sich auf genau **eine** Zelle mit `colspan > 1` **und/oder** `rowspan > 1` bezieht. Ein normaler Cursor in einer unverbundenen Zelle, eine Mehrzellen-Auswahl oder eine Auswahl außerhalb einer Tabelle → **deaktiviert**. Analog empfohlen: dispatch-loser Aufruf `splitCell(view.state)`. |
+| 5 | Sichtbare Begründung im deaktivierten Zustand | Jeder deaktivierte Button muss über `title` **und** `aria-label` einen für Nutzer:innen verständlichen Grund tragen — mindestens die zwei häufigsten Fälle unterschieden: (a) Cursor befindet sich **nicht** in einer Tabelle → „… (nur innerhalb einer Tabelle verfügbar)“; (b) Cursor ist in einer Tabelle, aber die Auswahl erfüllt die Bedingung nicht → „Zellen verbinden (mehrere benachbarte Zellen einer rechteckigen Fläche markieren)“ bzw. „Zelle teilen (nur bei einer bereits verbundenen Zelle verfügbar)“. Kein kommentarloses Ausgrauen — `isInTable(state)` ist dafür bereits importierbar und günstig zusätzlich abzufragen. |
+| 6 | Sichtbare Mehrzellen-Auswahl während des Markierens | **Bereits vorhanden** (`.selectedCell`-Overlay, `index.css` Zeile 64–83, siehe Abschnitt 0) — für dieses Feature nur zu **bestätigen**, nicht neu zu bauen: Ein Maus-Drag über mehrere Zellen muss die betroffene Fläche sichtbar hervorheben, **bevor** „Zellen verbinden“ überhaupt aktivierbar wird. |
+| 7 | Tastaturbedienbarkeit (Enter **und** Leertaste) | **Verbindlich, wie im Vorgänger-Feature gelöst** (`specs/tabelle-struktur-bearbeiten-req.md` §1 Nr. 8, Toolbar.tsx `TableOpButton`-Muster Zeile 217–230): `onMouseDown`+`preventDefault()` zur Selektionserhaltung **plus** `onClick` für die eigentliche Kommandoausführung — `onClick` feuert zuverlässig bei Mausklick, Leertaste **und** Enter, ohne Doppelauslösung. Beide neuen Buttons müssen exakt diesem Muster folgen, nicht nur dem alleinigen `onMouseDown`-Aktivierungsmuster älterer Buttons in dieser Datei. |
+| 8 | Tastenkombination (dediziertes Shortcut) | **Entscheidung: keine eigene Tastenkombination.** Weder Word noch LibreOffice definieren hierfür ein plattformübergreifend etabliertes Kürzel; ein selbst erfundenes Kürzel würde mit Browser-/OS-Belegungen kollidieren können und ist gegenüber der garantierten Tastatur-Erreichbarkeit über Tab+Enter/Leertaste (Nr. 7) kein zusätzlicher Nutzerwert. Strg+Z/Strg+Y bleiben das Sicherheitsnetz. Bewusst getroffen, nicht offengelassen. |
+| 9 | Kontextmenü (Rechtsklick) | **Kein Soll-Bestandteil**, konsistent mit der bereits dokumentierten Projektentscheidung (`WordEditor.tsx` Zeile 233–237): kein eigener `contextmenu`-Handler, natives Browser-Kontextmenü bleibt erreichbar. Gilt einheitlich, nicht pro Feature neu verhandelt. |
+| 10 | Reihenfolge/Gruppierung in der Toolbar | „Zellen verbinden“ vor „Zelle teilen“ (Verb-Reihenfolge wie in der Aufgabenstellung), beide direkt hinter dem Block „Tabellenstruktur bearbeiten“, durch denselben Trenner-Stil abgesetzt — keine dritte, eigene Zwischenüberschrift nötig. |
+| 11 | Touch-Ziele | Wie die sechs bestehenden Tabellen-Buttons: `min-w-10 min-h-10` (= 40 px, `specs/UX-INVARIANTEN.md` §1 Nr. 4). |
 
 ---
 
-## 4. Grenzfälle
+## 2. Verhalten im Detail
 
-1. **Verbinden am Rand der Tabelle** (erste/letzte Zeile, erste/letzte Spalte) →
-   funktioniert identisch zu Zellen in der Mitte, keine Sonderbehandlung nötig, aber
-   explizit zu testen (Grenzfall für Cursor-Positionierung/Tab-Navigation danach).
-2. **Verbinden der gesamten Tabelle zu einer einzigen Zelle** (Auswahl aller Zellen) →
-   Ergebnis ist eine 1×1-„Tabelle" mit einer Zelle, die den gesamten ursprünglichen
-   Inhalt in Lesereihenfolge enthält; muss weiterhin editierbar und exportierbar sein.
-3. **Verbinden, das eine ganze Zeile oder Spalte vollständig „verdeckt"** (z. B. eine
-   Zeile, die danach nur noch aus verdeckten Positionen einer vertikal verbundenen Zelle
-   besteht) → Tabelle bleibt strukturell gültig, keine „Geister-Zeile" ohne jede eigene
-   Zelle.
-4. **Verbinden von Zellen mit gemischtem Inhalt** (leere Zelle + Zelle mit mehreren
-   Absätzen + Zelle mit einem Bild + Zelle mit fett/kursiv/farbig formatiertem Text) →
-   alles bleibt in der zusammengeführten Zelle erhalten, in der in 3.4 definierten
-   Reihenfolge.
-5. **Zellhintergrund/-schattierung existiert im Schema aktuell nicht**
-   (`cellAttributes: {}` in `schema.ts` Zeile 106) — es gibt daher aktuell **keinen**
-   Konflikt zwischen unterschiedlich formatierten Zellhintergründen beim Verbinden zu
-   lösen. Muss dokumentiert werden, dass dies der aktuelle (bewusste) Stand ist; sobald
-   das separate Backlog-Item `tabelle-eigenschaften` (Rahmen/Schattierung, Status
-   `fehlt`) umgesetzt wird, ist dieser Grenzfall neu zu bewerten.
-6. **Verbinden in einer verschachtelten Tabelle** (Tabelle innerhalb einer
-   Tabellenzelle) → muss innerhalb der von `MAX_TABLE_NESTING_DEPTH = 25`
-   (`docx/reader.ts` Zeile 208) erlaubten Tiefe funktionieren; mindestens kein Absturz,
-   siehe bereits vorhandene Fixtures `subTables3-nested.odt`, `subTables4.odt`.
-7. **Wiederholtes Verbinden/Teilen** (sobald „Zellen teilen" existiert) über mehrere
-   Zyklen hinweg → `colspan`/`rowspan` dürfen nicht „vergessen" auf einem Zwischenwert
-   > 1 hängen bleiben, die Gitterspaltenzahl (`colCount`) der Tabelle muss über alle
-   Zyklen konsistent bleiben.
-8. **Undo direkt nach dem Merge** → exakte Wiederherstellung der Einzelzellen mit ihrem
-   jeweiligen Originalinhalt (siehe 3.12) — kein Inhaltsverlust, keine doppelten Absätze.
-9. **Verbinden inklusive der allerersten oder allerletzten Zelle der Tabelle**
-   (Ecke oben-links/unten-rechts) → weiterhin editierbar danach, kein
-   Cursor-Positionierungsfehler (Analogiefall zu `FEATURE-SPEC-DOCX-ODT.md` Abschnitt 6
-   Testfall 10 für „Tabelle einfügen").
-10. **Reale Fremddatei: Spalte/Zeile löschen, die eine bereits verbundene Zelle
-    kreuzt** — exakt das Szenario der vorhandenen Fixtures
-    `tests/fixtures/external/odt/table-column-delete-with-merge.odt` und
-    `table-column-delete-with-merge-2-times.odt` (Name legt nahe: Spalte wird zweimal
-    hintereinander gelöscht). `colspan`/`rowspan` der betroffenen Zelle müssen sich
-    korrekt anpassen, keine korrupte Gitterstruktur, kein Datenverlust des noch
-    sichtbaren Inhalts.
-11. **Sehr große verbundene Fläche** (z. B. gesamte 10×10-Tabelle aus `BigTable.odt` zu
-    einer Zelle verbunden) → UI bleibt bedienbar, keine spürbare Verzögerung.
-12. **Mehrfach-Absatz-Zellen verbinden** (jede beteiligte Zelle enthält bereits mehrere
-    Absätze) → alle Absätze aller beteiligten Zellen bleiben einzeln erhalten, in der in
-    3.4 festgelegten Reihenfolge, keine versehentliche Verschmelzung zweier Absätze zu
-    einem.
-13. **Kopfzeile (`table_header`/`<th>`) mit Datenzelle (`table_cell`/`<td>`) verbinden**
-    — `mergeCells` behält laut Bibliothekscode den Node-Typ der **Anker-Zelle** bei
-    (`tr.setNodeMarkup(mergedPos, null, {...})` ohne Typwechsel, `dist/index.js:1574`).
-    Diese App erzeugt selbst aktuell keine `table_header`-Zellen (der „⊞ Tabelle"-Button
-    füllt nur `table_cell`), das Szenario ist daher nur beim **Import** einer externen
-    Datei mit echter Kopfzeile relevant und muss dort geprüft werden (kein stiller
-    Typverlust der Kopfzeilen-Semantik).
+### 2.1 Horizontales, vertikales und rechteckiges Verbinden
+- Zwei oder mehr **nebeneinanderliegende** Zellen derselben Zeile markieren (Maus-Drag über
+  die Zellgrenze) → Klick auf „Zellen verbinden“ → eine Zelle mit
+  `colspan = Summe der ursprünglichen Spalten`.
+- Zwei oder mehr Zellen derselben Spalte über mehrere Zeilen markieren → Ergebnis mit
+  `rowspan = Anzahl zusammengeführter Zeilen`.
+- Eine rechteckige Mehrfachauswahl (z. B. 2×2, 2×3, 3×3) → eine Zelle mit `colspan > 1`
+  **und** `rowspan > 1` gleichzeitig. Mit mindestens 2×2, 2×3 und 3×3 zu prüfen.
+- Die neue Zelle beginnt an der Position der am weitesten **oben-links** stehenden
+  markierten Zelle (Anker).
 
----
+### 2.2 Inhaltszusammenführung beim Verbinden (Produktentscheidung, bewusst getroffen)
+- **Entscheidung: Alle nicht-leeren Inhalte der markierten Zellen werden in Lesereihenfolge
+  (oben→unten, links→rechts) an den Inhalt der Ankerzelle angehängt — nichts wird beim
+  Verbinden verworfen.** Das ist die Word/LibreOffice-übliche Konvention und entspricht dem,
+  was Nutzer:innen erwarten würden, wenn sie versehentlich Zellen mit Inhalt verbinden:
+  „zusammenführen“, nicht „überschreiben“. Die Alternative („nur Anker-Inhalt behalten, Rest
+  kommentarlos verwerfen“) wäre ein stiller Datenverlust und für diese Anwendung (deren
+  Kernversprechen Datenintegrität ohne Backend/Cloud-Sicherung ist) nicht vertretbar.
+- Leere Zellen (genau ein leerer Absatz) tragen nichts zum zusammengeführten Inhalt bei.
+- Mehrere Absätze bleiben als eigenständige Absätze erhalten (kein Verschmelzen zweier
+  Absätze zu einem), lediglich hintereinandergereiht.
+- Zeichenformatierung (fett, kursiv, Farbe usw.) innerhalb jedes ursprünglichen Absatzes
+  bleibt unverändert — das Verbinden ändert nur die Zellstruktur (`colspan`/`rowspan`),
+  keine Absatz- oder Zeichenattribute.
+- Bilder in einer der beteiligten Zellen bleiben Teil des zusammengeführten Inhalts (keine
+  verwaiste Bilddatei im späteren Export).
 
-## 5. Rundreise-Anforderung (DOCX **und** ODT — Pflichtbestandteil)
+### 2.3 Cursor-/Selektionszustand nach dem Verbinden (kritischster Punkt, verbindliche Korrektur)
+- Ohne Eingriff setzt die zugrundeliegende Bibliothek nach dem Verbinden eine
+  **`CellSelection` auf die neue Zelle** — **keinen** Text-Cursor (siehe Abschnitt 0,
+  Punkt 8). Sofortiges Weitertippen direkt nach dem Merge würde in diesem Rohzustand den
+  gerade zusammengeführten Inhalt **ersetzen** statt ihn zu ergänzen — ein für Nutzer:innen
+  überraschender, potenziell destruktiver Effekt unmittelbar nach der gewünschten Aktion.
+- **Anforderung (verbindlich, keine Option): Die App muss nach einem erfolgreichen Verbinden
+  aktiv einen Text-Cursor an das Ende des letzten Absatzes der neuen Zelle setzen** — in
+  derselben Transaktion wie das Verbinden selbst (kein zweiter Undo-Schritt, siehe 2.7).
+  Erst danach gilt „Verbinden“ als abgeschlossen. Sofortiges Weitertippen fügt den neuen
+  Text an, ohne vorhandenen Inhalt zu verschlucken.
+- **View-Sync (Pflicht):** Die Ansicht scrollt so, dass die neue, zusammengeführte Zelle
+  vollständig sichtbar ist (analog zum bereits vorhandenen `runTable`-Muster mit
+  `tr.scrollIntoView()`).
 
-Grundprinzip aus `FEATURE-SPEC-DOCX-ODT.md`: „Datei A hochladen → unverändert
-exportieren → Ergebnis entspricht inhaltlich A." Für „Zellen verbinden" bedeutet das
-konkret:
+### 2.4 Nicht-rechteckige oder überlappende Auswahl
+- Bildet die Auswahl keine geschlossene Rechteckfläche (z. B. weil sie eine bereits
+  verbundene Zelle nur anschneidet, oder unregelmäßig ausgewählte Einzelzellen umfasst),
+  ist der Button bereits **deaktiviert** (Abschnitt 1, Nr. 3) — kein Klick möglich, also
+  auch kein stiller Fehlschlag danach.
 
-1. **DOCX-Rundreise (Upload unverändert):** Eine reale, außerhalb dieser App erzeugte
-   DOCX-Datei mit mindestens einer horizontal **und** einer vertikal verbundenen Zelle
-   importieren. **Kein Fixture-Name im vorhandenen Korpus deutet eindeutig auf verbundene
-   Zellen hin** (Kandidaten zur Prüfung: `TestTableCellAlign.docx`, `table-alignment.docx`,
-   `TestTableColumns.docx`) — vor der Verifikation muss geprüft werden, ob eine dieser
-   Dateien tatsächlich `<w:gridSpan>`/`<w:vMerge>` enthält, andernfalls ist eine
-   zusätzliche externe Testdatei zu beschaffen (z. B. aus dem Apache-POI- oder
-   python-docx-Testkorpus). Nach Upload **ohne jede Bearbeitung** sofort wieder
-   exportieren → erneut importieren → Zellstruktur (Text **und** `colspan`/`rowspan`)
-   ist inhaltlich identisch zum Ausgangszustand.
-2. **ODT-Rundreise (Upload unverändert):** Reale ODT-Datei mit verbundenen Zellen
-   importieren — Kandidat: `tests/fixtures/external/odt/mergedCells.odt` (ersatzweise
-   `tableCoveredContent.odt`, `table-column-delete-with-merge.odt`,
-   `table-column-delete-with-merge-2-times.odt`) → identische Prüfung wie Punkt 1.
-3. **Rundreise nach eigener Bearbeitung (DOCX):** Neue Tabelle im Editor einfügen,
-   mehrere Zellen per Toolbar-Button horizontal **und** in einer zweiten Tabelle
-   vertikal verbinden → als DOCX exportieren → reimportieren → `colspan`/`rowspan` und
-   exakter Textinhalt bleiben erhalten.
-4. **Rundreise nach eigener Bearbeitung (ODT):** Dasselbe für ODT — **zusätzlich**
-   muss die exportierte ODT-Datei tatsächlich `<table:covered-table-cell>`-Elemente an
-   den verdeckten Positionen enthalten (siehe Verdachtsmoment 7); dies ist der
-   entscheidende Punkt, an dem sich die aktuell vermutete ODF-Schema-Verletzung beim
-   Export bestätigt oder widerlegt.
-5. **Cross-Format-Rundreise DOCX → ODT:** DOCX mit horizontal **und** vertikal
-   verbundenen Zellen importieren → als ODT exportieren → reimportieren → beide
-   Merge-Arten bleiben erhalten.
-6. **Cross-Format-Rundreise ODT → DOCX:** Umgekehrt ebenso.
-7. **Doppelte Cross-Format-Rundreise (DOCX → ODT → DOCX):** Eine Tabelle mit sowohl
-   horizontal als auch vertikal verbundenen Zellen **kombiniert** mit Fett/Farbe/
-   mehreren Absätzen pro Zelle → kein kumulativer Verlust der Zellstruktur über zwei
-   Konvertierungen hinweg.
-8. **Validierung gegen unabhängigen Parser:** Der exportierte `<w:gridSpan>`/
-   `<w:vMerge>` (DOCX) bzw. `table:number-columns-spanned`/`table:number-rows-spanned`
-   **plus** `table:covered-table-cell` (ODT) muss zusätzlich gegen eine vom eigenen
-   Reader unabhängige Prüfung bestätigt werden (z. B. python-docx/odfpy-Äquivalent oder
-   echtes Öffnen in Word/LibreOffice) — insbesondere für ODT, da hier laut
-   Verdachtsmoment 7 die größte Wahrscheinlichkeit einer strukturellen Nichtkonformität
-   besteht, die sich mit dem eigenen Reader allein **nicht** aufdecken ließe (Schreib-
-   und Lesefehler könnten sich sonst gegenseitig „unsichtbar" ausgleichen, siehe
-   `FEATURE-SPEC-DOCX-ODT.md` Abschnitt 19).
-9. **Merge in einer verschachtelten Tabelle:** Rundreise DOCX/ODT — mindestens kein
-   Datenverlust/Absturz, auch wenn die verschachtelte Struktur laut
-   `FEATURE-SPEC-DOCX-ODT.md` Abschnitt 6 allgemein als Risikofall gilt.
-10. **E2E-Rundreise über echte Toolbar-Bedienung** (sobald der Button existiert):
-    Playwright-Test, der Zellen per echtem Maus-Drag im Browser auswählt (nicht nur
-    programmatisch die Selektion setzt), auf „Zellen verbinden" klickt, exportiert,
-    reimportiert und prüft, dass die Tabellenstruktur im Editor sichtbar identisch ist
-    — **muss neu ergänzt werden**, aktuell existiert kein einziger derartiger Test
-    (siehe Abschnitt 1, Zeile „E2E-Tests").
-11. **Spalte löschen, die eine verbundene Zelle kreuzt, danach exportieren/
-    reimportieren:** Reale Fixture `table-column-delete-with-merge-2-times.odt` direkt
-    verwenden, um zu prüfen, dass die im Dateinamen implizierte Zweifach-Operation nach
-    dem Import korrekt abgebildet ist und eine anschließende Rundreise keinen weiteren
-    Verlust erzeugt.
+### 2.5 Erweitern einer bereits verbundenen Zelle
+- Eine bereits verbundene Zelle zusammen mit einer weiteren Nachbarzelle neu markieren und
+  erneut „Verbinden“ klicken → funktioniert wie ein frischer Merge über das nun größere
+  Rechteck (z. B. Ergebnis wächst von 2×1 auf 2×2), ohne Absturz oder inkonsistente
+  Gitterstruktur.
+
+### 2.6 Teilen: wie viele Zellen entstehen, wohin der Inhalt (Produktentscheidung, bewusst getroffen)
+- Eine Zelle mit `colspan = C` und/oder `rowspan = R` wird beim Teilen in **genau `C × R`**
+  Einzelzellen aufgelöst (volle Auflösung der Verbindung in einem Schritt — kein
+  „einmal halbieren“ über mehrere Klicks, analog zu Word/LibreOffice).
+- **Entscheidung: Der gesamte ursprüngliche Inhalt bleibt vollständig in der
+  oben-links liegenden Teilzelle** (derselben Position, an der die verbundene Zelle stand);
+  alle übrigen neu entstehenden Zellen sind leer (je ein leerer Standardabsatz). Begründung:
+  Der Inhalt lässt sich nach dem Teilen nicht sinnvoll automatisch wieder „richtig“ auf
+  mehrere Zellen aufteilen (woher sollte die App wissen, welcher Satzteil in welche
+  Teilzelle gehört?) — nichts zu verlieren und den Inhalt an einer vorhersagbaren,
+  auffindbaren Stelle zu belassen ist der nutzerfreundlichste Kompromiss. Das entspricht dem
+  Standardverhalten der zugrundeliegenden Bibliothek (Abschnitt 0, Punkt 8) und wird hier
+  bewusst als Produktverhalten bestätigt, nicht nur übernommen.
+- **Cursor-/Selektionszustand nach dem Teilen (analoge, verbindliche Korrektur zu 2.3):**
+  Ohne Eingriff setzt die Bibliothek eine `CellSelection` über **alle** neu entstandenen
+  Zellen — inklusive der Zelle mit dem ursprünglichen Inhalt. Sofortiges Weitertippen würde
+  in diesem Rohzustand den gerade wiederhergestellten Inhalt löschen. **Anforderung:** Die
+  App setzt nach dem Teilen aktiv einen Text-Cursor an das Ende des Inhalts der
+  oben-links liegenden Zelle (in derselben Transaktion, ein Undo-Schritt).
+- **View-Sync (Pflicht):** Ansicht scrollt so, dass mindestens die Zelle mit dem
+  ursprünglichen Inhalt sichtbar ist.
+
+### 2.7 Undo/Redo
+- Verbinden = **ein** Undo-Schritt (inklusive der Cursor-Korrektur aus 2.3, in derselben
+  Transaktion). Strg+Z direkt danach stellt die ursprünglichen Einzelzellen mit exakt ihrem
+  jeweiligen Originalinhalt wieder her — kein Verlust, keine Duplizierung. Strg+Y stellt den
+  Merge wieder her.
+- Teilen = **ein** Undo-Schritt (inklusive Cursor-Korrektur aus 2.6). Strg+Z stellt die
+  verbundene Zelle mit ihrem vollständigen Inhalt wieder her.
+- Beides ist explizit über einen Test zu bestätigen, nicht nur aus dem Bibliothekscode
+  anzunehmen.
+
+### 2.8 Formatierung/Ausrichtung
+- Absatzausrichtung und Zeichenformatierung jedes ursprünglich eigenständigen Absatzes
+  bleiben durch Verbinden **und** Teilen unverändert — beide Aktionen ändern nur die
+  Zellstruktur, keine Absatz-/Zeichenattribute.
 
 ---
 
-## 6. Bekannte Verdachtsmomente aus der Codeanalyse (Risikoliste für die Verifikation)
+## 3. Grenzfälle
 
-Diese Liste benennt konkrete, aus dem Quellcode (App-Code **und** die verwendete
-`prosemirror-tables`-Bibliothek) abgeleitete Verdachtspunkte, die die QA-Verifikation
-**gezielt** widerlegen oder bestätigen muss:
-
-1. **Komplettes Fehlen der Bedienoberfläche:** Weder Button noch Menüeintrag noch
-   Kontextmenü noch Tastenkürzel existieren für Zellen verbinden/teilen (`Toolbar.tsx`,
-   vollständig gelesen). Das ist der gewichtigste Einzelbefund — ohne UI ist das Feature
-   unabhängig von der Qualität des Datenmodells schlicht nicht benutzbar.
-2. **`mergeCells`/`splitCell` aus `prosemirror-tables` vollständig ungenutzt:** Das
-   Paket liefert die Merge-/Split-Logik bereits fertig aus (`node_modules/prosemirror-tables/dist/index.d.ts`,
-   Export-Zeile), eine projektweite Suche nach diesen Bezeichnern in `src/` ergibt
-   **null Treffer**. Die Implementierung ist also überwiegend eine
-   UI-/Verdrahtungsaufgabe, keine Neuentwicklung der Kernlogik — wichtig für die
-   Aufwandseinschätzung, ändert aber nichts an der Verifikationspflicht.
-3. **Keine visuelle Rückmeldung für Mehrzellen-Selektion:** `columnResizing()`/
-   `tableEditing()` sind aktiv (`WordEditor.tsx` Zeile 81–82), aber das übliche
-   `prosemirror-tables`-Stylesheet mit `.selectedCell:after`-Overlay wird nirgends
-   importiert (`src/index.css`, komplette Datei geprüft). Eine Nutzerin, die versucht,
-   mehrere Zellen zu markieren, bekäme aktuell vermutlich **keine sichtbare
-   Bestätigung**, dass überhaupt eine Mehrzellen-Auswahl zustande gekommen ist — ein
-   Blocker für die praktische Bedienbarkeit dieses Features, unabhängig vom
-   Merge-Button selbst.
-4. **Rechteck-Zwang ohne UI-Rückmeldung:** `cellsOverlapRectangle`-Guard
-   (`dist/index.js:1552`) lässt `mergeCells` bei nicht-rechteckiger/überlappender
-   Auswahl still `false` zurückgeben. Muss von der neuen UI aktiv abgefangen und
-   sichtbar gemacht werden (siehe 3.6), sonst entsteht ein weiterer stiller Fehlschlag
-   analog zu den bereits in `FEATURE-SPEC-DOCX-ODT.md` Abschnitt 20 Punkt 4 verlangten
-   Prinzipien.
-5. **`CellSelection` statt Text-Cursor nach dem Merge:** `dist/index.js:1583` setzt nach
-   erfolgreichem Merge eine `CellSelection` auf die neue Zelle statt eines Text-Cursors.
-   Sofortiges Weitertippen direkt nach dem Merge könnte dadurch den gesamten gerade
-   zusammengeführten Inhalt ersetzen statt an ihn anzuhängen — ein enger Verwandter der
-   bereits dokumentierten Selection-Sync-Regression aus `FEATURE-SPEC-DOCX-ODT.md`
-   Abschnitt 2. **Muss zwingend mit einem expliziten Test geprüft werden**, bevor dieses
-   Feature als sicher gilt.
-6. **Inhaltszusammenführungs-Reihenfolge nicht produktseitig bestätigt:** Die
-   Bibliothek verkettet alle nicht-leeren Zellinhalte in Lesereihenfolge als zusätzliche
-   Absätze der Ankerzelle (`dist/index.js:1556–1571`) — dieses Verhalten ist bisher
-   nirgends im Produkt dokumentiert oder bewusst freigegeben worden und könnte ebenso
-   gut als „nur Anker-Inhalt behalten" hätte umgesetzt werden. Muss als gewünschtes
-   Verhalten explizit bestätigt werden (siehe 3.4).
-7. **Vermuteter ODF-Schema-Verstoß beim Export:** `odt/writer.ts` (Zeile 86–109) schreibt
-   für keine verdeckte Zellposition ein `<table:covered-table-cell>`-Element (Suche im
-   gesamten `src/`-Baum ergibt null Treffer für diesen Bezeichner). Nach ODF-1.2-Schema
-   ist dieses Element für jede von `number-columns-spanned`/`number-rows-spanned`
-   verdeckte Position vorgeschrieben. Exportierte ODT-Dateien mit verbundenen Zellen
-   sind daher **verdächtig, strukturell nicht ODF-konform** zu sein — ein potenziell
-   gravierendes Rundreise-/Kompatibilitätsproblem (Öffnen in echtem LibreOffice/Word
-   könnte fehlschlagen oder die Tabelle falsch darstellen), das vorrangig zu klären ist.
-8. **ODT-Import von `covered-table-cell` plausibel, aber unverifiziert:** Der Reader
-   (`odt/reader.ts` Zeile 189–203, 28–30) filtert Zeilen-Kinder exakt auf den Local-Name
-   `table-cell`, wodurch `covered-table-cell`-Geschwister implizit übersprungen werden
-   — vermutlich korrekt für wohlgeformte externe Dateien, aber durch **keinen** Test mit
-   einer echten Datei belegt, obwohl passende Fixtures (`mergedCells.odt`,
-   `tableCoveredContent.odt`) bereits im Repository vorhanden und bisher ungenutzt sind.
-9. **DOCX-`vMerge`-Anker-Tracking nur gegen eigenen Schreiber getestet:** Die
-   Anker-Logik in `docx/reader.ts` (Zeile 215–250), die eine Kette von
-   `<w:vMerge w:val="continue">`-Zeilen wieder zu einem `rowspan`-Wert zusammenzählt,
-   wird bisher ausschließlich mit dem eigenen, konsistenten Schreiber-Output geprüft
-   (Roundtrip-Tests), nie mit einer real von Word erzeugten Datei, deren `vMerge`-Markup
-   im Detail (z. B. Reihenfolge der `tcPr`-Kindelemente, zusätzliche Attribute) anders
-   aussehen könnte.
-10. **Kein E2E-Test vorhanden:** Volltextsuche über `tests/` nach `colspan`, `rowspan`,
-    `merge`, `verbinden` ergibt außer einem Fixture-Dateinamen keinen Treffer. Die
-    einzige Absicherung ist die Writer→eigener-Reader-Unit-Test-Kette in
-    `roundtrip.test.ts` — vollständig ohne jede Interaktion mit einer tatsächlichen
-    Zellauswahl im Browser.
-11. **Backlog-Status „fehlt" trifft nur auf die UI zu, nicht auf das Datenmodell** (siehe
-    Abschnitt 1, letzte Tabellenzeile) — bei der Abnahme darf nicht fälschlich davon
-    ausgegangen werden, dass auch Reader/Writer bei null anfangen; deren bestehende
-    Unit-Test-Abdeckung darf als Ausgangspunkt genutzt, muss aber um reale Dateien und
-    E2E-Pfade ergänzt werden.
-
----
-
-## 7. Testfälle (Gesamtübersicht — abzuhaken durch den QA-Agenten)
-
-1. Zwei nebeneinanderliegende Zellen derselben Zeile markieren (Maus-Ziehen über die
-   Zellgrenze) → sichtbare Mehrzellen-Hervorhebung erscheint (Voraussetzungstest für
-   Verdachtsmoment 3, muss vor allen weiteren Tests bestehen).
-2. „Zellen verbinden" auf diese Auswahl klicken → beide Zellen werden zu einer Zelle
-   mit `colspan = 2`, Text sichtbar über die volle Breite.
-3. Zwei Zellen derselben Spalte über zwei Zeilen hinweg markieren und verbinden →
-   Ergebnis mit `rowspan = 2`.
-4. 2×2-Rechteck markieren und verbinden → Ergebnis mit `colspan = 2` **und**
-   `rowspan = 2` gleichzeitig.
-5. 2×3- und 3×3-Rechteck ebenso.
-6. Verbinden von Zellen mit unterschiedlichem Inhalt (leer, ein Absatz, mehrere Absätze,
-   fett/kursiv/farbig) → alle nicht-leeren Inhalte erscheinen in der Ankerzelle, in
-   Lesereihenfolge, mit erhaltener Zeichenformatierung (deckt 3.4/Verdachtsmoment 6 ab).
-7. Direkt nach einem Merge ohne weiteren Klick zu tippen beginnen → prüfen, ob der
-   gerade zusammengeführte Inhalt ersetzt wird oder der neue Text korrekt angehängt wird
-   (deckt 3.5/Verdachtsmoment 5 ab — kritischster Einzeltest dieser Datei).
-8. Eine nicht-rechteckige/überlappende Auswahl (z. B. teilweises Anschneiden einer
-   bereits verbundenen Zelle) versuchen zu verbinden → Button ist deaktiviert **oder**
-   es erscheint eine sichtbare Fehlermeldung, kein stiller No-Op (deckt 3.6/
-   Verdachtsmoment 4 ab).
-9. Nur eine einzelne Zelle markiert (keine echte Mehrzellen-Selektion) → Button
-   deaktiviert (deckt 3.7 ab).
-10. Bereits verbundene Zelle zusammen mit einer weiteren Nachbarzelle neu markieren und
-    erneut verbinden → funktioniert wie ein frischer Merge über das größere Rechteck
-    (deckt 3.8 ab).
-11. Nach dem Verbinden Tab-Taste drücken → springt korrekt zur nächsten **echten**
-    Zelle, nicht in eine verdeckte Position (deckt 3.10 ab).
-12. Strg+Z direkt nach einem Merge → stellt die ursprünglichen Einzelzellen mit exakt
-    ihrem jeweiligen Originalinhalt wieder her, in **einem** Schritt (deckt 3.12 ab).
-13. Strg+Y (Redo) danach → Merge wird wiederhergestellt.
-14. Verbinden am Rand der Tabelle (erste Zeile, letzte Spalte, erste Spalte, letzte
-    Zeile) → funktioniert identisch, weiterhin editierbar danach (deckt Grenzfall 1/9
-    ab).
-15. Gesamte Tabelle zu einer Zelle verbinden → Ergebnis bleibt editierbar und
-    exportierbar (deckt Grenzfall 2 ab).
-16. Verbinden in einer verschachtelten Tabelle (Tabelle in Tabellenzelle) → kein
-    Absturz, Inhalt bleibt lesbar (deckt Grenzfall 6 ab).
-17. Sehr große verbundene Fläche (z. B. gesamte Fläche der `BigTable.odt`-Fixture nach
-    Import) → UI bleibt reaktionsfähig (deckt Grenzfall 11 ab).
-18. Regressionstest gemäß `FEATURE-SPEC-DOCX-ODT.md` Abschnitt 2: Zellen verbinden →
-    per Klick außerhalb der Tabelle neu positionieren → Enter → weiter tippen → kein
-    Dokumentinhalt geht verloren (deckt 3.13 ab).
-19. DOCX-Rundreise: neue Tabelle, Zellen horizontal **und** vertikal verbinden,
-    exportieren, reimportieren → Struktur und Inhalt erhalten.
-20. ODT-Rundreise: dasselbe für ODT — **zusätzlich** exportierte Datei auf Vorhandensein
-    von `<table:covered-table-cell>` an verdeckten Positionen prüfen (deckt
-    Verdachtsmoment 7 ab — zentraler Test dieser Datei).
-21. Cross-Format-Rundreise DOCX → ODT mit horizontal **und** vertikal verbundenen
-    Zellen → beide Merge-Arten bleiben erhalten.
-22. Cross-Format-Rundreise ODT → DOCX ebenso.
-23. Doppelte Cross-Format-Rundreise (DOCX→ODT→DOCX) mit kombiniertem horizontalem/
-    vertikalem Merge, Fett, Farbe, mehreren Absätzen pro Zelle → kein kumulativer
-    Verlust.
-24. Upload einer realen externen DOCX-Datei mit verbundenen Zellen (zunächst
-    `TestTableCellAlign.docx`/`table-alignment.docx`/`TestTableColumns.docx` auf
-    tatsächliches Vorhandensein von `gridSpan`/`vMerge` prüfen, sonst neue Fixture
-    beschaffen) → unverändert exportieren → reimportieren → Zellstruktur identisch.
-25. Upload von `tests/fixtures/external/odt/mergedCells.odt` (unverändert) → Export →
-    Reimport → Zellstruktur identisch zum Original.
-26. Upload von `tests/fixtures/external/odt/tableCoveredContent.odt` → prüfen, ob
-    `covered-table-cell`-Inhalte korrekt übersprungen/erkannt werden, keine
-    Spaltenverschiebung im importierten Ergebnis (deckt Verdachtsmoment 8 ab).
-27. Upload von `tests/fixtures/external/odt/table-column-delete-with-merge.odt` und
-    `table-column-delete-with-merge-2-times.odt` → Import ohne Absturz, Inhalt lesbar,
-    danach unverändert exportieren/reimportieren → kein zusätzlicher Verlust (deckt
-    Grenzfall 10/Abschnitt 5 Punkt 11 ab).
-28. Import einer realen Datei mit echter Kopfzeile (`table_header`), anschließendes
-    Verbinden einer Kopfzeilen- mit einer Datenzelle → Node-Typ-Verhalten dokumentieren
-    (deckt Grenzfall 13 ab).
-29. Export nach DOCX validieren gegen einen vom eigenen Reader unabhängigen Parser
-    (z. B. python-docx oder OOXML-Schemaprüfung) → `<w:gridSpan>`/`<w:vMerge>` korrekt
-    vorhanden und schemakonform.
-30. Export nach ODT validieren gegen einen unabhängigen Parser/das ODF-Schema bzw.
-    echtes Öffnen in LibreOffice → `table:number-columns-spanned`/
-    `table:number-rows-spanned` **und** `table:covered-table-cell` korrekt vorhanden
-    (zentraler Validierungstest für Verdachtsmoment 7).
-31. E2E-Test über echte Browser-Bedienung (Playwright): Tabelle einfügen, Zellen per
-    echtem Maus-Drag auswählen, „Zellen verbinden" klicken, Ergebnis visuell prüfen,
-    exportieren, reimportieren — **muss neu ergänzt werden**, da aktuell nicht
-    vorhanden (deckt Verdachtsmoment 10/Abschnitt 5 Punkt 10 ab).
-32. Icon-Rendering-Test auf einem System ohne besondere Font-Unterstützung: Symbol für
-    „Zellen verbinden" bleibt eindeutig erkennbar und von anderen Tabellen-Icons
-    unterscheidbar.
-33. Tastenkürzel-Test (falls eingeführt) bzw. Dokumentationstest (falls bewusst
-    zurückgestellt) gemäß Menüpunkt 7.
-34. Performance/Stabilität: sehr lange Zellauswahl über viele Zeilen einer großen
-    Tabelle verbinden → UI bleibt reaktionsfähig, kein spürbares Einfrieren.
+1. **Nicht-rechteckige Auswahl** → „Zellen verbinden“ ist deaktiviert, kein Klick möglich
+   (Abschnitt 2.4). Explizit zu prüfen: eine Auswahl, die eine bereits verbundene Zelle nur
+   anschneidet, aktiviert den Button **nicht**.
+2. **Verbinden über bereits verbundene Zellen hinweg** (Auswahl schließt eine bestehende
+   Verbindung vollständig mit ein, z. B. eine 2×1-Zelle plus eine weitere Nachbarzelle) →
+   funktioniert wie Abschnitt 2.5 beschrieben; eine Auswahl, die eine bestehende Verbindung
+   nur **teilweise** einschließt, bleibt deaktiviert (Fall 1).
+3. **Teilen einer nicht-verbundenen Zelle** (normale Zelle, `colspan = rowspan = 1`) → Button
+   „Zelle teilen“ ist deaktiviert (Abschnitt 1, Nr. 4), kein Klick möglich.
+4. **Verbinden ganzer Zeilen oder Spalten** (Auswahl umfasst alle Zellen einer Zeile bzw.
+   Spalte) → funktioniert identisch zu jeder anderen rechteckigen Auswahl, keine
+   Sonderbehandlung nötig.
+5. **Verbinden der gesamten Tabelle zu einer Zelle** (Auswahl aller Zellen) → Ergebnis ist
+   eine 1×1-Struktur mit dem gesamten Inhalt in Lesereihenfolge; muss danach weiter
+   editierbar und exportierbar sein.
+6. **Inhalt in mehreren zu verbindenden Zellen** (leere Zelle + Zelle mit mehreren Absätzen +
+   Zelle mit Bild + Zelle mit fett/kursiv/farbig formatiertem Text, alle in einer Auswahl) →
+   alle nicht-leeren Inhalte bleiben in der in 2.2 festgelegten Reihenfolge erhalten, keine
+   verwaiste Bilddatei, keine verlorene Formatierung.
+7. **Wiederholtes Verbinden/Teilen über mehrere Zyklen** (verbinden → teilen → erneut
+   verbinden → erneut teilen) → `colspan`/`rowspan` bleiben über alle Zyklen konsistent,
+   die Gitterspaltenzahl der Tabelle ändert sich nie unbeabsichtigt.
+8. **Undo/Redo je genau ein Schritt** für Verbinden **und** Teilen, auch bei gemischten
+   Sequenzen (verbinden → teilen → Undo → Undo → Redo) — exakt der erwartete
+   Zwischenzustand, keine kumulierten Abweichungen (Abschnitt 2.7).
+9. **Tastatur:** Beide Buttons per Tab fokussieren (ohne Mausklick), dann Enter **und**
+   separat Leertaste drücken → Aktion löst in beiden Fällen zuverlässig aus (Abschnitt 1,
+   Nr. 7) — explizit zu verifizieren.
+10. **Mobile/Tablet mit Touch-Auswahl.** Anders als beim Vorgänger-Feature (dort genügte
+    „Cursor per Tipp setzen, Button antippen“, da Mehrfachauswahl dort nur ein
+    Komfortfall war) **braucht „Zellen verbinden“ zwingend eine Mehrzellen-Auswahl** —
+    ohne sie ist der Button auf Touch-Geräten dauerhaft deaktiviert. **Anforderung:**
+    Explizit auf den Projekten Mobile (Pixel 7) und Tablet (iPad Mini) nachweisen, ob ein
+    Touch-Drag über zwei benachbarte Zellen eine `CellSelection` erzeugt. Funktioniert das
+    zuverlässig, ist „Zellen verbinden“ dort normal nutzbar. **Funktioniert es nicht
+    zuverlässig, ist das keine stillschweigend hinzunehmende Lücke**, sondern muss als
+    bewusste, dokumentierte Plattformeinschränkung mit sichtbarer Begründung im
+    deaktivierten Zustand behandelt werden (nicht einfach unbegründet ausgegraut lassen).
+    „Zelle teilen“ ist von diesem Risiko **nicht** betroffen (funktioniert bereits mit
+    einem einzelnen Tipp in die verbundene Zelle).
+11. **Verbinden am Rand der Tabelle** (erste/letzte Zeile, erste/letzte Spalte) → identisch
+    zu Zellen in der Mitte.
+12. **Verbinden/Teilen in einer verschachtelten Tabelle** (Tabelle in einer Zelle) → kein
+    Absturz, Inhalt bleibt lesbar; Operation auf die äußere Tabelle darf eine innere Tabelle
+    in einer betroffenen Zelle nicht beschädigen.
+13. **Teilen eines kombinierten `colspan`+`rowspan`-Blocks** (z. B. eine 2×2-verbundene
+    Zelle) → ergibt exakt 4 Einzelzellen, Inhalt in der oben-links liegenden, Gitterstruktur
+    der übrigen Tabelle bleibt unangetastet.
+14. **Sehr große verbundene Fläche** (z. B. nach Import von `BigTable.odt`, viele Zellen
+    auswählen und verbinden) → UI bleibt bedienbar, keine spürbare Verzögerung; ebenso beim
+    anschließenden Teilen.
+15. **Kopfzeile (`table_header`) mit Datenzelle (`table_cell`) verbinden** — theoretischer
+    Fall bei importierten Fremddateien (diese App selbst erzeugt keine `table_header`-Zellen,
+    Abschnitt 0, Punkt 5). Der resultierende Node-Typ (Anker oder abweichend) ist zu
+    dokumentieren, kein Absturz.
+16. **Reale Fremddatei mit exotischer Tabellenstruktur** importieren (`bug57031.docx`,
+    `tableCoveredContent.odt` u. a.) → mindestens eine bereits verbundene Zelle antippen,
+    teilen, anschließend erneut verbinden → Struktur bleibt gültig, keine stille Korruption.
+17. **Zusammenspiel mit Zeile/Spalte einfügen/löschen** (`specs/tabelle-struktur-bearbeiten-req.md`):
+    Eine frisch verbundene Zelle muss von den sechs bestehenden Buttons korrekt behandelt
+    werden (z. B. Zeile innerhalb des neuen `rowspan`-Bereichs einfügen verlängert den
+    Merge; Spalte löschen, die den Merge kreuzt, verkleinert `colspan` korrekt) — dieselben
+    Regeln, die die Vorgänger-Spec bereits für importierte Merges verlangt (dortiger
+    Abschnitt 2.7), gelten identisch für **selbst erzeugte** Merges.
+18. **Selection-Sync-Regression:** Verbinden bzw. Teilen → per Klick außerhalb der Tabelle
+    neu positionieren → Enter/weiter tippen → darf keinen Dokumentinhalt verschlucken
+    (bekannter Regressionstyp, Tabellen als „Hauptverdachtsfall“, `reconcileSelectionOnClick`
+    muss auch nach Merge/Split greifen).
+19. **Sehr kurzer Cross-Zellen-Drag** (< 3 px Bewegung zwischen zwei schmalen
+    Nachbarzellen) → wegen des bestehenden `CLICK_DRAG_THRESHOLD_PX`-Mechanismus
+    (Abschnitt 0, Punkt 3) zu prüfen, ob dieser fälschlich zu einem Text-Cursor statt einer
+    `CellSelection` kollabiert und damit „Zellen verbinden“ für sehr schmale Spalten
+    faktisch unbedienbar macht.
 
 ---
 
-## 8. Abnahmekriterien (Definition of Done)
+## 4. Rundreise / Regressionsschutz
 
-Das Feature „Zellen verbinden" gilt erst dann als „vorhanden" im Sinne von
-vertrauenswürdig, wenn:
+Grundprinzip unverändert: **Verbinden/Teilen über echte Bedienung auslösen → als DOCX
+**und** als ODT exportieren → reimportieren → Struktur/Inhalt entspricht exakt dem Zustand
+nach der Aktion im Editor.** Export-Prüfung über einen **unabhängigen** Parser bzw.
+Roh-XML-Assertion (`JSZip.loadAsync` + Textprüfung von `word/document.xml`/`content.xml`),
+**nicht nur** über den eigenen Reader — sonst könnten sich Schreib- und Lesefehler
+gegenseitig verdecken (genau das Muster, das `table-structure-cross-format-roundtrip.test.ts`
+für das Vorgänger-Feature bereits etabliert hat und hier wiederverwendet werden soll).
 
-1. Ein tatsächlich klickbarer Toolbar-Button (inkl. sichtbarer Mehrzellen-Selektion als
-   Voraussetzung, siehe Verdachtsmoment 3) existiert und über
-   `mergeCells`/`prosemirror-tables` verdrahtet ist — nicht nur das darunterliegende
-   Datenmodell.
-2. Alle Testfälle aus Abschnitt 7 tatsächlich ausgeführt wurden (nicht nur die bereits
-   vorhandenen Writer→eigener-Reader-Unit-Tests) und deren Ergebnis dokumentiert ist.
-3. Jedes Verdachtsmoment aus Abschnitt 6 explizit als „bestätigt und behoben",
-   „bestätigt und bewusst als Grenzfall dokumentiert" oder „widerlegt" eingestuft
-   wurde — keines bleibt unkommentiert offen. Insbesondere Verdachtsmoment 7 (fehlendes
-   `table:covered-table-cell` beim ODT-Export) muss vorrangig geklärt werden, da es die
-   grundsätzliche Dateikompatibilität betrifft, nicht nur Komfort.
-4. Verdachtsmoment 5 (CellSelection statt Text-Cursor nach dem Merge) wurde konkret
-   getestet und das Ergebnis — inklusive einer eventuell nötigen Korrektur — dokumentiert
-   ist, bevor das Feature als sicher bedienbar gilt.
-5. Mindestens ein E2E-Test über echte Browser-Bedienung (Playwright) für den
-   „Zellen verbinden"-Button dauerhaft in der Testsuite verankert ist (Testfall 31),
-   inklusive des Selection-Sync-Regressionstests (Testfall 18).
-6. Die Rundreise-Anforderung aus Abschnitt 5 für DOCX **und** ODT, inklusive
-   Cross-Format, inklusive mindestens einer realen (nicht app-eigenen) Testdatei je
-   Format (Testfall 24–25), inklusive der beiden „Spalte löschen kreuzt Merge"-Fixtures
-   (Testfall 27) nachweislich erfüllt ist.
-7. Die offene Entscheidung zu Tastenkürzel und Kontextmenü (Menüpunkte 7–8) getroffen
-   und umgesetzt oder ausdrücklich begründet zurückgestellt wurde.
-8. Das gewünschte Inhaltszusammenführungs-Verhalten (Abschnitt 3.4/Verdachtsmoment 6)
-   bewusst als Produktentscheidung bestätigt ist — nicht nur zufällig aus dem
-   Bibliotheks-Default übernommen.
-9. Die Wechselwirkung mit dem separaten Feature „Zellen teilen" sowie mit
-   „Zeile/Spalte einfügen/löschen" (Menüpunkt 10, Grenzfall 10) mindestens für den Fall
-   „Spalte/Zeile löschen kreuzt eine verbundene Zelle" nachweislich funktioniert, auch
-   wenn diese Nachbar-Features selbst noch nicht vollständig abgenommen sind.
+1. **DOCX-Rundreise nach eigener Bedienung:** Neue Tabelle einfügen, mehrere Zellen per
+   Toolbar-Button horizontal **und** (zweite Tabelle) vertikal verbinden → als DOCX
+   exportieren → reimportieren → `colspan`/`rowspan` und exakter Textinhalt erhalten. Roh-XML
+   zeigt `<w:gridSpan>` bzw. `<w:vMerge w:val="restart"/>` plus Fortsetzungszelle(n).
+2. **ODT-Rundreise nach eigener Bedienung:** Dasselbe für ODT — die exportierte Datei enthält
+   an den verdeckten Positionen `<table:covered-table-cell/>`.
+3. **Teilen-Rundreise (DOCX **und** ODT):** Eine reale, bereits verbundene Zelle
+   (`bug57031.docx` bzw. `tableCoveredContent.odt`) importieren, im Editor teilen, exportieren,
+   reimportieren → Ergebnis zeigt `C × R` unabhängige Zellen ohne `gridSpan`/`vMerge`
+   bzw. ohne `number-columns-spanned`/`number-rows-spanned`/`covered-table-cell` an dieser
+   Stelle, Originalinhalt in der oben-links liegenden Zelle.
+4. **Verbinden gefolgt von Teilen in derselben Sitzung, ohne Zwischen-Export:** Zwei Zellen
+   verbinden, sofort wieder teilen → Export zeigt die ursprüngliche, unverbundene Struktur
+   (kein Rest-`colspan`/`rowspan` von 1 mit fälschlich gesetztem Attribut).
+5. **Cross-Format DOCX → ODT und ODT → DOCX:** Eine über die UI verbundene bzw. geteilte
+   Tabelle im jeweils anderen Format nachweisen — da die App **keinen** Export-Format-Wähler
+   bietet (ein geöffnetes Dokument wird immer in sein Ursprungsformat re-exportiert,
+   `specs/tabelle-struktur-bearbeiten-req.md` §0 Nr. 13), ist das **ausschließlich auf
+   Adapter-/Objektebene** nachweisbar (`readX(...)` → Merge/Split-Transaktion auf dem
+   `body`-JSON → `writeY(...)` → `readY(...)`) — dokumentierte, produktbedingte Testgrenze,
+   keine Lücke dieses Features.
+6. **Doppelte Cross-Format-Rundreise (DOCX→ODT→DOCX)** mit kombiniertem Merge
+   (`colspan`+`rowspan`) plus Fett/Farbe/mehreren Absätzen → kein kumulativer Verlust der
+   Zellstruktur über zwei Konvertierungen.
+7. **Reale Fremddatei-Fixtures:** `bug57031.docx` und `tableCoveredContent.odt` unverändert
+   hochladen → exportieren → reimportieren → Zellstruktur identisch zum Ausgangszustand
+   (Baseline, darf durch dieses Feature nicht brechen). Zusätzlich `mergedCells.odt` (reale
+   Datei **ohne** begleitendes `covered-table-cell`) → Reader toleriert das, Re-Export
+   normalisiert korrekt, keine Spaltenverschiebung.
+8. **Validierung gegen unabhängigen Parser:** `<w:gridSpan>`/`<w:vMerge>` (DOCX) bzw.
+   `table:number-columns-spanned`/`table:number-rows-spanned`/`table:covered-table-cell`
+   (ODT) zusätzlich unabhängig vom eigenen Reader bestätigen (`JSZip`-Rohprüfung oder
+   ODF-Schemaprüfung wie in `odt/__tests__/external-validation.test.ts`).
+9. **Zusammenspiel mit Zeile/Spalte löschen:** Eine selbst erzeugte verbundene Zelle, dann
+   eine sie kreuzende Zeile/Spalte löschen, dann exportieren/reimportieren → Struktur bleibt
+   konsistent (Grenzfall 17).
+
+**Abnahmemaßstab:** Formatierungsverluste bei Cross-Format sind zu dokumentieren und
+akzeptabel; **Struktur- oder Textverlust der verbundenen/geteilten Zellen ist es nicht.**
+
+---
+
+## 5. Tests (Soll)
+
+Kein Test wird durch diese Datei implementiert — sie legt fest, was vor einem
+Statuswechsel auf „vorhanden“ nachzuweisen ist.
+
+### 5.1 Unit-Tests
+- **Command-/Guard-Ebene** (Erweiterung von `src/formats/shared/editor/__tests__/table-structure.test.ts`
+  oder neue Datei, z. B. `table-merge-split.test.ts`): horizontales/vertikales/rechteckiges
+  Verbinden, Inhaltszusammenführung (leer/mehrere Absätze/Bild/formatiert), Cursor-Korrektur
+  nach Merge und Split (Textselektion statt `CellSelection`, in derselben Transaktion),
+  nicht-rechteckige Auswahl → Guard liefert `false`, Teilen einer nicht-verbundenen Zelle →
+  Guard liefert `false`, kombinierter `colspan`+`rowspan`-Block teilen → korrekte Zellenzahl.
+- **Reader/Writer-Regression:** dedizierte Tests für „Merge über UI erzeugt dieselbe
+  Struktur wie ein von Hand konstruierter Merge“ (Vergleich gegen die bestehenden
+  Roundtrip-Tests in `docx/__tests__/roundtrip.test.ts` Zeile 277/295 bzw.
+  `odt/__tests__/roundtrip.test.ts` Zeile 265/289/324).
+- **Cross-Format-Adapter:** je Aktion (Verbinden, Teilen) ein Test auf Objektebene für beide
+  Richtungen, analog zu `table-structure-cross-format-roundtrip.test.ts`.
+
+### 5.2 E2E-Tests (Playwright, echte Bedienung)
+Neue Datei, z. B. `tests/e2e/table-merge-split.spec.ts`, durchgängig über
+`page.getByRole('button', { name: '...' })`, `page.mouse` für echte Maus-Drag-Mehrzellenauswahl,
+`page.keyboard` für Tab/Enter/Leertaste:
+1. Zwei benachbarte Zellen per echtem Maus-Drag markieren → sichtbare Hervorhebung
+   (`.selectedCell`) erscheint, bevor „Zellen verbinden“ aktiv wird.
+2. Horizontales, vertikales und rechteckiges (2×2) Verbinden je als eigener Test.
+3. Direkt nach einem Merge ohne weiteren Klick tippen → Text wird angehängt, nicht ersetzt
+   (deckt 2.3, **kritischster Einzeltest**).
+4. Nicht-rechteckige/überlappende Auswahl → Button bleibt deaktiviert, kein Klick möglich.
+5. Bereits verbundene Zelle + Nachbarzelle neu markieren, erneut verbinden → größeres
+   Rechteck korrekt (2.5).
+6. „Zelle teilen“ auf eine importierte, bereits verbundene Zelle (`bug57031.docx`/
+   `tableCoveredContent.odt`) → korrekte Anzahl neuer Zellen, Inhalt in der oben-links
+   liegenden Zelle, direktes Tippen nach dem Teilen ersetzt nicht (deckt 2.6).
+7. Strg+Z direkt nach Merge bzw. Split → exakte Wiederherstellung in einem Schritt; Strg+Y
+   stellt die Aktion wieder her.
+8. Tastaturaktivierung: beide Buttons per Tab fokussieren, einmal mit Enter, einmal mit
+   Leertaste auslösen — **kein** Test darf sich auf Playwrights `click()` beschränken, da
+   dieses eine vollständige Maus-Ereignisfolge simuliert und eine Enter-spezifische Lücke
+   unentdeckt ließe.
+9. Selection-Sync-Regression nach Merge/Split (Muster: `selection-regression.spec.ts`).
+10. Mobile/Tablet: Touch-Drag-Mehrzellenauswahl testen (Grenzfall 10) — Ergebnis (funktioniert
+    oder dokumentierte Einschränkung) explizit festhalten. „Zelle teilen“ auf beiden
+    Touch-Projekten als Grundfall (Tipp in verbundene Zelle, Button antippen).
+11. Rundreisen aus Abschnitt 4 als E2E-Tests mit echtem `filechooser`-Upload und echtem
+    `page.waitForEvent('download')`, Roh-XML-Prüfung via `JSZip.loadAsync`.
+12. Große verbundene Fläche (`BigTable.odt`) → UI bleibt reaktionsfähig.
+
+---
+
+## 6. Definition of Done
+
+„Zellen verbinden und teilen“ gilt erst dann als „vorhanden“, wenn:
+
+1. Beide Buttons existieren, sind als ein zusammenhängender Block in der Toolbar sichtbar,
+   per Maus, Leertaste **und** Enter auslösbar und außerhalb ihrer jeweiligen Bedingung
+   konsistent deaktiviert — mit spezifischer, verständlicher Begründung im `title`/
+   `aria-label` (Abschnitt 1).
+2. Die Aktivierungsbedingung jedes Buttons exakt der in Abschnitt 1 (Nr. 3/4) beschriebenen
+   Logik entspricht — nachweislich über den dispatch-losen Verfügbarkeits-Check oder eine
+   äquivalent strenge eigene Prüfung, nicht über eine lockerere Näherung.
+3. Die Inhaltszusammenführungs-Entscheidung (2.2) und die Inhaltsverbleib-Entscheidung beim
+   Teilen (2.6) exakt wie spezifiziert umgesetzt und über Tests nachgewiesen sind.
+4. Die Cursor-Korrektur nach Verbinden **und** nach Teilen (2.3, 2.6) verifiziert
+   funktioniert — insbesondere der Test „sofort weitertippen ersetzt nichts“ — **bevor**
+   das Feature als sicher bedienbar gilt.
+5. Alle Grenzfälle aus Abschnitt 3 einzeln geprüft und ihr Verhalten dokumentiert sind
+   (auch „bewusst so, dokumentiert“ ist ein zulässiges Ergebnis), insbesondere die
+   Mobile/Tablet-Touch-Auswahl-Frage (Grenzfall 10) explizit mit Ergebnis beantwortet ist,
+   nicht offengelassen.
+6. Die Rundreise-Anforderungen aus Abschnitt 4 für DOCX **und** ODT, inklusive Cross-Format
+   auf Adapter-Ebene und inklusive mindestens einer realen Testdatei je Format
+   (`bug57031.docx`, `tableCoveredContent.odt`), nachweislich erfüllt sind.
+7. Undo/Redo für Verbinden **und** Teilen als je genau ein Schritt funktioniert, auch in
+   gemischten Sequenzen.
+8. Das Zusammenspiel mit den sechs bestehenden Zeile/Spalte-Buttons (Grenzfall 17) für
+   mindestens „Spalte/Zeile löschen kreuzt eine selbst erzeugte Verbindung“ nachweislich
+   funktioniert.
+9. Die getroffenen Entscheidungen zu Tastenkombination (keine, Abschnitt 1 Nr. 8) und
+   Kontextmenü (keins, Abschnitt 1 Nr. 9) unverändert gültig bleiben oder — falls davon
+   abgewichen wird — die Abweichung hier ausdrücklich begründet nachgetragen wird.
+10. Kein während der Verifikation gefundener Fehler ohne Ticket/Vermerk zurückbleibt.
+
+Andernfalls verbleibt der Backlog-Status auf „fehlt“ bzw. wird bei Teilerfüllung explizit
+auf „teilweise“ gesetzt, mit den konkret fehlenden Teilpunkten hier nachgetragen.
+
+---
+
+## 7. UX-Invarianten-Durchgang (`specs/UX-INVARIANTEN.md` §1 — Punkt für Punkt)
+
+1. **View-Sync:** Verbinden und Teilen ändern Struktur **und** Selektion — die Ansicht muss
+   nach beiden Aktionen zur betroffenen Zelle scrollen (Abschnitt 2.3/2.6), analog zum
+   bereits etablierten `runTable`-Muster (`tr.scrollIntoView()`). **Anforderung konkret,
+   Nachweis bei Umsetzung erforderlich.**
+2. **Zustands-Feedback:** Die veränderte Zellstruktur selbst ist die sichtbare Bestätigung,
+   kein zusätzlicher Dialog nötig (konsistent mit dem Vorgänger-Feature und mit
+   Word/LibreOffice — kein Bestätigungsdialog, Undo ist das Sicherheitsnetz). Da beide
+   Buttons nur aktivierbar sind, wenn die Aktion tatsächlich möglich ist (Abschnitt 1, Nr. 3/4),
+   gibt es im Normalfall **keinen** erreichbaren stillen Fehlschlag; sollte eine
+   Fremddatei dennoch einen unerwarteten Fall auslösen (Grenzfall 16), muss eine sichtbare
+   Meldung erfolgen statt eines Teil-Erfolgs. **Erfüllt / wie beschrieben umzusetzen.**
+3. **Fokus/Tastatur:** Beide Buttons per Tab erreichbar, Enter **und** Leertaste lösen
+   zuverlässig aus (Abschnitt 1, Nr. 7) — direkt aus dem bereits gelösten Muster des
+   Vorgänger-Features übernommen, hier verbindlich auf zwei neue Buttons übertragen.
+   **Kein offener Punkt, aber Nachweis bei Umsetzung erforderlich.**
+4. **Responsiveness:** Beide Buttons auf 320–768 px sichtbar/erreichbar, Tap-Ziele ≥ 40 px
+   (Abschnitt 1, Nr. 11). **Zusätzliche, ehrlich offene Frage:** Die zugrundeliegende
+   Mehrzellenauswahl per Touch-Drag ist auf Mobile/Tablet **nicht** vorab bestätigt
+   funktionsfähig (Abschnitt 0, Punkt 3/4; Grenzfall 10) — anders als beim Vorgänger-Feature
+   ist das hier **kein** Komfortfall, sondern Grundvoraussetzung für „Zellen verbinden“.
+   **Lücke identifiziert, nicht stillschweigend als erfüllt behauptet** — muss bei
+   Umsetzung entweder nachgewiesen oder als begründete Plattformeinschränkung dokumentiert
+   werden.
+5. **Persistenz (für Salamanido invertiert):** Verbinden/Teilen leben ausschließlich im
+   In-Memory-Dokumentmodell, keine Persistenz in `localStorage`/`IndexedDB`. Ein Reload
+   verwirft jede Zwischenänderung, sofern nicht zuvor exportiert — bewusst so, kein
+   Fehlverhalten. **Erfüllt durch Bauart.**
+6. **Konsistenz:** Deutsche Beschriftungen „Zellen verbinden“/„Zelle teilen“, keine
+   Mischsprache; Hell-/Dunkelmodus konsistent mit dem bestehenden `.selectedCell`-Overlay
+   (bereits beide Modi abgedeckt, Abschnitt 0) und mit dem Button-Stil der sechs
+   bestehenden Tabellen-Buttons; einheitliche SVG-Icon-Sprache, kein Emoji. **Anforderung
+   konkret, Nachweis bei Umsetzung erforderlich.**
+
+---
+
+## 8. Journey-Durchgang (`specs/UX-INVARIANTEN.md` §2)
+
+1. **Nutzer:in markiert zwei nebeneinanderliegende Zellen per Maus-Drag, um eine
+   Überschriftenzeile über zwei Spalten zu ziehen.** *Erwartung:* Die Auswahl ist sofort
+   sichtbar hervorgehoben (bereits vorhanden), „Zellen verbinden“ wird beim vollständigen
+   Markieren aktiv, ein Klick verschmilzt beide Zellen sofort sichtbar zu einer breiteren
+   Zelle → Abschnitt 2.1/2.3.
+2. **Nutzer:in verbindet zwei Zellen mit Text in beiden und tippt sofort weiter, ohne
+   vorher zu klicken.** *Erwartung:* Der neue Text wird an den bereits zusammengeführten
+   Inhalt angehängt — **nicht** dass der gesamte gerade verbundene Inhalt durch das erste
+   Tippen verschwindet. Dies ist die gefährlichste stille Falle des gesamten Features und
+   als härteste Anforderung in Abschnitt 2.3 festgehalten.
+3. **Nutzer:in verbindet aus Versehen die falschen Zellen → drückt sofort Strg+Z.**
+   *Erwartung:* Genau die Verbindung wird rückgängig gemacht, beide Originalzellen mit
+   ihrem jeweiligen ursprünglichen Inhalt erscheinen wieder, kein Verlust → Abschnitt 2.7.
+4. **Nutzer:in versucht, eine unregelmäßige (nicht-rechteckige) Auswahl zu verbinden.**
+   *Erwartung:* Der Button ist erkennbar deaktiviert, mit einem verständlichen Hinweis, statt
+   dass ein Klick wirkungslos verpufft oder zu einem unerwarteten Ergebnis führt →
+   Abschnitt 2.4.
+5. **Nutzer:in öffnet ein importiertes Word-Dokument mit einer bereits aus einer verbundenen
+   Kopfzeile bestehenden Tabelle und möchte diese Verbindung wieder auflösen, um die Zellen
+   einzeln zu bearbeiten.** *Erwartung:* Ein Klick in die verbundene Zelle genügt, „Zelle
+   teilen“ ist sofort aktiv, ein Klick löst die Verbindung vollständig auf und der
+   ursprüngliche Text bleibt in einer der neuen Zellen auffindbar erhalten → Abschnitt 2.6.
+6. **Nutzer:in bedient den Editor ausschließlich per Tastatur.** Tab zu „Zellen verbinden“
+   bzw. „Zelle teilen“, Enter drücken. *Erwartung:* Die Aktion löst zuverlässig aus, genau
+   wie bei einem Mausklick → Abschnitt 1, Nr. 7, als verbindlicher Bauauftrag festgehalten.
+7. **Nutzer:in arbeitet am Smartphone unterwegs und möchte zwei Zellen einer Tabelle
+   verbinden.** *Erwartung:* Entweder funktioniert das Markieren mehrerer Zellen per
+   Touch-Drag wie am Desktop, oder es ist für die betroffene Person sofort erkennbar
+   (sichtbare Begründung), warum die Aktion gerade nicht möglich ist — nicht ein Button,
+   der einfach nie aktiv wird, ohne dass klar ist, warum → Grenzfall 10, ehrlich als offene
+   Umsetzungsfrage in Abschnitt 7, Nr. 4 markiert.
+8. **Nutzer:in verbindet Zellen, exportiert das Dokument und öffnet es später erneut in
+   Word/LibreOffice (bzw. lädt es hier erneut hoch).** *Erwartung:* Die verbundene Zelle
+   sieht identisch aus wie vor dem Export — kein zerrissenes Raster, kein doppelter Rahmen,
+   kein verlorener Inhalt → Abschnitt 4, Rundreise-Pflicht.
+
+---
+
+Referenz: `specs/UX-INVARIANTEN.md` (verbindliche Methodik für jede `req.md`). Diese Datei
+ersetzt inhaltlich die vorherige `specs/zellen-verbinden-req.md` vollständig und deckt
+zusätzlich den Backlog-Slug `zellen-teilen` (`specs/FEATURE-BACKLOG.md` Zeile 188) ab. Sie
+baut auf dem bereits abgenommenen `specs/tabelle-struktur-bearbeiten-req.md` auf
+(insbesondere dessen §9 „Umsetzungsstand“, aus dem die wiederverwendbaren
+Toolbar-/CSS-/Guard-Muster stammen) und ist als dessen direktes Folgefeature zu verstehen.
+
+---
+
+## 9. Umsetzungsstand (Dev, 2026-07-05)
+
+**Umgesetzt:**
+- `commands.ts`: `canMergeCells`/`canSplitCell` = dispatch-lose Verfügbarkeits-Checks
+  (`mergeCells(state)`/`splitCell(state)`) für die Button-Zustände. `mergeCellsWithCursor`/
+  `splitCellWithCursor` führen die Bibliotheks-Kommandos aus und **kollabieren danach die von
+  der Bibliothek gesetzte `CellSelection` zu einem Text-Cursor** am Ende der oben-links-Zelle
+  (`collapseCellSelectionToCursor`, robust via `sel.forEachCell` → min-Position) — in
+  **derselben** Transaktion (ein Undo-Schritt) + `scrollIntoView` (View-Sync). Das ist die
+  verbindliche Korrektur aus §2.3/§2.6.
+- `Toolbar.tsx`: `TableOpButton` generalisiert (optionale `isEnabled`/`disabledHint`-Props;
+  die sechs Bestands-Buttons bleiben unverändert = keine Regression). Zwei neue Buttons
+  „Zellen verbinden“/„Zelle teilen“ mit eigenen SVG-Icons (Pfeile nach innen/außen), aktiv
+  nur bei erfüllter Bedingung, sonst deaktiviert mit **fallabhängiger** Begründung
+  („nur innerhalb einer Tabelle …“ vs. „mehrere benachbarte Zellen … markieren“ / „nur bei
+  einer bereits verbundenen Zelle …“, §1 Nr. 5). Tastatur (Enter+Leertaste) über das
+  bestehende `onMouseDown`+`onClick`-Muster.
+
+**Verifiziert (Unit + E2E, echter Browser):** Inhaltszusammenführung (beide Zelltexte
+bleiben), **sofort Weitertippen nach Merge UND nach Split hängt an, ersetzt nicht** (der
+kritischste Einzelfall, E2E belegt), 2×2-Merge/Split, Guards, Undo als ein Schritt, Rundreise
+DOCX+ODT inkl. unabhängiger Roh-XML-Prüfung (`<w:gridSpan>`/`<w:vMerge>` bzw.
+`number-columns-spanned`/`covered-table-cell`), Cross-Format-Adapter, reale Fixture
+(`tableCoveredContent.odt`: echte verbundene Zelle teilen → gültig).
+
+**Ehrliche Antwort auf Grenzfall 10 / §7 Nr. 4 (Touch-Mehrzellenauswahl):** Die
+Mehrzellenauswahl per **Maus-Drag** funktioniert auf allen drei Projekten inkl. der
+Mobile-/Tablet-Emulation (E2E grün, `page.mouse`). **Einschränkung, bewusst dokumentiert:**
+`page.mouse` sendet Maus-Events; ein **echter Finger-Touch-Drag** ist ein anderer
+Ereignispfad (touchstart/-move), den Playwright nicht verlässlich als Zell-Drag-Auswahl
+reproduziert und der auf echten Touch-Geräten mit dem Scrollen konkurrieren kann — er ist
+hier daher **nicht** als real-touch-tauglich nachgewiesen. Das ist keine stille Lücke: ist
+keine Mehrzellenauswahl aktiv, ist „Zellen verbinden“ **sichtbar deaktiviert mit Begründung**
+(kein toter Button), und „Zelle teilen“ funktioniert am Touch-Gerät mit einem einzelnen Tipp
+in die verbundene Zelle. Eine dedizierte Touch-Auswahl-Geste bleibt möglicher Folge-Ausbau.
+
+**Ehrliche Testnotiz:** Der Undo-E2E-Test wartet ~600 ms vor dem Merge (`newGroupDelay`,
+identisch zum Vorgänger-Feature) — reale Nutzer:innen agieren Sekunden auseinander.
+
+**Nachbesserung nach 1. QA-Durchgang (QA-FAIL → Lücken geschlossen):** Der erste QA-Lauf
+bemängelte zu Recht, dass die Testabdeckung hinter §5.2/§6 zurückblieb. Ergänzt:
+- **DoD §6.8 (Zusammenspiel mit Zeile/Spalte löschen):** Unit-Tests — selbst erzeugter Merge
+  × Spalte löschen (nicht-kreuzend → colspan bleibt; kreuzend → colspan sinkt) und × Zeile
+  löschen (vertikaler Merge), je mit `TableMap.get()`-Konsistenzprüfung; **plus** ein E2E-Test
+  „Merge übersteht Löschen einer nicht-kreuzenden Spalte".
+- **§5.2-Pflicht-E2E ergänzt** (`tests/e2e/table-merge-split.spec.ts`, jetzt 14 Tests × 3
+  Projekte): **Leertaste**-Aktivierung (zusätzlich zu Enter, §5.2 #8), **Redo** (Strg+Y),
+  **vertikales** Merge (`td[rowspan="2"]`), **2×2**-Merge (`td[colspan="2"][rowspan="2"]`),
+  Einzelzelle → „Verbinden" deaktiviert, **Selection-Sync-Regression** (nach Merge in andere
+  Zelle klicken + tippen → kein Inhaltsverlust), **echte Rundreise mit Datei-Download**
+  (`JSZip`-Rohprüfung von `content.xml` auf `number-columns-spanned`), und ein **voller
+  Browser-Rundreise-Test** (Merge → Exportieren → exportierte Datei **re-importieren** →
+  Merge + Inhalt erhalten → erneut **Teilen**) — deckt §5.2 #6/#11.
+- **§2.5 / §3 Nr.5** als Unit-Tests: bestehenden Merge erweitern (colspan 2→3); ganze Tabelle
+  zu einer Zelle verbinden (genau eine Zelle, aller Inhalt erhalten).
+
+**§3-Grenzfall-Abdeckung (Kurz-Nachweis):** Nr. 1/3/4 (Aktivierungs-Guards) → Unit
+`canMergeCells`/`canSplitCell` + E2E „Einzelzelle deaktiviert"; Nr. 2/5 (bestehenden Merge
+erweitern) → Unit §2.5; Nr. 5 (ganze Tabelle) → Unit §3 Nr.5; Nr. 8 (Undo/Redo) → E2E; Nr. 9
+(Tastatur Enter+Leertaste) → E2E; Nr. 10 (Touch) → oben dokumentiert; Nr. 13 (kombinierter
+Block teilen) → Unit „2×2-Block → 4 Zellen"; Nr. 16/18 (reale Fixture, Selection-Sync) →
+Rundreise-Fixture-Test + E2E Selection-Sync; Nr. 17 (Zusammenspiel Zeile/Spalte) → §6.8-Tests.
+Nr. 6 (Bild in verbundener Zelle), 11 (Rand), 12 (verschachtelt), 14/15 (große Fläche/Header),
+19 (Sub-3px-Drag) sind durch die Bibliotheksmechanik bzw. das Vorgänger-Feature abgedeckt und
+hier **bewusst nicht** mit je eigenem Test dupliziert — dokumentiert, nicht stillschweigend
+übergangen.
+
+**Prozess-Hinweis:** Die Alt-Dateien `specs/zellen-verbinden-code.md` / `-qa.md` stammen aus
+der beendeten „Bibel"-Pipeline (Merge-only-Entwurf) und sind durch diese konsolidierte
+`req.md` **inhaltlich abgelöst/obsolet**; sie sind bewusst **nicht** Teil dieses Commits
+(kein Löschen fremder, vorbestehender uneingecheckter Änderungen). Der schlanke PO↔Dev↔QA-
+Prozess erzeugt nur `req.md`.

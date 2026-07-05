@@ -1,4 +1,4 @@
-import type { Command, EditorState } from 'prosemirror-state'
+import type { Command, EditorState, Transaction } from 'prosemirror-state'
 import { TextSelection } from 'prosemirror-state'
 import { wrapInList, liftListItem } from 'prosemirror-schema-list'
 import {
@@ -10,6 +10,9 @@ import {
   addColumnAfter,
   deleteColumn,
   selectedRect,
+  mergeCells,
+  splitCell,
+  CellSelection,
 } from 'prosemirror-tables'
 import { wordSchema } from '../schema'
 
@@ -166,6 +169,64 @@ export function deleteColumnOrTable(): Command {
     const rect = selectedRect(state)
     const deletesAllColumns = rect.left === 0 && rect.right === rect.map.width
     return deletesAllColumns ? deleteEnclosingTable()(state, dispatch, view) : deleteColumn(state, dispatch)
+  }
+}
+
+/** True when the current selection is a rectangular multi-cell CellSelection that can be
+ * merged — the exact condition `mergeCells` itself checks (a dispatch-less run is a pure
+ * availability probe, ProseMirror convention). Drives the "Zellen verbinden" button state. */
+export function canMergeCells(state: EditorState): boolean {
+  return mergeCells(state)
+}
+
+/** True when the selection is a single cell with colspan>1 and/or rowspan>1 that can be
+ * split. Drives the "Zelle teilen" button state. */
+export function canSplitCell(state: EditorState): boolean {
+  return splitCell(state)
+}
+
+/**
+ * After merge/split, prosemirror-tables leaves a `CellSelection` (not a text cursor). Typing
+ * in that state would REPLACE the just-merged / just-restored content instead of appending
+ * to it — the feature's most dangerous silent trap. This collapses the CellSelection to a
+ * real text cursor at the end of the top-left cell's content, in the SAME transaction, so
+ * immediate typing appends. See specs/zellen-verbinden-req.md §2.3 / §2.6.
+ */
+function collapseCellSelectionToCursor(tr: Transaction): Transaction {
+  const sel = tr.selection
+  if (!(sel instanceof CellSelection)) return tr
+  let topLeft = Infinity
+  sel.forEachCell((_node, pos) => {
+    if (pos < topLeft) topLeft = pos
+  })
+  if (!isFinite(topLeft)) return tr
+  const cellNode = tr.doc.nodeAt(topLeft)
+  if (!cellNode) return tr
+  const contentEnd = topLeft + 1 + cellNode.content.size
+  return tr.setSelection(TextSelection.near(tr.doc.resolve(contentEnd), -1))
+}
+
+/** Merges the selected cells (content of all cells appended to the top-left anchor), then
+ * places a text cursor at the end of the merged content (see {@link collapseCellSelectionToCursor}). */
+export function mergeCellsWithCursor(): Command {
+  return (state, dispatch) => {
+    if (!mergeCells(state)) return false
+    if (dispatch) {
+      mergeCells(state, (tr) => dispatch(collapseCellSelectionToCursor(tr).scrollIntoView()))
+    }
+    return true
+  }
+}
+
+/** Splits a merged cell into its C×R individual cells (original content stays in the
+ * top-left cell), then places a text cursor at the end of that content. */
+export function splitCellWithCursor(): Command {
+  return (state, dispatch) => {
+    if (!splitCell(state)) return false
+    if (dispatch) {
+      splitCell(state, (tr) => dispatch(collapseCellSelectionToCursor(tr).scrollIntoView()))
+    }
+    return true
   }
 }
 

@@ -1,6 +1,6 @@
 import type { ChangeEvent, ReactNode } from 'react'
 import type { EditorView } from 'prosemirror-view'
-import type { Command } from 'prosemirror-state'
+import type { Command, EditorState } from 'prosemirror-state'
 import { toggleMark } from 'prosemirror-commands'
 import { wordSchema } from '../schema'
 import {
@@ -10,6 +10,8 @@ import {
   addRowBefore,
   applyMarkColor,
   canCut,
+  canMergeCells,
+  canSplitCell,
   clearMarkColor,
   cutSelection,
   deleteColumnOrTable,
@@ -19,8 +21,10 @@ import {
   isAlignActive,
   isInTable,
   liftFromList,
+  mergeCellsWithCursor,
   setAlign,
   setHeading,
+  splitCellWithCursor,
   toggleList,
   type Align,
 } from './commands'
@@ -193,27 +197,54 @@ const IconColDelete = (
     <path d="M10.6 9.6l3.3 4.8M13.9 9.6l-3.3 4.8" />
   </TableIcon>
 )
+// Merge = two arrows pointing inward (no divider); Split = a centre divider with two arrows
+// pointing outward — opposites, distinguishable without the tooltip (req §1 #1/#2).
+const IconMergeCells = (
+  <TableIcon>
+    <rect x="3" y="6" width="18" height="12" rx="1.5" />
+    <path d="M4 12h5M7 10l2 2-2 2" />
+    <path d="M20 12h-5M17 10l-2 2 2 2" />
+  </TableIcon>
+)
+const IconSplitCell = (
+  <TableIcon>
+    <rect x="3" y="6" width="18" height="12" rx="1.5" />
+    <line x1="12" y1="6" x2="12" y2="18" />
+    <path d="M9 12H4M6 10l-2 2 2 2" />
+    <path d="M15 12h5M18 10l2 2-2 2" />
+  </TableIcon>
+)
 
 /**
- * A table-structure toolbar button. Disabled (with a visible reason in title/aria-label)
- * whenever the cursor is not inside a table — the single enable condition for all six
- * (req §1 #7, §2.8). Mouse-down preventDefault preserves the editor selection and stops
- * focus theft; the command runs in onClick, which fires for a mouse click AND for keyboard
- * Enter/Space, so every activation path works with no double-trigger (req §1 #8).
+ * A table toolbar button. Disabled (with a visible reason in title/aria-label) unless its
+ * `isEnabled` predicate holds — defaults to `isInTable` (the condition for the six
+ * insert/delete buttons, req §1 #7). Merge/split pass a stricter predicate (a dispatch-less
+ * availability probe) plus a `disabledHint` explaining the selection requirement; when the
+ * cursor isn't in a table at all, the not-in-a-table reason takes precedence (req §1 #5).
+ * Mouse-down preventDefault preserves the editor selection and stops focus theft; the command
+ * runs in onClick, which fires for a mouse click AND keyboard Enter/Space, with no
+ * double-trigger (req §1 #8).
  */
 function TableOpButton({
   view,
   command,
   label,
   children,
+  isEnabled,
+  disabledHint,
 }: {
   view: EditorView
   command: Command
   label: string
   children: ReactNode
+  isEnabled?: (state: EditorState) => boolean
+  disabledHint?: string
 }) {
-  const enabled = isInTable(view.state)
-  const title = enabled ? label : `${label} (nur innerhalb einer Tabelle verfügbar)`
+  const enabled = (isEnabled ?? isInTable)(view.state)
+  const reason = !isInTable(view.state)
+    ? 'nur innerhalb einer Tabelle verfügbar'
+    : (disabledHint ?? 'nur innerhalb einer Tabelle verfügbar')
+  const title = enabled ? label : `${label} (${reason})`
   return (
     <button
       type="button"
@@ -426,6 +457,30 @@ export function Toolbar({ view, cutError, setCutError }: ToolbarProps) {
       </TableOpButton>
       <TableOpButton view={view} command={deleteColumnOrTable()} label="Spalte löschen">
         {IconColDelete}
+      </TableOpButton>
+
+      <div className="w-px h-5 bg-neutral-300 dark:bg-neutral-700 mx-1" />
+
+      {/* Zellen verbinden/teilen (specs/zellen-verbinden-req.md): enabled only when the
+          selection actually allows the action; a text cursor is placed after merge/split
+          so typing appends instead of replacing. */}
+      <TableOpButton
+        view={view}
+        command={mergeCellsWithCursor()}
+        label="Zellen verbinden"
+        isEnabled={canMergeCells}
+        disabledHint="mehrere benachbarte Zellen einer rechteckigen Fläche markieren"
+      >
+        {IconMergeCells}
+      </TableOpButton>
+      <TableOpButton
+        view={view}
+        command={splitCellWithCursor()}
+        label="Zelle teilen"
+        isEnabled={canSplitCell}
+        disabledHint="nur bei einer bereits verbundenen Zelle verfügbar"
+      >
+        {IconSplitCell}
       </TableOpButton>
 
       <div className="w-px h-5 bg-neutral-300 dark:bg-neutral-700 mx-1" />
