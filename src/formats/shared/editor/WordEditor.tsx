@@ -204,9 +204,9 @@ export function WordEditor({ document: doc, onChange }: FormatEditorProps<WordDo
       plugins: [
         history(),
         keymap({
-          // Mod-c/Mod-x/Mod-v are deliberately NOT bound here: copy/cut/paste
-          // run exclusively through ProseMirror's native clipboard default
-          // handler (prosemirror-view, handlers.copy/cut/paste) plus the
+          // Mod-c/Mod-v (copy/paste) are deliberately NOT bound here: they run
+          // exclusively through ProseMirror's native clipboard default handler
+          // (prosemirror-view, handlers.copy/paste) plus the
           // `clipboardTextSerializer` set below. Any future keymap addition
           // must be checked against accidentally swallowing these via an
           // overly broad binding. See specs/kopieren-req.md Abschnitt 3,
@@ -219,6 +219,22 @@ export function WordEditor({ document: doc, onChange }: FormatEditorProps<WordDo
           'Mod-b': toggleMark(wordSchema.marks.strong),
           'Mod-i': toggleMark(wordSchema.marks.em),
           'Mod-u': toggleMark(wordSchema.marks.underline),
+          // Ctrl/Cmd+X: a *text / cell / all* selection falls through (return false) to
+          // prosemirror-view's native `cut` handler, exactly as before. But a NODE selection —
+          // in practice a selected image, whose NodeView wraps the <img> in a
+          // contenteditable=false <span> — is NOT reliably cut by a synthetic Ctrl+X on
+          // touch/mobile engines: the browser fires no `cut` event for a non-editable node
+          // selection there, so the image silently survives (reproduced on the CI Tablet
+          // project; cut.spec.ts:228/570). Route just that case through cutSelection(), which
+          // for a node selection guarantees the removal with an explicit ProseMirror
+          // transaction (best-effort native `copy` for the clipboard, never
+          // navigator.clipboard). Same path as the toolbar button and Shift-Delete, so all
+          // image-cut entry points behave identically and deterministically. See
+          // specs/bild-groesse-aendern-req.md, specs/ausschneiden-code.md §3.3.
+          'Mod-x': (state, dispatch, view) =>
+            state.selection instanceof NodeSelection
+              ? cutSelection({ onCutBlocked: setCutError })(state, dispatch, view)
+              : false,
           // Windows' common secondary "cut" keybinding. Not something browsers
           // map to a native cut on a contenteditable by themselves (unlike
           // Ctrl+X/Cmd+X, which prosemirror-view already handles natively), so

@@ -356,6 +356,28 @@ export function cutSelection(handlers: CutHandlers = {}): Command {
     if (!dispatch || !view) return true // availability check only (e.g. for `disabled`)
 
     view.focus()
+
+    // A NODE selection — in practice a selected image, whose NodeView wraps the <img> in a
+    // contenteditable=false element — is a special case: touch/mobile Chromium's
+    // execCommand('cut') does NOT fire a `cut` event for such a selection, so the node is
+    // never deleted (verified deterministically on the Tablet project; the same reason a
+    // synthetic Ctrl+X can leave a selected image behind under CI load, cut.spec.ts:228/570).
+    // Guarantee the removal with an explicit ProseMirror transaction — exactly the deletion
+    // prosemirror-view's own native `cut` handler performs — while still writing the clipboard
+    // best-effort through the sanctioned native `copy` path (never navigator.clipboard, per the
+    // privacy invariant). Deletion is deterministic and the copy happens first, so there is
+    // never a "clipboard written but not deleted" (or the reverse) half-state; on engines that
+    // refuse to copy a non-editable node selection the image is still reliably removed.
+    if (state.selection instanceof NodeSelection) {
+      try {
+        view.dom.ownerDocument.execCommand('copy')
+      } catch {
+        // best-effort clipboard write; the deletion below is what must not be skipped
+      }
+      dispatch(state.tr.deleteSelection().scrollIntoView())
+      return true
+    }
+
     let succeeded = false
     try {
       succeeded = view.dom.ownerDocument.execCommand('cut')

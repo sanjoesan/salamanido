@@ -251,6 +251,38 @@ test('Testfall 8: Bild anklicken und mit Strg+X ausschneiden entfernt es, umgebe
   await expect(editor).toContainText('Text davor.')
 })
 
+test('Testfall 8b: selektiertes Bild über den Toolbar-Button "Ausschneiden" entfernen (deterministischer execCommand-Pfad, alle Projekte)', async ({ page }) => {
+  // Deckt gezielt den Pfad ab, über den Strg+X ein node-selektiertes Bild seit dem
+  // Tablet-Fix laufen lässt: view.focus() (→ selectionToDOM re-sync) + execCommand('cut'),
+  // denselben Pfad wie dieser Button. Anders als der synthetische Strg+X in Testfall 8 ist
+  // dieser Klickpfad nicht von der browser-eigenen Ctrl+X→cut-Zuordnung abhängig und daher
+  // auch auf mobil-emulierten Projekten deterministisch. Siehe WordEditor.tsx (Mod-x-Keymap).
+  await odtCard(page).getByRole('button', { name: 'Neu erstellen' }).click()
+  const editor = page.locator('.ProseMirror')
+  await editor.click()
+  await page.keyboard.type('Text davor.')
+
+  const fs = await import('node:fs/promises')
+  const tinyPngPath = join(__dirname, 'fixtures', 'tiny-cut-8b.png')
+  await fs.writeFile(
+    tinyPngPath,
+    Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=', 'base64'),
+  )
+  await page.locator('label:has-text("Bild")').locator('input[type=file]').setInputFiles(tinyPngPath)
+
+  await expect(editor.locator('img')).toHaveCount(1)
+  await pinActualSizeZoom(page)
+  await editor.locator('img').click()
+
+  // Bild ist jetzt node-selektiert → der Ausschneiden-Button ist aktiv.
+  const cutButton = page.getByRole('button', { name: 'Ausschneiden' })
+  await expect(cutButton).toBeEnabled()
+  await cutButton.click()
+
+  await expect(editor.locator('img')).toHaveCount(0)
+  await expect(editor).toContainText('Text davor.')
+})
+
 test('Testfall 9: Strg+Z direkt nach Strg+X stellt exakt den Ursprungszustand wieder her', async ({ page }) => {
   await odtCard(page).getByRole('button', { name: 'Neu erstellen' }).click()
   const editor = page.locator('.ProseMirror')
