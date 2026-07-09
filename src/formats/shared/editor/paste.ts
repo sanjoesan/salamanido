@@ -46,7 +46,26 @@ export function splitPlainTextIntoParagraphs(text: string): string[][] {
  */
 export function plainTextClipboardParser(text: string, $context: ResolvedPos, schema: Schema): Slice {
   const marks = $context.marks()
-  const paragraphs = splitPlainTextIntoParagraphs(text).map((lines) => {
+  const blocks = splitPlainTextIntoParagraphs(text)
+
+  // Trailing newline(s) — e.g. the "zeile\n\n" this editor's own full-line cut puts on
+  // the clipboard — produce a trailing EMPTY block/line. Pasted where content follows
+  // the caret in the same textblock, that open empty end correctly pushes the remainder
+  // onto a new line (a cut line pasted at another line's start re-creates the line).
+  // But with NOTHING after the caret (end of paragraph/document) there is nothing to
+  // merge into: the empty end materialised as a phantom empty paragraph (or trailing
+  // line break) WITH the caret trapped inside — the reported "beim Einfügen entstehen
+  // mehr Zeilenumbrüche und der Cursor steht in der nächsten Zeile" bug. Mobile
+  // clipboards routinely deliver text/plain only, so this path is the norm on touch
+  // devices, not the exception. Drop the empty tail exactly in that case.
+  const atTextblockEnd = $context.parent.isTextblock && $context.parentOffset === $context.parent.content.size
+  if (atTextblockEnd) {
+    while (blocks.length > 1 && blocks[blocks.length - 1].every((line) => line.length === 0)) blocks.pop()
+    const last = blocks[blocks.length - 1]
+    while (last.length > 1 && last[last.length - 1].length === 0) last.pop()
+  }
+
+  const paragraphs = blocks.map((lines) => {
     const inline: ProseMirrorNode[] = []
     lines.forEach((line, index) => {
       if (index > 0) inline.push(schema.nodes.hard_break.create())

@@ -106,6 +106,54 @@ describe('plainTextClipboardParser', () => {
     expect(textNode.isText).toBe(true)
     expect(strong.isInSet(textNode.marks)).toBe(true)
   })
+
+  /** Caret at the very END of a paragraph ('x|') — nothing follows in the textblock. */
+  function contextAtParagraphEnd() {
+    const p = wordSchema.nodes.paragraph.create(null, wordSchema.text('x'))
+    const doc = wordSchema.nodes.doc.create(null, p)
+    return doc.resolve(2) // inside the paragraph, after 'x' (parentOffset == content.size)
+  }
+
+  /** Caret strictly INSIDE a paragraph ('x|y') — content follows in the textblock. */
+  function contextMidParagraph() {
+    const p = wordSchema.nodes.paragraph.create(null, wordSchema.text('xy'))
+    const doc = wordSchema.nodes.doc.create(null, p)
+    return doc.resolve(2) // between 'x' and 'y'
+  }
+
+  describe('trailing newlines (Cut→Paste-Bug: Phantom-Leerabsatz)', () => {
+    it('"zeile\\n\\n" mitten im Absatz → trailing leerer Absatz BLEIBT (schiebt den Rest auf eine neue Zeile)', () => {
+      const s = plainTextClipboardParser('zeile\n\n', contextMidParagraph(), wordSchema)
+      expect(s.content.childCount).toBe(2)
+      expect(s.content.child(1).content.size).toBe(0)
+    })
+
+    it('"zeile\\n\\n" am Absatz-/Dokumentende → KEIN Phantom-Leerabsatz, kein Cursor in der nächsten Zeile', () => {
+      const s = plainTextClipboardParser('zeile\n\n', contextAtParagraphEnd(), wordSchema)
+      expect(s.content.childCount).toBe(1)
+      expect(allText(s.content)).toBe('zeile')
+    })
+
+    it('"zeile\\n" am Absatzende → kein trailing hard_break', () => {
+      const s = plainTextClipboardParser('zeile\n', contextAtParagraphEnd(), wordSchema)
+      expect(s.content.childCount).toBe(1)
+      const kinds: string[] = []
+      s.content.child(0).forEach((n) => kinds.push(n.type.name))
+      expect(kinds).toEqual(['text'])
+    })
+
+    it('mehrere trailing Leerblöcke am Absatzende werden alle entfernt', () => {
+      const s = plainTextClipboardParser('zeile\n\n\n\n', contextAtParagraphEnd(), wordSchema)
+      expect(s.content.childCount).toBe(1)
+      expect(allText(s.content)).toBe('zeile')
+    })
+
+    it('Binnen-Leerzeilen bleiben unangetastet (nur der Schwanz wird beschnitten)', () => {
+      const s = plainTextClipboardParser('a\n\nb\n\n', contextAtParagraphEnd(), wordSchema)
+      expect(s.content.childCount).toBe(2)
+      expect(allText(s.content)).toBe('ab')
+    })
+  })
 })
 
 describe('sanitizePastedHtml', () => {

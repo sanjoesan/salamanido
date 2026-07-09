@@ -313,6 +313,31 @@ for (const fmt of ['odt', 'docx'] as const) {
   })
 }
 
+// ---- trailing Newlines (Cut→Paste-Bug 2026-07-09) ----
+// Der eigene Zeilen-Cut legt "zeile\n\n" in die Zwischenablage. Kommt beim Einfügen nur
+// text/plain an (Normalfall auf Mobilgeräten), entstand am Absatz-/Dokumentende ein
+// Phantom-Leerabsatz und der Cursor stand danach in der nächsten Zeile.
+
+test('Plain-Paste "zeile\\n\\n" am Dokumentende → kein Phantom-Leerabsatz, Cursor direkt hinter dem Text', async ({
+  page,
+}) => {
+  await page.keyboard.type('bestehender Text ')
+  await paste(page, { text: 'eingefügte Zeile\n\n' })
+  await expect(editor(page).locator('p')).toHaveCount(1)
+  await page.keyboard.type('X')
+  await expect(editor(page).locator('p').first()).toHaveText('bestehender Text eingefügte ZeileX')
+})
+
+test('Plain-Paste "zeile\\n\\n" am Zeilenanfang → Absatzumbruch bleibt erhalten (Zeile wird davor eingefügt)', async ({
+  page,
+}) => {
+  await page.keyboard.type('zweite Zeile')
+  await page.keyboard.press('Home')
+  await page.waitForTimeout(100)
+  await paste(page, { text: 'erste Zeile\n\n' })
+  await expect(editor(page).locator('p')).toHaveText(['erste Zeile', 'zweite Zeile'])
+})
+
 // ---- 3.6 structure contexts ----
 
 test('3.6: multi-block paste inside a list item does not break the list apart', async ({ page }) => {
