@@ -657,12 +657,23 @@ Desktop Chrome + Mobile + Tablet):
   600ms-Trennung (Testkommentar dokumentiert den Skip; Nutzertempo ist unbetroffen,
   die Granularität ist engine-unabhängige PM-Logik).
 
+**Nachtrag (gleicher Abend): DOCX-Reader-Ebenen-Typ-Restdefekt (Befund C Zeile 2) BEHOBEN** —
+`parseNumberingXml` liest jetzt JEDES `<w:lvl>` (numId → ilvl → Typ; dünn definierte tiefe
+Ebenen erben Ebene 0), `groupLists` fragt den Typ je (numId, ilvl) ab. Eine Fremddatei mit
+Bullet-Ebene-0/Decimal-Ebene-1 in EINER numId importiert damit typrichtig je Ebene
+(synthetischer Word-Nachbau in `mixed-list-import.test.ts`). Das ist die Reader-Hälfte von
+§5A Option B; der Writer behält vorgabegemäß sein statisches Zwei-num-Schema.
+
 **Bewusst OFFEN (Status bleibt „teilweise", je als Vermerk gemäß Abnahmekriterium 11):**
 
 - **(b) 5A DOCX-Writer-Typ-Kollaps:** gemischt-typige Ketten (Bullet↔Nummeriert je
   Ebene) kollabieren beim DOCX-Export weiterhin in die numId der äußersten Liste —
-  unverändert, ODT nicht betroffen. Eigenständiges Arbeitspaket (abstractNum je
-  Typkombination bzw. numId je Kette).
+  gemäß §5A **Option B** die verbindliche Vorgabe dieser Datei (Option A = Lead/PO-
+  Entscheidung, verortet in `mehrstufige-liste`); ODT nicht betroffen.
+- **ODT-Reader-Ebenen-Typ (Befund C Zeile 3):** `listKinds` weiterhin ein Typ pro
+  Stilname (betrifft den Fremddatei-Import gemischter ODT-Listen); der DOCX-Zwilling
+  ist behoben (s. o.), das ODT-Pendant braucht zusätzlich Stilnamen-Vererbung über
+  verschachtelte `text:list` ohne eigenes style-name-Attribut — eigenes Arbeitspaket.
 - **(c) `%N`-Fehlreferenz** in der zyklischen Nummerierungsdefinition ab Ebene ≥ 4 —
   unverändert.
 - **(d) DOCX-Import bildreiner Listenpunkte** — unverändert (vorbestehend).

@@ -75,26 +75,45 @@ function headingLevelForStyle(styleId: string | null, info: HeadingInfo): number
   return null
 }
 
-function parseNumberingXml(numberingDoc: Document | null): Map<string, 'bullet' | 'ordered'> {
-  const kindByNumId = new Map<string, 'bullet' | 'ordered'>()
+/** numId → (w:ilvl → bullet|ordered), read from EVERY `<w:lvl>` of the abstractNum.
+ * Word encodes mixed-type chains (e.g. bullet on level 0, decimal on level 1) inside
+ * ONE abstractNum; the previous first-`<w:lvl>`-only read forced every level of such a
+ * foreign file onto a single kind (liste-einruecken-tab-req.md Befund C — the reader
+ * half of §5A Option B; the writer deliberately keeps its static two-num scheme). */
+export type ListKindsByNumId = Map<string, Map<number, 'bullet' | 'ordered'>>
+
+function parseNumberingXml(numberingDoc: Document | null): ListKindsByNumId {
+  const kindByNumId: ListKindsByNumId = new Map()
   if (!numberingDoc) return kindByNumId
-  const abstractKindById = new Map<string, 'bullet' | 'ordered'>()
+  const abstractKindsById = new Map<string, Map<number, 'bullet' | 'ordered'>>()
   for (const abstractEl of Array.from(numberingDoc.getElementsByTagNameNS(OOXML_NAMESPACES.w, 'abstractNum'))) {
     const id = abstractEl.getAttributeNS(OOXML_NAMESPACES.w, 'abstractNumId')
-    const lvl = firstChildNS(abstractEl, OOXML_NAMESPACES.w, 'lvl')
-    const numFmt = lvl && firstChildNS(lvl, OOXML_NAMESPACES.w, 'numFmt')
-    const fmt = numFmt?.getAttributeNS(OOXML_NAMESPACES.w, 'val')
-    if (id) abstractKindById.set(id, fmt === 'bullet' ? 'bullet' : 'ordered')
+    const levels = new Map<number, 'bullet' | 'ordered'>()
+    for (const lvl of childElements(abstractEl, OOXML_NAMESPACES.w, 'lvl')) {
+      const ilvl = Number(lvl.getAttributeNS(OOXML_NAMESPACES.w, 'ilvl') ?? '0') || 0
+      const fmt = firstChildNS(lvl, OOXML_NAMESPACES.w, 'numFmt')?.getAttributeNS(OOXML_NAMESPACES.w, 'val')
+      levels.set(ilvl, fmt === 'bullet' ? 'bullet' : 'ordered')
+    }
+    if (id) abstractKindsById.set(id, levels)
   }
   for (const numEl of Array.from(numberingDoc.getElementsByTagNameNS(OOXML_NAMESPACES.w, 'num'))) {
     const numId = numEl.getAttributeNS(OOXML_NAMESPACES.w, 'numId')
     const abstractRef = firstChildNS(numEl, OOXML_NAMESPACES.w, 'abstractNumId')
     const abstractId = abstractRef?.getAttributeNS(OOXML_NAMESPACES.w, 'val')
-    if (numId && abstractId && abstractKindById.has(abstractId)) {
-      kindByNumId.set(numId, abstractKindById.get(abstractId)!)
+    if (numId && abstractId && abstractKindsById.has(abstractId)) {
+      kindByNumId.set(numId, abstractKindsById.get(abstractId)!)
     }
   }
   return kindByNumId
+}
+
+/** The list kind for one concrete (numId, ilvl): the level's own entry, else the
+ * level-0 entry (Word inherits sparsely defined deep levels), else 'ordered' for a
+ * known-but-empty abstractNum (previous behaviour) / 'bullet' for an unknown numId. */
+function listKindFor(kindByNumId: ListKindsByNumId, numId: string, ilvl: number): 'bullet' | 'ordered' {
+  const levels = kindByNumId.get(numId)
+  if (!levels) return 'bullet'
+  return levels.get(ilvl) ?? levels.get(0) ?? 'ordered'
 }
 
 function marksFromRunProperties(rPr: Element | null): Array<{ type: string; attrs?: Record<string, unknown> }> {
@@ -428,7 +447,7 @@ function parseTable(tblEl: Element, headingInfo: HeadingInfo, imageRels: Map<str
  * identisch"). Without this, every paragraph sharing a `numId` collapses into one flat
  * list regardless of its `w:ilvl`.
  */
-function groupLists(items: Array<{ marker: ListMarker; block: JsonNode }>, kindByNumId: Map<string, 'bullet' | 'ordered'>): JsonNode[] {
+function groupLists(items: Array<{ marker: ListMarker; block: JsonNode }>, kindByNumId: ListKindsByNumId): JsonNode[] {
   interface Frame {
     numId: string
     ilvl: number
@@ -439,7 +458,7 @@ function groupLists(items: Array<{ marker: ListMarker; block: JsonNode }>, kindB
   const stack: Frame[] = []
 
   const openFrame = (numId: string, ilvl: number) => {
-    const kind = kindByNumId.get(numId) || 'bullet'
+    const kind = listKindFor(kindByNumId, numId, ilvl)
     stack.push({ numId, ilvl, node: { type: kind === 'ordered' ? 'ordered_list' : 'bullet_list', content: [] } })
   }
 
@@ -516,7 +535,7 @@ async function resolveImageSources(zip: JSZip, blocks: JsonNode[]): Promise<void
 async function readBodyChildren(
   bodyEl: Element,
   headingInfo: HeadingInfo,
-  kindByNumId: Map<string, 'bullet' | 'ordered'>,
+  kindByNumId: ListKindsByNumId,
   imageRels: Map<string, string>,
   zip: JSZip,
 ): Promise<JsonNode[]> {
