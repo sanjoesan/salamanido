@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react'
 import { EditorState, TextSelection, NodeSelection, Selection } from 'prosemirror-state'
 import { EditorView } from 'prosemirror-view'
 import { history, undo, redo } from 'prosemirror-history'
@@ -7,13 +7,20 @@ import { baseKeymap, toggleMark } from 'prosemirror-commands'
 import { splitListItem } from 'prosemirror-schema-list'
 import { tableEditing, columnResizing } from 'prosemirror-tables'
 import { dropCursor } from 'prosemirror-dropcursor'
-import { gapCursor } from 'prosemirror-gapcursor'
+import { gapCursor, GapCursor } from 'prosemirror-gapcursor'
 import { wordSchema } from '../schema'
 import { cutSelection, insertHardBreak, insertTable, selectedImage } from './commands'
 import { clipboardTextSerializer } from './clipboard'
 import { createPastePlugin } from './paste'
 import { createPaginationPlugin } from './pagination'
-import { pageBackgroundStyle, PAGE_WIDTH_PX, PAGE_HEIGHT_PX, PAGE_MARGIN_PX } from './pageLayout'
+import {
+  pageBackgroundStyle,
+  PAGE_WIDTH_PX,
+  PAGE_HEIGHT_PX,
+  PAGE_MARGIN_PX,
+  PAGE_CONTENT_HEIGHT_PX,
+  PAGE_GAP_PX,
+} from './pageLayout'
 import { Toolbar } from './Toolbar'
 import { TableSizeDialog } from './TableSizeDialog'
 import { ImageResizeNodeView } from './imageNodeView'
@@ -47,8 +54,14 @@ import type { WordDocumentContent } from '../documentModel'
 function reconcileSelectionOnClick(view: EditorView, event: MouseEvent) {
   const coords = view.posAtCoords({ left: event.clientX, top: event.clientY })
   if (!coords) return
+  const { selection } = view.state
+  // A GapCursor is the ONLY caret before/after a boundary table (basis-stabilisierung-req.md
+  // B2). When the click landed in that same gap zone, collapsing "near" a text position
+  // would tear the caret into the adjacent cell — leave it be. A stale gap elsewhere in the
+  // document is still repaired like any other selection.
+  if (selection instanceof GapCursor && Math.abs(coords.pos - selection.head) <= 1) return
   const newSelection = TextSelection.near(view.state.doc.resolve(coords.pos))
-  if (!newSelection.eq(view.state.selection)) {
+  if (!newSelection.eq(selection)) {
     view.dispatch(view.state.tr.setSelection(newSelection))
   }
 }
@@ -180,6 +193,26 @@ export function WordEditor({ document: doc, onChange }: FormatEditorProps<WordDo
     return () => ro.disconnect()
   }, [])
 
+  // B4 (basis-stabilisierung-req.md §2.4): the sheet is always as tall as WHOLE pages —
+  // an empty document shows one full A4 sheet and a partially filled last page is padded
+  // to full height. Derived from the CONTENT flow height (containerRef), which the sheet's
+  // own min-height does not influence — measuring the sheet itself would feed back.
+  const [pageMinHeight, setPageMinHeight] = useState(PAGE_HEIGHT_PX)
+  useEffect(() => {
+    const el = containerRef.current
+    if (!el) return
+    const FLOW_PERIOD = PAGE_CONTENT_HEIGHT_PX + PAGE_GAP_PX // one page of content + one spacer
+    const update = () => {
+      const pages = Math.max(1, Math.floor(el.offsetHeight / FLOW_PERIOD) + 1)
+      setPageMinHeight(pages * FLOW_PERIOD - PAGE_GAP_PX + 2 * PAGE_MARGIN_PX)
+    }
+    update()
+    if (typeof ResizeObserver === 'undefined') return
+    const ro = new ResizeObserver(update)
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [])
+
   // Ctrl/Cmd +/-/0 zoom, best-effort (the editor is the only surface mounted here).
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
@@ -248,6 +281,12 @@ export function WordEditor({ document: doc, onChange }: FormatEditorProps<WordDo
           'Shift-Delete': cutSelection({ onCutBlocked: setCutError }),
         }),
         keymap(baseKeymap),
+        // BEFORE tableEditing: its arrow handler must get the first shot at Arrow-Up/-Down
+        // on a boundary row, otherwise prosemirror-tables swallows the key and the caret
+        // position before/after an edge table is unreachable by keyboard
+        // (basis-stabilisierung-req.md B2 §2.2). From an inner row no valid gap exists, so
+        // the gap-cursor handler returns false and in-table arrow navigation still runs.
+        gapCursor(),
         columnResizing(),
         tableEditing(),
         // Paste/drop pipeline: plain-text line semantics, HTML sanitisation,
@@ -256,7 +295,6 @@ export function WordEditor({ document: doc, onChange }: FormatEditorProps<WordDo
         // the one-time init effect is safe. See specs/einfuegen-code.md 5.3.
         createPastePlugin({ onNotice: setPasteNotice }),
         dropCursor(),
-        gapCursor(),
         createPaginationPlugin(),
       ],
     })
@@ -321,15 +359,25 @@ export function WordEditor({ document: doc, onChange }: FormatEditorProps<WordDo
     // without any dragging (pointer jitter, sub-pixel rounding).
     const CLICK_DRAG_THRESHOLD_PX = 3
     let mouseDownPos: { x: number; y: number } | null = null
+    let selectionAtMouseDown: Selection | null = null
     const onMouseDown = (event: MouseEvent) => {
       mouseDownPos = { x: event.clientX, y: event.clientY }
+      selectionAtMouseDown = view.state.selection
     }
     const onMouseUp = (event: MouseEvent) => {
       const down = mouseDownPos
+      const selAtDown = selectionAtMouseDown
       mouseDownPos = null
+      selectionAtMouseDown = null
       if (!down) return
       const movedPx = Math.hypot(event.clientX - down.x, event.clientY - down.y)
       if (movedPx > CLICK_DRAG_THRESHOLD_PX) return
+      // The click itself already produced a selection change (ProseMirror's own click
+      // handling, gapcursor's handleClick placing a fresh GapCursor, a NodeSelection on
+      // an image, ...) — don't second-guess it. Only clicks that did NOT register in the
+      // model by mouseup (the "man klickt hinein und nix passiert" bug, B3 — Chromium
+      // sometimes leaves the click's native selection change unflushed) are repaired.
+      if (selAtDown && !view.state.selection.eq(selAtDown)) return
       reconcileSelectionOnClick(view, event)
     }
     view.dom.addEventListener('mousedown', onMouseDown)
@@ -345,6 +393,44 @@ export function WordEditor({ document: doc, onChange }: FormatEditorProps<WordDo
     // document identity from here on, re-syncing from props would fight it.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
+
+  // B3 (basis-stabilisierung-req.md §2.3): a click ANYWHERE on the visible sheet — the
+  // white page margins and the empty area below the last block included — must focus the
+  // editor and place a sensible cursor. Those regions live OUTSIDE the contenteditable
+  // (they are the sheet's padding / leftover min-height), so ProseMirror never sees such
+  // clicks without this handler. Clicks inside .ProseMirror are left entirely to PM.
+  const focusEditorFromSheet = (event: ReactMouseEvent) => {
+    const view = viewRef.current
+    if (!view || view.dom.contains(event.target as Node)) return
+    event.preventDefault() // keep the browser from focusing the div itself
+    const doc = view.state.doc
+    const editorRect = view.dom.getBoundingClientRect()
+    const above = event.clientY < editorRect.top
+    const below = event.clientY > editorRect.bottom
+    let selection: Selection | null = null
+    if (above || below) {
+      // Vertically outside the content: the doc BOUNDARY is meant, never some nearby inner
+      // position (posAtCoords would happily resolve into a boundary table's first/last cell).
+      // A boundary table/image has no text position before/after it — there a GapCursor is
+      // the correct "write here" caret (B2); next to a normal textblock the plain doc
+      // start/end works. (GapCursor.valid is not part of the public typings, so the
+      // equivalent check — "the boundary child is not a textblock" — is done directly.)
+      const boundaryChild = above ? doc.firstChild : doc.lastChild
+      if (boundaryChild && !boundaryChild.isTextblock) {
+        selection = new GapCursor(above ? doc.resolve(0) : doc.resolve(doc.content.size))
+      } else {
+        selection = above ? Selection.atStart(doc) : Selection.atEnd(doc)
+      }
+    } else {
+      // Side margins: land in the nearest position of the clicked line.
+      const coords = view.posAtCoords({ left: event.clientX, top: event.clientY })
+      if (coords) selection = TextSelection.near(doc.resolve(coords.pos))
+    }
+    if (selection && !selection.eq(view.state.selection)) {
+      view.dispatch(view.state.tr.setSelection(selection))
+    }
+    view.focus()
+  }
 
   const activeView = viewRef.current
   return (
@@ -388,8 +474,14 @@ export function WordEditor({ document: doc, onChange }: FormatEditorProps<WordDo
           <div
             ref={sheetRef}
             data-testid="page-sheet"
+            onMouseDown={focusEditorFromSheet}
             style={{
               width: PAGE_WIDTH_PX,
+              // B4: an empty/short document still shows one FULL A4 sheet, and the last
+              // page of a longer document is padded to full page height — without this the
+              // sheet was only as tall as its content (a ~210px strip for a new document).
+              // border-box (Tailwind preflight) makes this the outer height incl. margins.
+              minHeight: pageMinHeight,
               padding: `${PAGE_MARGIN_PX}px`,
               transform: `scale(${zoom})`,
               transformOrigin: 'top left',

@@ -22,7 +22,17 @@ function App() {
   const activeModule = active ? findModuleById(active.moduleId) : undefined
 
   return (
-    <div className="flex min-h-screen flex-col bg-white dark:bg-neutral-950">
+    <div
+      className={`flex flex-col bg-white dark:bg-neutral-950 ${
+        // Editor open: the app is EXACTLY viewport-high so the page area scrolls
+        // internally (scrollRef) and the zoom status bar stays visible — with
+        // min-h-screen the whole WINDOW scrolled instead and the inner scroller
+        // never engaged (basis-stabilisierung B3/B4: a full-height A4 sheet made
+        // even an empty document overflow the viewport). The format picker keeps
+        // growing freely so the landing page never clips on small screens.
+        active ? 'h-dvh' : 'min-h-screen'
+      }`}
+    >
       <PrivacyModal />
       <PrivacyBanner />
       <main className="flex-1 min-h-0 flex flex-col">

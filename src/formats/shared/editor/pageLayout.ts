@@ -19,13 +19,20 @@ export const PAGE_GAP_PX = 2 * PAGE_MARGIN_PX + PAGE_SEPARATOR_PX
  * A repeating background that paints alternating "page" (white, shadowed) and
  * "gap" (surrounding chrome color) bands behind the continuous editor content,
  * so a single scrolling surface reads as a stack of separate A4 sheets.
+ *
+ * Each white band spans the FULL page height including both page margins
+ * (basis-stabilisierung-req.md B4) — previously only the content region was
+ * painted white, so the top/bottom margins showed the grey chrome and a short
+ * document never looked like a whole sheet. The maths still line up with the
+ * pagination spacers: page N's content starts at N·period + PAGE_MARGIN_PX
+ * (period = PAGE_HEIGHT + separator = content + PAGE_GAP), exactly the top
+ * margin into page N's white band.
  */
 export function pageBackgroundStyle(): CSSProperties {
-  const period = PAGE_CONTENT_HEIGHT_PX + PAGE_GAP_PX
+  const period = PAGE_HEIGHT_PX + PAGE_SEPARATOR_PX // == PAGE_CONTENT_HEIGHT_PX + PAGE_GAP_PX
   return {
-    backgroundImage: `linear-gradient(to bottom, white 0, white ${PAGE_CONTENT_HEIGHT_PX}px, transparent ${PAGE_CONTENT_HEIGHT_PX}px, transparent ${period}px)`,
+    backgroundImage: `linear-gradient(to bottom, white 0, white ${PAGE_HEIGHT_PX}px, transparent ${PAGE_HEIGHT_PX}px, transparent ${period}px)`,
     backgroundSize: `100% ${period}px`,
     backgroundRepeat: 'repeat-y',
-    backgroundPositionY: `${PAGE_MARGIN_PX}px`,
   }
 }

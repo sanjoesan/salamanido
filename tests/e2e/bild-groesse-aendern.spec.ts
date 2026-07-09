@@ -220,7 +220,12 @@ test.describe('Bildgröße ändern', () => {
       buffer: Buffer.from(TINY_PNG, 'base64'),
     })
     await expect(page.locator('.ProseMirror td .pm-image-wrap img')).toHaveCount(1)
-    await page.keyboard.press('ArrowLeft') // node-select the just-inserted cell image
+    // Rückwärts zum Bild sind es seit dem sichtbaren Gap-Cursor ZWEI Caret-Stopps: erst der
+    // Gap zwischen Block-Bild und Folgeabsatz (dort kann man tippen, B2), dann das Bild
+    // selbst. Vorwärts (ArrowRight vom Absatzende, Test oben) bleibt es EIN Stopp, weil an
+    // der offenen Absatzseite kein Gap existiert.
+    await page.keyboard.press('ArrowLeft')
+    await page.keyboard.press('ArrowLeft')
     await expect(panel(page)).toBeVisible()
     await widthField(page).fill('3')
     await widthField(page).press('Enter')

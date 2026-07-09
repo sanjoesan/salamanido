@@ -1,6 +1,6 @@
 import type { Command, EditorState, Transaction } from 'prosemirror-state'
 import { TextSelection, NodeSelection } from 'prosemirror-state'
-import type { Node as PMNode } from 'prosemirror-model'
+import type { Node as PMNode, MarkType } from 'prosemirror-model'
 import { wrapInList, liftListItem } from 'prosemirror-schema-list'
 import {
   isInTable,
@@ -43,8 +43,24 @@ export function setAlign(align: Align): Command {
   }
 }
 
+/**
+ * Whether the alignment button for `align` should read as active: ALL alignable blocks
+ * touched by the selection carry it. A mixed multi-paragraph selection therefore lights up
+ * NO alignment button instead of misleadingly showing the first block's state
+ * (basis-stabilisierung-req.md B1 §2.1).
+ */
 export function isAlignActive(state: EditorState, align: Align): boolean {
-  const { $from } = state.selection
+  const { from, to, $from } = state.selection
+  let sawBlock = false
+  let allMatch = true
+  state.doc.nodesBetween(from, to, (node) => {
+    if (alignableTypes.has(node.type.name)) {
+      sawBlock = true
+      if (node.attrs.align !== align) allMatch = false
+    }
+  })
+  if (sawBlock) return allMatch
+  // Fallback (e.g. NodeSelection on an image): the nearest alignable ancestor decides.
   for (let depth = $from.depth; depth >= 0; depth--) {
     const node = $from.node(depth)
     if (alignableTypes.has(node.type.name)) {
@@ -52,6 +68,50 @@ export function isAlignActive(state: EditorState, align: Align): boolean {
     }
   }
   return false
+}
+
+/**
+ * Whole-range active state for a mark button (basis-stabilisierung-req.md B1 §2.1).
+ * Collapsed cursor: the pending `storedMarks` (falling back to the marks at the cursor)
+ * decide — so clicking "Fett" without a selection lights the button up immediately.
+ * Range selection: active only when EVERY text node across EVERY selection range carries
+ * the mark (Word semantics — a partially bold selection reads as "not bold"). Pairs with
+ * `toggleMark(..., { removeWhenPresent: false })`, so an active button always means "the
+ * next click turns it off".
+ */
+export function isMarkActive(state: EditorState, type: MarkType): boolean {
+  const { empty, $from, ranges } = state.selection
+  if (empty) return !!type.isInSet(state.storedMarks || $from.marks())
+  let sawText = false
+  let allMarked = true
+  for (const range of ranges) {
+    state.doc.nodesBetween(range.$from.pos, range.$to.pos, (node) => {
+      if (!node.isText) return
+      sawText = true
+      if (!type.isInSet(node.marks)) allMarked = false
+    })
+  }
+  return sawText && allMarked
+}
+
+/**
+ * Whether the selection sits entirely inside a list of the given kind — drives the
+ * aria-pressed/active state of the list toolbar buttons (B1 §2.1). For nested mixed
+ * lists the innermost list around each selection end decides.
+ */
+export function isListActive(state: EditorState, ordered: boolean): boolean {
+  const listType = ordered ? wordSchema.nodes.ordered_list : wordSchema.nodes.bullet_list
+  const otherType = ordered ? wordSchema.nodes.bullet_list : wordSchema.nodes.ordered_list
+  const { $from, $to } = state.selection
+  const inList = ($pos: typeof $from) => {
+    for (let depth = $pos.depth; depth > 0; depth--) {
+      const node = $pos.node(depth)
+      if (node.type === listType) return true
+      if (node.type === otherType) return false
+    }
+    return false
+  }
+  return inList($from) && inList($to)
 }
 
 export function setHeading(level: number | null): Command {
@@ -360,22 +420,62 @@ export function splitCellWithCursor(): Command {
 
 export type ColorMarkName = 'textColor' | 'highlight'
 
+/**
+ * Applies a colour mark to the selection — or, with a collapsed cursor, sets it as a
+ * pending stored mark so the NEXT typed text carries the colour (writing-caret semantics,
+ * parity with bold/italic; basis-stabilisierung-req.md B5 — the previous silent
+ * `return false` no-op was the "Textfarbe bewirkt nichts" bug). `addToSet` replaces an
+ * existing mark of the same type, so re-picking simply swaps the pending colour.
+ */
 export function applyMarkColor(markName: ColorMarkName, color: string): Command {
   return (state, dispatch) => {
     const { from, to, empty } = state.selection
-    if (empty) return false
-    if (dispatch) dispatch(state.tr.addMark(from, to, wordSchema.marks[markName].create({ color })))
+    const mark = wordSchema.marks[markName].create({ color })
+    if (dispatch) {
+      if (empty) dispatch(state.tr.addStoredMark(mark))
+      else dispatch(state.tr.addMark(from, to, mark))
+    }
     return true
   }
 }
 
+/** Removes the colour from the selection — or, with a collapsed cursor, drops the pending/
+ * inherited stored colour so the next typed text is uncoloured (B5, no silent no-op). */
 export function clearMarkColor(markName: ColorMarkName): Command {
   return (state, dispatch) => {
     const { from, to, empty } = state.selection
-    if (empty) return false
-    if (dispatch) dispatch(state.tr.removeMark(from, to, wordSchema.marks[markName]))
+    if (dispatch) {
+      if (empty) dispatch(state.tr.removeStoredMark(wordSchema.marks[markName]))
+      else dispatch(state.tr.removeMark(from, to, wordSchema.marks[markName]))
+    }
     return true
   }
+}
+
+/**
+ * The uniform colour of the given mark across the selection (or at the cursor, including a
+ * pending stored mark); null when unset or mixed. Drives the toolbar swatch value so the
+ * colour field reflects the document state instead of the last manually picked value
+ * (basis-stabilisierung-req.md B1 §2.1 "Farbfelder").
+ */
+export function activeColor(state: EditorState, markName: ColorMarkName): string | null {
+  const type = wordSchema.marks[markName]
+  const { empty, $from, ranges } = state.selection
+  if (empty) {
+    const mark = type.isInSet(state.storedMarks || $from.marks())
+    return mark ? (mark.attrs.color as string) : null
+  }
+  let color: string | null | undefined
+  for (const range of ranges) {
+    state.doc.nodesBetween(range.$from.pos, range.$to.pos, (node) => {
+      if (!node.isText) return
+      const mark = type.isInSet(node.marks)
+      const nodeColor = mark ? (mark.attrs.color as string) : null
+      if (color === undefined) color = nodeColor
+      else if (color !== nodeColor) color = null // mixed → no uniform colour
+    })
+  }
+  return color ?? null
 }
 
 /** True when a non-empty selection exists (Text/Image/Cell/All) — the single

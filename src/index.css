@@ -24,6 +24,42 @@ body {
   outline: none;
   min-height: 100%;
   color: #111827;
+  /* prosemirror-view's base stylesheet is not imported anywhere — these two rules from it
+     matter: without pre-wrap, consecutive spaces collapse and trailing spaces vanish while
+     typing (basis-stabilisierung-req.md Querschnitt §2.6). */
+  white-space: pre-wrap;
+  word-wrap: break-word;
+}
+
+/*
+ * prosemirror-gapcursor draws the caret for positions that have no text block (before/after
+ * a boundary table or image) as an empty <div> styled entirely by CSS — the stylesheet the
+ * package ships is not imported anywhere, so the gap cursor was INVISIBLE: users could not
+ * see that clicking above/below a table had worked (basis-stabilisierung-req.md B2, §0.7).
+ * Rules adapted from prosemirror-gapcursor/style/gapcursor.css; the blink matches the
+ * native caret. Pages stay white in dark mode, so the dark line keeps its contrast.
+ */
+.ProseMirror-gapcursor {
+  display: none;
+  pointer-events: none;
+  position: absolute;
+}
+.ProseMirror-gapcursor::after {
+  content: '';
+  display: block;
+  position: absolute;
+  top: -2px;
+  width: 20px;
+  border-top: 1px solid #111827;
+  animation: ProseMirror-cursor-blink 1.1s steps(2, start) infinite;
+}
+@keyframes ProseMirror-cursor-blink {
+  to {
+    visibility: hidden;
+  }
+}
+.ProseMirror-focused .ProseMirror-gapcursor {
+  display: block;
 }
 
 .ProseMirror p,

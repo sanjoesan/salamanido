@@ -4,6 +4,7 @@ import type { Command, EditorState } from 'prosemirror-state'
 import { toggleMark } from 'prosemirror-commands'
 import { wordSchema } from '../schema'
 import {
+  activeColor,
   addColumnAfter,
   addColumnBefore,
   addRowAfter,
@@ -21,6 +22,8 @@ import {
   insertImage,
   isAlignActive,
   isInTable,
+  isListActive,
+  isMarkActive,
   liftFromList,
   mergeCellsWithCursor,
   setAlign,
@@ -41,6 +44,12 @@ interface ToolbarProps {
 function run(view: EditorView, command: Command) {
   command(view.state, view.dispatch, view)
   view.focus()
+}
+
+/** `<input type="color">` only accepts #rrggbb — map a missing/mixed/non-hex colour to a
+ * neutral default instead of provoking a React controlled-input warning. */
+function swatchValue(color: string | null, fallback: string): string {
+  return color && /^#[0-9a-fA-F]{6}$/.test(color) ? color : fallback
 }
 
 /**
@@ -89,17 +98,20 @@ function MarkButton({
   glyphClassName?: string
 }) {
   const markType = wordSchema.marks[mark]
-  const active = markType.isInSet(view.state.selection.$from.marks()) !== undefined
+  // Whole-range active state incl. storedMarks (basis-stabilisierung-req.md B1): the button
+  // lights up for a pending mark at a collapsed cursor and only when a range selection is
+  // formatted THROUGHOUT. `removeWhenPresent: false` gives the matching Word toggle
+  // semantics: a partially bold selection becomes fully bold first; only a fully bold one
+  // is unbolded — so "button active" always means "next click turns it off".
+  const active = isMarkActive(view.state, markType)
   return (
     <button
       type="button"
       title={title}
       aria-label={title}
       aria-pressed={active}
-      onMouseDown={(e) => {
-        e.preventDefault()
-        run(view, toggleMark(markType))
-      }}
+      onMouseDown={(e) => e.preventDefault()}
+      onClick={() => run(view, toggleMark(markType, null, { removeWhenPresent: false }))}
       className={`px-2 py-1 rounded text-sm border ${
         active
           ? 'bg-neutral-900 text-white border-neutral-900 dark:bg-neutral-100 dark:text-neutral-900'
@@ -118,10 +130,42 @@ function AlignButton({ view, align, label }: { view: EditorView; align: Align; l
       type="button"
       title={`Ausrichtung: ${align}`}
       aria-pressed={active}
-      onMouseDown={(e) => {
-        e.preventDefault()
-        run(view, setAlign(align))
-      }}
+      onMouseDown={(e) => e.preventDefault()}
+      onClick={() => run(view, setAlign(align))}
+      className={`px-2 py-1 rounded text-sm border ${
+        active
+          ? 'bg-neutral-900 text-white border-neutral-900 dark:bg-neutral-100 dark:text-neutral-900'
+          : 'border-transparent hover:bg-neutral-100 dark:hover:bg-neutral-800 text-neutral-700 dark:text-neutral-300'
+      }`}
+    >
+      {label}
+    </button>
+  )
+}
+
+/** List toggle with a visible + aria-pressed active state (basis-stabilisierung-req.md B1 —
+ * the list buttons previously carried no active indication at all). Same activation pattern
+ * as every format button: mousedown only preserves the selection, click fires the command
+ * (mouse, Enter AND Space). */
+function ListButton({
+  view,
+  ordered,
+  title,
+  label,
+}: {
+  view: EditorView
+  ordered: boolean
+  title: string
+  label: string
+}) {
+  const active = isListActive(view.state, ordered)
+  return (
+    <button
+      type="button"
+      title={title}
+      aria-pressed={active}
+      onMouseDown={(e) => e.preventDefault()}
+      onClick={() => run(view, ordered ? toggleList(true) : toggleList(false))}
       className={`px-2 py-1 rounded text-sm border ${
         active
           ? 'bg-neutral-900 text-white border-neutral-900 dark:bg-neutral-100 dark:text-neutral-900'
@@ -352,22 +396,24 @@ export function Toolbar({ view, cutError, setCutError, onOpenTableDialog }: Tool
 
       <div className="w-px h-5 bg-neutral-300 dark:bg-neutral-700 mx-1" />
 
+      {/* The swatch VALUE mirrors the colour at the cursor/selection (incl. a pending stored
+          colour); a neutral default shows when unset or mixed — the field no longer displays
+          whatever was last picked regardless of the document (B1 §2.1 "Farbfelder"). */}
       <label className="flex items-center gap-1 text-sm text-neutral-600 dark:text-neutral-400" title="Textfarbe">
         <span aria-hidden>A</span>
         <input
           aria-label="Textfarbe"
           type="color"
           className="w-6 h-6 p-0 border-0 bg-transparent"
+          value={swatchValue(activeColor(view.state, 'textColor'), '#000000')}
           onChange={(e) => run(view, applyMarkColor('textColor', e.target.value))}
         />
       </label>
       <button
         type="button"
         title="Textfarbe entfernen"
-        onMouseDown={(e) => {
-          e.preventDefault()
-          run(view, clearMarkColor('textColor'))
-        }}
+        onMouseDown={(e) => e.preventDefault()}
+        onClick={() => run(view, clearMarkColor('textColor'))}
         className="px-1.5 py-1 text-xs rounded hover:bg-neutral-100 dark:hover:bg-neutral-800 text-neutral-500"
       >
         ⌫
@@ -378,16 +424,15 @@ export function Toolbar({ view, cutError, setCutError, onOpenTableDialog }: Tool
           aria-label="Hervorhebungsfarbe"
           type="color"
           className="w-6 h-6 p-0 border-0 bg-transparent"
+          value={swatchValue(activeColor(view.state, 'highlight'), '#ffff00')}
           onChange={(e) => run(view, applyMarkColor('highlight', e.target.value))}
         />
       </label>
       <button
         type="button"
         title="Hervorhebung entfernen"
-        onMouseDown={(e) => {
-          e.preventDefault()
-          run(view, clearMarkColor('highlight'))
-        }}
+        onMouseDown={(e) => e.preventDefault()}
+        onClick={() => run(view, clearMarkColor('highlight'))}
         className="px-1.5 py-1 text-xs rounded hover:bg-neutral-100 dark:hover:bg-neutral-800 text-neutral-500"
       >
         ⌫
@@ -402,35 +447,13 @@ export function Toolbar({ view, cutError, setCutError, onOpenTableDialog }: Tool
 
       <div className="w-px h-5 bg-neutral-300 dark:bg-neutral-700 mx-1" />
 
-      <button
-        type="button"
-        title="Aufzählung"
-        onMouseDown={(e) => {
-          e.preventDefault()
-          run(view, toggleList(false))
-        }}
-        className="px-2 py-1 rounded text-sm hover:bg-neutral-100 dark:hover:bg-neutral-800 text-neutral-700 dark:text-neutral-300"
-      >
-        • Liste
-      </button>
-      <button
-        type="button"
-        title="Nummerierte Liste"
-        onMouseDown={(e) => {
-          e.preventDefault()
-          run(view, toggleList(true))
-        }}
-        className="px-2 py-1 rounded text-sm hover:bg-neutral-100 dark:hover:bg-neutral-800 text-neutral-700 dark:text-neutral-300"
-      >
-        1. Liste
-      </button>
+      <ListButton view={view} ordered={false} title="Aufzählung" label="• Liste" />
+      <ListButton view={view} ordered={true} title="Nummerierte Liste" label="1. Liste" />
       <button
         type="button"
         title="Liste aufheben"
-        onMouseDown={(e) => {
-          e.preventDefault()
-          run(view, liftFromList())
-        }}
+        onMouseDown={(e) => e.preventDefault()}
+        onClick={() => run(view, liftFromList())}
         className="px-2 py-1 rounded text-sm hover:bg-neutral-100 dark:hover:bg-neutral-800 text-neutral-700 dark:text-neutral-300"
       >
         ⇧ Liste
