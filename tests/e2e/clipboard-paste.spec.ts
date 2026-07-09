@@ -138,10 +138,15 @@ test('3.11/Grenzfall 15: pasted script/onerror is neutralised, text survives', a
   expect(alerted).toBe(false)
 })
 
-test('Grenzfall 20: pasted hyperlink keeps its visible text, drops the link', async ({ page }) => {
+test('Grenzfall 20 (aktualisiert): pasted hyperlink keeps text AND link target', async ({ page }) => {
+  // Bis zur Einführung des link-Marks (hyperlink-einfuegen-req.md) wurde der Link
+  // mangels Schema-Regel auf Text reduziert — das war die damals dokumentierte
+  // Erwartung dieses Grenzfalls. Seit dem Mark bleibt die Ziel-URL beim HTML-Paste
+  // erhalten (javascript:-URLs entschärft der Sanitizer weiterhin vorab).
   await paste(page, { html: '<p>Vor <a href="https://x.test">Link-Text</a> nach</p>' })
   await expect(editor(page)).toContainText('Vor Link-Text nach')
-  await expect(editor(page).locator('a')).toHaveCount(0)
+  await expect(editor(page).locator('a[href="https://x.test"]')).toHaveCount(1)
+  await expect(editor(page).locator('a')).toHaveText('Link-Text')
 })
 
 test('Grenzfall 21: plain text inherits surrounding marks; plain-paste mode does not', async ({ page }) => {
