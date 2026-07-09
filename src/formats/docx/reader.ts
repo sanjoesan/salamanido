@@ -447,7 +447,7 @@ function parseTable(tblEl: Element, headingInfo: HeadingInfo, imageRels: Map<str
  * identisch"). Without this, every paragraph sharing a `numId` collapses into one flat
  * list regardless of its `w:ilvl`.
  */
-function groupLists(items: Array<{ marker: ListMarker; block: JsonNode }>, kindByNumId: ListKindsByNumId): JsonNode[] {
+function groupLists(items: Array<{ marker: ListMarker; blocks: JsonNode[] }>, kindByNumId: ListKindsByNumId): JsonNode[] {
   interface Frame {
     numId: string
     ilvl: number
@@ -477,10 +477,10 @@ function groupLists(items: Array<{ marker: ListMarker; block: JsonNode }>, kindB
     while (stack.length) closeFrame()
   }
 
-  for (const { marker, block } of items) {
+  for (const { marker, blocks } of items) {
     if (!marker.numId) {
       closeAll()
-      result.push(block)
+      result.push(...blocks)
       continue
     }
     const { numId, ilvl } = marker
@@ -504,7 +504,7 @@ function groupLists(items: Array<{ marker: ListMarker; block: JsonNode }>, kindB
       }
     }
     const currentTop = stack[stack.length - 1]
-    ;(currentTop.node.content as JsonNode[]).push({ type: 'list_item', content: [block] })
+    ;(currentTop.node.content as JsonNode[]).push({ type: 'list_item', content: blocks })
   }
   closeAll()
   return result
@@ -539,15 +539,23 @@ async function readBodyChildren(
   imageRels: Map<string, string>,
   zip: JSZip,
 ): Promise<JsonNode[]> {
-  const items: Array<{ marker: ListMarker; block: JsonNode }> = []
+  const items: Array<{ marker: ListMarker; blocks: JsonNode[] }> = []
   for (const child of Array.from(bodyEl.children)) {
     if (child.namespaceURI === OOXML_NAMESPACES.w && child.localName === 'p') {
       const marker = listMarkerFor(child)
-      for (const block of paragraphToBlocks(child, headingInfo, imageRels)) {
-        items.push({ marker: block.type === 'paragraph' ? marker : { numId: null, ilvl: 0 }, block })
+      const blocks = paragraphToBlocks(child, headingInfo, imageRels)
+      if (marker.numId && blocks.length > 0) {
+        // ALL blocks a list paragraph splits into (text parts, inline images, rescued
+        // unsupported content) stay together in ONE list item — previously only the
+        // `paragraph` parts kept the marker, so an image-only list point fell OUT of
+        // its list and split it in two (liste-einruecken-tab-req.md Befund C /
+        // Grenzfall 4.6; `list_item` is `block+`, so any block mix is schema-legal).
+        items.push({ marker, blocks })
+      } else {
+        for (const block of blocks) items.push({ marker: { numId: null, ilvl: 0 }, blocks: [block] })
       }
     } else if (child.namespaceURI === OOXML_NAMESPACES.w && child.localName === 'tbl') {
-      items.push({ marker: { numId: null, ilvl: 0 }, block: parseTable(child, headingInfo, imageRels) })
+      items.push({ marker: { numId: null, ilvl: 0 }, blocks: [parseTable(child, headingInfo, imageRels)] })
     }
   }
   const grouped = groupLists(items, kindByNumId)

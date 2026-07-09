@@ -684,7 +684,11 @@ Der **Writer** behält vorgabegemäß sein statisches Schema (§5A Option B).
   den Word-üblichen Einzug je Ebene (`w:ind` 720 Twips/Ebene, 360 hängend) — damit ist
   auch die per-Ebene-Einrückung in Word/LibreOffice sichtbar (Befund C Zeile 5 Punkte
   a+b; Unit-Tests in `styleDefs.test.ts`).
-- **(d) DOCX-Import bildreiner Listenpunkte** — unverändert (vorbestehend).
+- ~~**(d) DOCX-Import bildreiner Listenpunkte**~~ **BEHOBEN (gleicher Abend):** die
+  Marker-Zuordnung bündelt jetzt ALLE Blöcke eines Listen-Absatzes (Textteile, Bilder,
+  gerettete unsupported-Inhalte) in EINEM `list_item` (`block+` erlaubt das) — ein
+  bildreiner Listenpunkt fällt nicht mehr aus der Liste und spaltet sie nicht mehr
+  (synthetischer Nachbau in `mixed-list-import.test.ts`, Grenzfall 4.6).
 - **ODT-Darstellung ab `text:level="2"`** (Befund C/4.10): Stildefinitionen weiterhin
   nur für Ebene 1; die Rundreise-STRUKTUR ist unberührt (E2E-belegt), nur die optische
   Feindarstellung in LibreOffice bleibt Ebene-1-artig. Zusammen mit dem
