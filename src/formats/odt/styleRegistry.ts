@@ -111,9 +111,30 @@ export function headingStyleDefs(): string {
 export const BULLET_LIST_STYLE_NAME = 'LB'
 export const ORDERED_LIST_STYLE_NAME = 'LO'
 
+// All 10 ODF list levels get a real definition (previously only text:level="1"): a
+// nested level exported to ODT otherwise had no bullet glyph/number format/indent of
+// its own in LibreOffice (liste-einruecken-tab-req.md Befund C — the ODT twin of the
+// DOCX numbering-levels fix). Glyphs/number formats cycle like their DOCX counterparts
+// in docx/styleDefs.ts; the label indent grows 0.5cm per level.
+const ODT_BULLET_GLYPHS = ['•', '◦', '▪']
+const ODT_NUMBER_FORMATS = ['1', 'a', 'i']
+const ODF_MAX_LIST_LEVEL = 10
+
+function listLevelProps(level: number): string {
+  return `<style:list-level-properties text:space-before="${(0.5 * level).toFixed(1)}cm" text:min-label-width="0.5cm"/>`
+}
+
 export function listStyleDefs(): string {
+  const bulletLevels = Array.from({ length: ODF_MAX_LIST_LEVEL }, (_, i) => {
+    const level = i + 1
+    return `<text:list-level-style-bullet text:level="${level}" text:bullet-char="${ODT_BULLET_GLYPHS[i % ODT_BULLET_GLYPHS.length]}">${listLevelProps(level)}</text:list-level-style-bullet>`
+  }).join('')
+  const numberLevels = Array.from({ length: ODF_MAX_LIST_LEVEL }, (_, i) => {
+    const level = i + 1
+    return `<text:list-level-style-number text:level="${level}" style:num-format="${ODT_NUMBER_FORMATS[i % ODT_NUMBER_FORMATS.length]}" style:num-suffix=".">${listLevelProps(level)}</text:list-level-style-number>`
+  }).join('')
   return (
-    `<text:list-style style:name="${BULLET_LIST_STYLE_NAME}"><text:list-level-style-bullet text:level="1" text:bullet-char="•"><style:list-level-properties text:space-before="0.5cm" text:min-label-width="0.5cm"/></text:list-level-style-bullet></text:list-style>` +
-    `<text:list-style style:name="${ORDERED_LIST_STYLE_NAME}"><text:list-level-style-number text:level="1" style:num-format="1" style:num-suffix="."><style:list-level-properties text:space-before="0.5cm" text:min-label-width="0.5cm"/></text:list-level-style-number></text:list-style>`
+    `<text:list-style style:name="${BULLET_LIST_STYLE_NAME}">${bulletLevels}</text:list-style>` +
+    `<text:list-style style:name="${ORDERED_LIST_STYLE_NAME}">${numberLevels}</text:list-style>`
   )
 }

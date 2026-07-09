@@ -689,7 +689,8 @@ Der **Writer** behält vorgabegemäß sein statisches Schema (§5A Option B).
   gerettete unsupported-Inhalte) in EINEM `list_item` (`block+` erlaubt das) — ein
   bildreiner Listenpunkt fällt nicht mehr aus der Liste und spaltet sie nicht mehr
   (synthetischer Nachbau in `mixed-list-import.test.ts`, Grenzfall 4.6).
-- **ODT-Darstellung ab `text:level="2"`** (Befund C/4.10): Stildefinitionen weiterhin
-  nur für Ebene 1; die Rundreise-STRUKTUR ist unberührt (E2E-belegt), nur die optische
-  Feindarstellung in LibreOffice bleibt Ebene-1-artig. Zusammen mit dem
-  Word-Verbundformat dem Slug `mehrstufige-liste` zugeordnet (Abnahmekriterium 9).
+- ~~**ODT-Darstellung ab `text:level="2"`**~~ **BEHOBEN (gleicher Abend):** `LB`/`LO`
+  definieren jetzt alle 10 ODF-Ebenen (Symbole bzw. Zahlenformate 1/a/i zyklisch wie das
+  DOCX-Pendant, Label-Einzug wächst 0,5 cm je Ebene) — `styleRegistry.test.ts`. Beim
+  Slug `mehrstufige-liste` verbleibt nur noch das Word-VERBUNDformat („1.1") und der
+  §5A-Writer-Teil (Abnahmekriterium 9).
