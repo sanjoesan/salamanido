@@ -9,7 +9,7 @@ import { tableEditing, columnResizing } from 'prosemirror-tables'
 import { dropCursor } from 'prosemirror-dropcursor'
 import { gapCursor, GapCursor } from 'prosemirror-gapcursor'
 import { wordSchema } from '../schema'
-import { cutSelection, insertHardBreak, insertTable, selectedImage } from './commands'
+import { cutSelection, insertHardBreak, insertPageBreak, insertTable, selectedImage } from './commands'
 import { clipboardTextSerializer } from './clipboard'
 import { createPastePlugin } from './paste'
 import { createPaginationPlugin } from './pagination'
@@ -203,7 +203,13 @@ export function WordEditor({ document: doc, onChange }: FormatEditorProps<WordDo
     if (!el) return
     const FLOW_PERIOD = PAGE_CONTENT_HEIGHT_PX + PAGE_GAP_PX // one page of content + one spacer
     const update = () => {
-      const pages = Math.max(1, Math.floor(el.offsetHeight / FLOW_PERIOD) + 1)
+      const flowPages = Math.max(1, Math.floor(el.offsetHeight / FLOW_PERIOD) + 1)
+      // The pagination plugin's spacers know the TRUE page count — a manual page break
+      // (seitenumbruch-req.md §3.8) forces a new page long before the flow height alone
+      // would suggest one. Spacer insertion/removal always changes the flow height by
+      // PAGE_GAP_PX, so this ResizeObserver re-runs on every pagination change.
+      const spacerPages = el.querySelectorAll('.page-break-spacer').length + 1
+      const pages = Math.max(flowPages, spacerPages)
       setPageMinHeight(pages * FLOW_PERIOD - PAGE_GAP_PX + 2 * PAGE_MARGIN_PX)
     }
     update()
@@ -254,6 +260,10 @@ export function WordEditor({ document: doc, onChange }: FormatEditorProps<WordDo
           'Mod-Shift-z': redo,
           Enter: splitListItem(wordSchema.nodes.list_item),
           'Shift-Enter': insertHardBreak(),
+          // Strg/Cmd+Enter = manueller Seitenumbruch — der in Word UND LibreOffice
+          // identische Standard-Shortcut (seitenumbruch-req.md §1.2). Bewusst getrennt
+          // von Shift-Enter (Zeilenumbruch) — zwei verschiedene Konzepte (§3.11).
+          'Mod-Enter': insertPageBreak(setPasteNotice),
           'Mod-b': toggleMark(wordSchema.marks.strong),
           'Mod-i': toggleMark(wordSchema.marks.em),
           'Mod-u': toggleMark(wordSchema.marks.underline),
@@ -441,6 +451,7 @@ export function WordEditor({ document: doc, onChange }: FormatEditorProps<WordDo
           cutError={cutError}
           setCutError={setCutError}
           onOpenTableDialog={() => setTableDialogOpen(true)}
+          onNotice={setPasteNotice}
         />
       )}
       {activeView && tableDialogOpen && (

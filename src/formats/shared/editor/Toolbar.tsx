@@ -20,6 +20,7 @@ import {
   deleteRowOrTable,
   deleteTableAtSelection,
   insertImage,
+  insertPageBreak,
   isAlignActive,
   isInTable,
   isListActive,
@@ -39,6 +40,9 @@ interface ToolbarProps {
   setCutError: (message: string | null) => void
   /** Opens the table-size chooser (replaces the old fixed 2×2 insert). */
   onOpenTableDialog: () => void
+  /** Transient, auto-dismissing status banner (shared with the paste pipeline) —
+   * used by the page-break fallback inside tables/lists (seitenumbruch-req.md §3.10). */
+  onNotice: (message: string) => void
 }
 
 function run(view: EditorView, command: Command) {
@@ -255,6 +259,16 @@ const IconTableDelete = (
     <path d="M4.5 5.5l15 13M19.5 5.5l-15 13" />
   </TableIcon>
 )
+// Seitenumbruch: obere und untere Seitenhälfte, getrennt durch eine gestrichelte
+// Umbruchlinie (seitenumbruch-req.md §1.1 — eingebettetes SVG, kein Unicode-Zeichen).
+const IconPageBreak = (
+  <TableIcon>
+    <path d="M5 9V4.5A1.5 1.5 0 0 1 6.5 3h11A1.5 1.5 0 0 1 19 4.5V9" />
+    <path d="M5 15v4.5A1.5 1.5 0 0 0 6.5 21h11a1.5 1.5 0 0 0 1.5-1.5V15" />
+    <line x1="3.5" y1="12" x2="20.5" y2="12" strokeDasharray="3 2.5" />
+  </TableIcon>
+)
+
 // Merge = two arrows pointing inward (no divider); Split = a centre divider with two arrows
 // pointing outward — opposites, distinguishable without the tooltip (req §1 #1/#2).
 const IconMergeCells = (
@@ -318,7 +332,7 @@ function TableOpButton({
   )
 }
 
-export function Toolbar({ view, cutError, setCutError, onOpenTableDialog }: ToolbarProps) {
+export function Toolbar({ view, cutError, setCutError, onOpenTableDialog, onNotice }: ToolbarProps) {
   function currentHeadingLevel(): string {
     const { $from } = view.state.selection
     for (let depth = $from.depth; depth >= 0; depth--) {
@@ -539,6 +553,21 @@ export function Toolbar({ view, cutError, setCutError, onOpenTableDialog }: Tool
         🖼 Bild
         <input type="file" accept="image/*" className="hidden" onChange={handleImagePick} />
       </label>
+
+      {/* Manueller Seitenumbruch (seitenumbruch-req.md §1.1) — eigenes SVG-Icon (kein
+          Unicode-Zeichen), zugänglicher Name über title UND aria-label, Aktivierung über
+          onClick (Maus, Enter UND Leertaste). Gleicher Command wie Strg+Enter. */}
+      <button
+        type="button"
+        title="Seitenumbruch einfügen"
+        aria-label="Seitenumbruch einfügen"
+        onMouseDown={(e) => e.preventDefault()}
+        onClick={() => run(view, insertPageBreak(onNotice))}
+        className="px-2 py-1 rounded text-sm hover:bg-neutral-100 dark:hover:bg-neutral-800 text-neutral-700 dark:text-neutral-300 inline-flex items-center gap-1"
+      >
+        {IconPageBreak}
+        <span>Umbruch</span>
+      </button>
     </div>
   )
 }

@@ -23,6 +23,10 @@ interface RunStyle {
 interface ParsedStyles {
   textStyles: Map<string, RunStyle>
   paragraphAligns: Map<string, string>
+  /** Styles (family "paragraph") carrying a manual page break: fo:break-before="page"
+   * and/or fo:break-after="page" — both occur in real LibreOffice files
+   * (seitenumbruch-req.md §0.10/§3.7, fixture pagebreaks.odt). */
+  paragraphBreaks: Map<string, { before: boolean; after: boolean }>
   listKinds: Map<string, 'bullet' | 'ordered'>
 }
 
@@ -37,8 +41,9 @@ function firstChildNS(el: Element, ns: string, localName: string): Element | nul
 function parseAutomaticStyles(automaticStylesEl: Element | null): ParsedStyles {
   const textStyles = new Map<string, RunStyle>()
   const paragraphAligns = new Map<string, string>()
+  const paragraphBreaks = new Map<string, { before: boolean; after: boolean }>()
   const listKinds = new Map<string, 'bullet' | 'ordered'>()
-  if (!automaticStylesEl) return { textStyles, paragraphAligns, listKinds }
+  if (!automaticStylesEl) return { textStyles, paragraphAligns, paragraphBreaks, listKinds }
 
   for (const styleEl of childElements(automaticStylesEl, ODF_NAMESPACES.style, 'style')) {
     const name = styleEl.getAttributeNS(ODF_NAMESPACES.style, 'name')
@@ -64,6 +69,13 @@ function parseAutomaticStyles(automaticStylesEl: Element | null): ParsedStyles {
       const props = firstChildNS(styleEl, ODF_NAMESPACES.style, 'paragraph-properties')
       const align = props?.getAttributeNS(ODF_NAMESPACES.fo, 'text-align')
       if (align) paragraphAligns.set(name, align)
+      // Manual page breaks live on the paragraph style (LibreOffice's own encoding).
+      // `text:soft-page-break` elements are deliberately NOT read here or anywhere —
+      // they are a pure rendering hint for an AUTOMATIC break, not a manual one
+      // (seitenumbruch-req.md §3.7, fixture text-extract.odt).
+      const before = props?.getAttributeNS(ODF_NAMESPACES.fo, 'break-before') === 'page'
+      const after = props?.getAttributeNS(ODF_NAMESPACES.fo, 'break-after') === 'page'
+      if (before || after) paragraphBreaks.set(name, { before, after })
     }
   }
 
@@ -74,7 +86,7 @@ function parseAutomaticStyles(automaticStylesEl: Element | null): ParsedStyles {
     listKinds.set(name, hasNumber ? 'ordered' : 'bullet')
   }
 
-  return { textStyles, paragraphAligns, listKinds }
+  return { textStyles, paragraphAligns, paragraphBreaks, listKinds }
 }
 
 const EMPTY_REDLINE_MARKER_NAMES = new Set([
@@ -371,7 +383,36 @@ async function resolveImageSources(
 }
 
 async function readOfficeTextChildren(bodyTextEl: Element, styles: ParsedStyles, zip: JSZip): Promise<JsonNode[]> {
-  const blocks = Array.from(bodyTextEl.children).flatMap((child) => elementToBlocks(child, styles))
+  // Manual page breaks (fo:break-before/-after="page" on the paragraph style) are
+  // translated into top-level page_break nodes here — and ONLY here: a break style on a
+  // paragraph nested inside a table cell is deliberately not translated, matching how
+  // LibreOffice itself renders such files (LO bug 35585; real fixtures
+  // no_pagebreak.odt / 35585_-_no_pagebreak.odt — seitenumbruch-req.md Grenzfall 4).
+  const blocks: JsonNode[] = []
+  for (const child of Array.from(bodyTextEl.children)) {
+    const isParagraphLike =
+      child.namespaceURI === ODF_NAMESPACES.text && (child.localName === 'p' || child.localName === 'h')
+    const styleName = isParagraphLike ? child.getAttributeNS(ODF_NAMESPACES.text, 'style-name') : null
+    const breaks = (styleName && styles.paragraphBreaks.get(styleName)) || { before: false, after: false }
+    const childBlocks = elementToBlocks(child, styles)
+    if (breaks.before) {
+      blocks.push({ type: 'page_break' })
+      // An EMPTY paragraph whose style only carries the break is a pure break carrier
+      // (our own writer emits exactly that before tables/lists/images and at the doc
+      // end; LibreOffice produces the same shape for Ctrl+Enter on an empty line) —
+      // collapse it to the bare page_break instead of leaving a stray empty paragraph
+      // at the top of the new page (seitenumbruch-req.md §3.6, Grenzfall 10).
+      const isEmptyCarrier =
+        childBlocks.length === 1 && childBlocks[0].type === 'paragraph' && !childBlocks[0].content?.length
+      if (!isEmptyCarrier) blocks.push(...childBlocks)
+    } else {
+      blocks.push(...childBlocks)
+    }
+    if (breaks.after) blocks.push({ type: 'page_break' })
+  }
+  // A document ending on a break gets a caret home on the new page — same
+  // normalisation as the insertPageBreak command (Grenzfall 2).
+  if (blocks[blocks.length - 1]?.type === 'page_break') blocks.push(emptyParagraph())
   await resolveImageSources(zip, blocks)
   return blocks
 }

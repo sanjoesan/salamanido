@@ -4,6 +4,7 @@ import { escapeXml, NAMESPACE_DECLARATIONS } from './xmlUtil'
 import {
   TextStyleRegistry,
   PARAGRAPH_ALIGN_STYLE_NAME,
+  PARAGRAPH_ALIGN_BREAK_STYLE_NAME,
   paragraphAlignStyleDefs,
   headingStyleDefs,
   headingStyleName,
@@ -83,11 +84,28 @@ function inlineToOdt(nodes: JsonNode[] | undefined, styles: TextStyleRegistry): 
     .join('')
 }
 
-function blockToOdt(node: JsonNode, styles: TextStyleRegistry, images: ImageCollector, tableNames: TableNameSequence): string {
+// Empty break-carrier paragraph: used when the block after a page_break cannot carry
+// `fo:break-before` on its own style (table/list/image/unsupported — or the break is the
+// last block). The reader collapses exactly this shape (empty paragraph whose style
+// breaks before) back into a bare page_break node, so the round trip stays clean
+// (seitenumbruch-req.md §3.6, Grenzfall 10).
+function breakCarrierParagraphXml(): string {
+  return `<text:p text:style-name="${PARAGRAPH_ALIGN_BREAK_STYLE_NAME.left}"/>`
+}
+
+function blockToOdt(
+  node: JsonNode,
+  styles: TextStyleRegistry,
+  images: ImageCollector,
+  tableNames: TableNameSequence,
+  breakBefore = false,
+): string {
   switch (node.type) {
     case 'paragraph': {
       const align = (node.attrs?.align as string) ?? 'left'
-      const styleName = PARAGRAPH_ALIGN_STYLE_NAME[align] ?? PARAGRAPH_ALIGN_STYLE_NAME.left
+      const styleName = breakBefore
+        ? (PARAGRAPH_ALIGN_BREAK_STYLE_NAME[align] ?? PARAGRAPH_ALIGN_BREAK_STYLE_NAME.left)
+        : (PARAGRAPH_ALIGN_STYLE_NAME[align] ?? PARAGRAPH_ALIGN_STYLE_NAME.left)
       const inner = inlineToOdt(node.content, styles)
       return `<text:p text:style-name="${styleName}">${inner}</text:p>`
     }
@@ -95,8 +113,14 @@ function blockToOdt(node: JsonNode, styles: TextStyleRegistry, images: ImageColl
       const level = Number(node.attrs?.level ?? 1)
       const align = (node.attrs?.align as string) ?? 'left'
       const inner = inlineToOdt(node.content, styles)
-      return `<text:h text:style-name="${headingStyleName(level, align)}" text:outline-level="${level}">${inner}</text:h>`
+      return `<text:h text:style-name="${headingStyleName(level, align, breakBefore)}" text:outline-level="${level}">${inner}</text:h>`
     }
+    case 'page_break':
+      // Only reached for a page_break NESTED inside a cell/list/unsupported block —
+      // top-level ones are folded into their following block's style by blocksToOdt.
+      // (LibreOffice does not render in-cell page breaks — LO bug 35585 — but the
+      // information is preserved in the file rather than silently dropped.)
+      return breakCarrierParagraphXml()
     case 'bullet_list':
     case 'ordered_list': {
       const listStyleName = node.type === 'ordered_list' ? ORDERED_LIST_STYLE_NAME : BULLET_LIST_STYLE_NAME
@@ -204,13 +228,38 @@ function blockToOdt(node: JsonNode, styles: TextStyleRegistry, images: ImageColl
   }
 }
 
+/**
+ * Serialises the top-level blocks. A `page_break` node itself produces no element — the
+ * FOLLOWING paragraph/heading gets the `fo:break-before="page"` variant of its style
+ * (LibreOffice's own encoding, seitenumbruch-req.md §3.6). When the following block is a
+ * table/list/image (no style variant available) or the break is the last block, an empty
+ * break-carrier paragraph is emitted instead — the reader collapses it back to a bare
+ * page_break node on import.
+ */
 function blocksToOdt(
   content: JsonNode[] | undefined,
   styles: TextStyleRegistry,
   images: ImageCollector,
   tableNames: TableNameSequence,
 ): string {
-  return (content ?? []).map((node) => blockToOdt(node, styles, images, tableNames)).join('')
+  const out: string[] = []
+  let pendingBreak = false
+  for (const node of content ?? []) {
+    if (node.type === 'page_break') {
+      if (pendingBreak) out.push(breakCarrierParagraphXml()) // two breaks in a row → empty page (Grenzfall 3)
+      pendingBreak = true
+      continue
+    }
+    if (pendingBreak && (node.type === 'paragraph' || node.type === 'heading')) {
+      out.push(blockToOdt(node, styles, images, tableNames, true))
+    } else {
+      if (pendingBreak) out.push(breakCarrierParagraphXml())
+      out.push(blockToOdt(node, styles, images, tableNames))
+    }
+    pendingBreak = false
+  }
+  if (pendingBreak) out.push(breakCarrierParagraphXml())
+  return out.join('')
 }
 
 function buildContentXml(bodyXml: string, styles: TextStyleRegistry): string {

@@ -240,6 +240,70 @@ export function insertHardBreak(): Command {
   }
 }
 
+/**
+ * Inserts a manual, forced page break at the caret (specs/seitenumbruch-req.md §3.1/§3.2):
+ * a selection is replaced, a caret mid-paragraph splits it like Enter (both halves keep
+ * their block type — consistent with splitBlock, Grenzfall 6), and the caret ends up at
+ * the start of the content after the break. Everything happens in ONE transaction = one
+ * undo step (§3.9), with scrollIntoView (View-Sync).
+ *
+ * Inside a table cell or a list item the break degrades to a LINE break plus a visible
+ * notice (§3.10, Grenzfälle 4/5): Word itself inserts a line break for Ctrl+Enter in a
+ * cell, LibreOffice ignores in-cell page breaks outright (LO bug 35585, real fixtures
+ * no_pagebreak.odt), and the block-level pagination (pagination.ts) cannot split a
+ * table/list across pages anyway — a silent no-op or a torn structure are the two
+ * outcomes this fallback avoids.
+ */
+export function insertPageBreak(onBlocked?: (message: string) => void): Command {
+  return (state, dispatch) => {
+    const { $from } = state.selection
+    let inList = false
+    for (let depth = $from.depth; depth > 0; depth--) {
+      if ($from.node(depth).type === wordSchema.nodes.list_item) {
+        inList = true
+        break
+      }
+    }
+    if (isInTable(state) || inList) {
+      if (dispatch) {
+        dispatch(state.tr.replaceSelectionWith(wordSchema.nodes.hard_break.create()).scrollIntoView())
+        onBlocked?.(
+          `Seitenumbruch ist innerhalb von ${isInTable(state) ? 'Tabellen' : 'Listen'} nicht möglich — Zeilenumbruch eingefügt.`,
+        )
+      }
+      return true
+    }
+    if (!dispatch) return true
+
+    let tr = state.tr
+    if (!tr.selection.empty) tr = tr.deleteSelection()
+    const $pos = tr.selection.$from
+    let insertPos: number
+    if ($pos.depth === 0) {
+      // GapCursor at a top-level boundary (e.g. before/after an edge table) — that
+      // boundary IS the insert position.
+      insertPos = $pos.pos
+    } else if ($pos.parentOffset > 0 && $pos.parentOffset < $pos.parent.content.size) {
+      tr = tr.split($pos.pos, $pos.depth)
+      insertPos = tr.selection.$from.before(1)
+    } else if ($pos.parentOffset === 0) {
+      insertPos = $pos.before(1)
+    } else {
+      insertPos = $pos.after(1)
+    }
+    tr = tr.insert(insertPos, wordSchema.nodes.page_break.create())
+    const afterBreak = insertPos + 1
+    if (afterBreak >= tr.doc.content.size) {
+      // Break at the very end (Grenzfall 2): the new page needs a caret home — Word/
+      // LibreOffice equally show a real empty page with an empty paragraph.
+      tr = tr.insert(afterBreak, wordSchema.nodes.paragraph.create())
+    }
+    tr = tr.setSelection(TextSelection.near(tr.doc.resolve(afterBreak), 1)).scrollIntoView()
+    dispatch(tr)
+    return true
+  }
+}
+
 export function insertTable(rows: number, cols: number): Command {
   return (state, dispatch) => {
     if (dispatch) {

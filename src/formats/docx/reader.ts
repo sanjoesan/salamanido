@@ -115,7 +115,7 @@ function marksFromRunProperties(rPr: Element | null): Array<{ type: string; attr
 }
 
 interface RunLike {
-  kind: 'text' | 'break' | 'image' | 'unsupported'
+  kind: 'text' | 'break' | 'pageBreak' | 'image' | 'unsupported'
   text?: string
   marks?: Array<{ type: string; attrs?: Record<string, unknown> }>
   imageRelId?: string
@@ -195,7 +195,17 @@ function decodeRunElement(rEl: Element, headingInfo: HeadingInfo, imageRels: Map
     if (child.namespaceURI === OOXML_NAMESPACES.w && child.localName === 't') {
       out.push({ kind: 'text', text: child.textContent ?? '', marks: marks.length ? marks : undefined })
     } else if (child.namespaceURI === OOXML_NAMESPACES.w && child.localName === 'br') {
-      out.push({ kind: 'break' })
+      // `w:type="page"` is a MANUAL page break (Word's Ctrl+Enter) and must stay one —
+      // it was previously degraded to a plain line break, a silent data loss
+      // (seitenumbruch-req.md §0.6/§3.5). A `w:br` without type (or type
+      // "textWrapping") remains the plain line break (real evidence: 60329.docx with
+      // 85 such runs, none of which may be promoted).
+      const brType = child.getAttributeNS(OOXML_NAMESPACES.w, 'type')
+      out.push(brType === 'page' ? { kind: 'pageBreak' } : { kind: 'break' })
+    } else if (child.namespaceURI === OOXML_NAMESPACES.w && child.localName === 'lastRenderedPageBreak') {
+      // Word's cached marker for an AUTOMATIC break at last save — deliberately ignored
+      // (it is not a manual break and must not become one; §3.5, previously this fell
+      // through the if/else chain only by accident).
     } else if (child.namespaceURI === OOXML_NAMESPACES.w && (child.localName === 'drawing' || child.localName === 'pict')) {
       out.push(decodeDrawingOrPict(child, headingInfo, imageRels, depth))
     }
@@ -261,7 +271,7 @@ function paragraphToBlocks(
   const level = headingLevelForStyle(styleId, headingInfo)
 
   const runs = decodeParagraphRuns(pEl, headingInfo, imageRels, depth)
-  const hasBlockRun = runs.some((r) => r.kind === 'image' || r.kind === 'unsupported')
+  const hasBlockRun = runs.some((r) => r.kind === 'image' || r.kind === 'unsupported' || r.kind === 'pageBreak')
 
   if (!hasBlockRun) {
     const content = runsToInline(runs)
@@ -279,11 +289,22 @@ function paragraphToBlocks(
   const flush = () => {
     if (buffer.length === 0) return
     const content = runsToInline(buffer)
-    if (content.length > 0) blocks.push({ type: 'paragraph', attrs: { align }, content })
+    // Text parts keep the paragraph's block type: a heading split around a page break
+    // (or an inline image) must not silently degrade its text to plain paragraphs —
+    // the round trip "Überschrift direkt vor/nach dem Umbruch" depends on it
+    // (seitenumbruch-req.md §5.2.6).
+    const type = level ? 'heading' : 'paragraph'
+    const attrs = level ? { level, align } : { align }
+    if (content.length > 0) blocks.push({ type, attrs, content })
     buffer = []
   }
   for (const run of runs) {
-    if (run.kind === 'image') {
+    if (run.kind === 'pageBreak') {
+      // A paragraph containing ONLY a break run collapses to a bare page_break node —
+      // the exact inverse of the writer's standalone break-paragraph (§3.4/§3.5).
+      flush()
+      blocks.push({ type: 'page_break' })
+    } else if (run.kind === 'image') {
       flush()
       const target = run.imageRelId ? imageRels.get(run.imageRelId) : undefined
       blocks.push({
@@ -568,6 +589,11 @@ export async function readDocx(file: File | Blob): Promise<WordDocumentContent> 
     const coreDoc = parseXmlDocument(coreXmlText)
     title = coreDoc.getElementsByTagNameNS(OOXML_NAMESPACES.dc, 'title')[0]?.textContent ?? ''
   }
+
+  // A document ending on a manual page break gets an empty paragraph appended — the
+  // "new page" needs a caret home in the editor (same normalisation the
+  // insertPageBreak command applies, seitenumbruch-req.md Grenzfall 2).
+  if (bodyBlocks[bodyBlocks.length - 1]?.type === 'page_break') bodyBlocks.push(emptyParagraph())
 
   // `doc`'s content model requires at least one block (`block+`) — a header/footer
   // part can legally exist but resolve to zero recognizable blocks (e.g. a header

@@ -65,28 +65,44 @@ export const PARAGRAPH_ALIGN_STYLE_NAME: Record<string, string> = {
   justify: 'Ppara-justify',
 }
 
+// Break-before variants: ODF encodes a manual page break as `fo:break-before="page"` on
+// the style of the paragraph that starts the new page — the exact mechanism LibreOffice
+// Writer's own Ctrl+Enter uses (seitenumbruch-req.md §3.6). One variant per alignment so
+// a break never costs the paragraph its alignment.
+export const PARAGRAPH_ALIGN_BREAK_STYLE_NAME: Record<string, string> = {
+  left: 'Ppara-left-pb',
+  center: 'Ppara-center-pb',
+  right: 'Ppara-right-pb',
+  justify: 'Ppara-justify-pb',
+}
+
 export function paragraphAlignStyleDefs(): string {
-  return Object.entries(PARAGRAPH_ALIGN_STYLE_NAME)
-    .map(
-      ([align, name]) =>
-        `<style:style style:name="${name}" style:family="paragraph" style:parent-style-name="Standard"><style:paragraph-properties fo:text-align="${align}"/></style:style>`,
-    )
-    .join('')
+  const plain = Object.entries(PARAGRAPH_ALIGN_STYLE_NAME).map(
+    ([align, name]) =>
+      `<style:style style:name="${name}" style:family="paragraph" style:parent-style-name="Standard"><style:paragraph-properties fo:text-align="${align}"/></style:style>`,
+  )
+  const withBreak = Object.entries(PARAGRAPH_ALIGN_BREAK_STYLE_NAME).map(
+    ([align, name]) =>
+      `<style:style style:name="${name}" style:family="paragraph" style:parent-style-name="Standard"><style:paragraph-properties fo:text-align="${align}" fo:break-before="page"/></style:style>`,
+  )
+  return [...plain, ...withBreak].join('')
 }
 
 const HEADING_FONT_SIZES: Record<number, number> = { 1: 24, 2: 20, 3: 18, 4: 16, 5: 14, 6: 13 }
 const ALIGNS = ['left', 'center', 'right', 'justify'] as const
 
-export function headingStyleName(level: number, align: string): string {
-  return `Heading${level}-${align}`
+export function headingStyleName(level: number, align: string, breakBefore = false): string {
+  return `Heading${level}-${align}${breakBefore ? '-pb' : ''}`
 }
 
 export function headingStyleDefs(): string {
   return Object.entries(HEADING_FONT_SIZES)
     .flatMap(([level, size]) =>
-      ALIGNS.map(
-        (align) =>
-          `<style:style style:name="${headingStyleName(Number(level), align)}" style:family="paragraph" style:parent-style-name="Standard"><style:paragraph-properties fo:text-align="${align}"/><style:text-properties fo:font-weight="bold" fo:font-size="${size}pt"/></style:style>`,
+      ALIGNS.flatMap((align) =>
+        [false, true].map(
+          (breakBefore) =>
+            `<style:style style:name="${headingStyleName(Number(level), align, breakBefore)}" style:family="paragraph" style:parent-style-name="Standard"><style:paragraph-properties fo:text-align="${align}"${breakBefore ? ' fo:break-before="page"' : ''}/><style:text-properties fo:font-weight="bold" fo:font-size="${size}pt"/></style:style>`,
+        ),
       ),
     )
     .join('')

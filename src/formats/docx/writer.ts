@@ -113,25 +113,34 @@ interface ListContext {
 // defined level rather than emitting an ilvl value Word doesn't recognize.
 const MAX_LIST_ILVL = 8
 
+// A manual page break is encoded the way Word itself encodes Ctrl+Enter: as an inline
+// `<w:br w:type="page"/>` run (seitenumbruch-req.md §3.4 — explicitly NOT
+// `<w:lastRenderedPageBreak/>` and NOT a `w:sectPr` section break). The run is emitted
+// as the FIRST run of the paragraph/heading that follows the page_break node; see
+// blocksToDocx below for the placement rules.
+const PAGE_BREAK_RUN = '<w:r><w:br w:type="page"/></w:r>'
+
 function blockToDocx(
   node: JsonNode,
   images: ImageCollector,
   rels: RelationshipRegistry,
   listContext: ListContext | null = null,
+  breakBefore = false,
 ): string {
+  const breakRun = breakBefore ? PAGE_BREAK_RUN : ''
   switch (node.type) {
     case 'paragraph': {
       const align = (node.attrs?.align as string) ?? 'left'
       const numPr = listContext
         ? `<w:numPr><w:ilvl w:val="${listContext.level}"/><w:numId w:val="${listContext.numId}"/></w:numPr>`
         : ''
-      return `<w:p>${paragraphPropsXml(align, numPr)}${inlineToRuns(node.content)}</w:p>`
+      return `<w:p>${paragraphPropsXml(align, numPr)}${breakRun}${inlineToRuns(node.content)}</w:p>`
     }
     case 'heading': {
       const level = Number(node.attrs?.level ?? 1)
       const align = (node.attrs?.align as string) ?? 'left'
       const styleTag = `<w:pStyle w:val="${HEADING_STYLE_ID(level)}"/>`
-      return `<w:p>${paragraphPropsXml(align, styleTag)}${inlineToRuns(node.content)}</w:p>`
+      return `<w:p>${paragraphPropsXml(align, styleTag)}${breakRun}${inlineToRuns(node.content)}</w:p>`
     }
     case 'bullet_list':
     case 'ordered_list': {
@@ -153,6 +162,12 @@ function blockToDocx(
       return tableToDocx(node, images, rels)
     case 'image':
       return imageParagraphXml(node, images, rels)
+    case 'page_break':
+      // Only reached for a page_break NESTED inside a cell/list/unsupported block
+      // (possible via in-editor paste) — top-level ones are folded into their
+      // following paragraph by blocksToDocx. A break-only paragraph keeps it from
+      // being silently dropped; OOXML permits page-break runs inside cells.
+      return `<w:p>${PAGE_BREAK_RUN}</w:p>`
     case 'unsupported_block':
       // The reader used this node purely to keep otherwise-unsupported content (a
       // textbox, an embedded object) visible instead of silently dropping it (see
@@ -211,8 +226,35 @@ function tableToDocx(node: JsonNode, images: ImageCollector, rels: RelationshipR
   return `<w:tbl><w:tblPr/>${grid}${rowsXml}</w:tbl>`
 }
 
+/**
+ * Serialises the top-level blocks. A `page_break` node itself produces no element —
+ * it turns into an inline `<w:br w:type="page"/>` run placed as the first run of the
+ * FOLLOWING paragraph/heading (renders identically to Word's own trailing-run
+ * encoding and keeps the following block's type intact for the round trip). When the
+ * following block cannot carry an inline run (table/list/image/unsupported — or the
+ * break is the last block), a standalone break-only paragraph is emitted instead;
+ * Word shows that as one empty paragraph mark, which the reader in turn collapses
+ * back to a bare page_break node (seitenumbruch-req.md §3.4, Grenzfall 10).
+ */
 function blocksToDocx(content: JsonNode[] | undefined, images: ImageCollector, rels: RelationshipRegistry): string {
-  return (content ?? []).map((node) => blockToDocx(node, images, rels)).join('')
+  const out: string[] = []
+  let pendingBreak = false
+  for (const node of content ?? []) {
+    if (node.type === 'page_break') {
+      if (pendingBreak) out.push(`<w:p>${PAGE_BREAK_RUN}</w:p>`) // two breaks in a row → empty page (Grenzfall 3)
+      pendingBreak = true
+      continue
+    }
+    if (pendingBreak && (node.type === 'paragraph' || node.type === 'heading')) {
+      out.push(blockToDocx(node, images, rels, null, true))
+    } else {
+      if (pendingBreak) out.push(`<w:p>${PAGE_BREAK_RUN}</w:p>`)
+      out.push(blockToDocx(node, images, rels))
+    }
+    pendingBreak = false
+  }
+  if (pendingBreak) out.push(`<w:p>${PAGE_BREAK_RUN}</w:p>`)
+  return out.join('')
 }
 
 function buildDocumentXml(bodyXml: string, sectPrExtra: string): string {

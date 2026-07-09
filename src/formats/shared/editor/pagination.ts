@@ -8,14 +8,29 @@ import { PAGE_CONTENT_HEIGHT_PX, PAGE_GAP_PX } from './pageLayout'
  * than a whole page is simply left to overflow that page rather than split —
  * true intra-block splitting would require duplicating DOM nodes across pages,
  * which ProseMirror's single-EditorView model doesn't support.
+ *
+ * `forcedIndices` are indices that MUST start a new page regardless of the
+ * accumulated height — the blocks following a manual `page_break` node
+ * (specs/seitenumbruch-req.md §3.8). A forced break resets the height budget,
+ * so a manual break and a subsequent natural overflow break compose correctly;
+ * unlike natural breaks it also fires with an empty page so far (two adjacent
+ * manual breaks = a deliberately empty page in between, Grenzfall 3).
  */
-export function computePageBreakIndices(heights: number[], pageContentHeight: number): number[] {
+export function computePageBreakIndices(
+  heights: number[],
+  pageContentHeight: number,
+  forcedIndices: number[] = [],
+): number[] {
   if (pageContentHeight <= 0) return []
+  const forced = new Set(forcedIndices)
   const breaks: number[] = []
   let cumulative = 0
   for (let i = 0; i < heights.length; i++) {
     const height = heights[i]
-    if (cumulative > 0 && cumulative + height > pageContentHeight) {
+    if (forced.has(i) && i > 0) {
+      breaks.push(i)
+      cumulative = 0
+    } else if (cumulative > 0 && cumulative + height > pageContentHeight) {
       breaks.push(i)
       cumulative = 0
     }
@@ -24,8 +39,8 @@ export function computePageBreakIndices(heights: number[], pageContentHeight: nu
   return breaks
 }
 
-export function computePageCount(heights: number[], pageContentHeight: number): number {
-  return computePageBreakIndices(heights, pageContentHeight).length + 1
+export function computePageCount(heights: number[], pageContentHeight: number, forcedIndices: number[] = []): number {
+  return computePageBreakIndices(heights, pageContentHeight, forcedIndices).length + 1
 }
 
 const paginationKey = new PluginKey<DecorationSet>('pagination')
@@ -45,33 +60,41 @@ function measureAndBuildDecorations(view: EditorView): DecorationSet {
   // zoom factor: we always compare the true, unscaled block heights against the
   // unscaled page-content height. See specs/dokument-darstellung-req.md §3 (edge 4).
   const heights: number[] = []
-  view.state.doc.forEach((_node, offset) => {
+  // The block right after a manual page_break node ALWAYS starts a new page (§3.8).
+  const forcedIndices: number[] = []
+  view.state.doc.forEach((node, offset, index) => {
+    if (node.type.name === 'page_break') forcedIndices.push(index + 1)
     let el: Node | null = view.nodeDOM(offset)
     // Walk up to the element that actually sits in the top-level block flow (tables are
     // wrapped in a `.tableWrapper` div by prosemirror-tables).
     while (el && el.parentNode && el.parentNode !== view.dom) el = el.parentNode
     heights.push(el instanceof HTMLElement ? el.offsetHeight : 0)
   })
-  const breakIndices = computePageBreakIndices(heights, PAGE_CONTENT_HEIGHT_PX)
+  const breakIndices = computePageBreakIndices(heights, PAGE_CONTENT_HEIGHT_PX, forcedIndices)
 
   if (breakIndices.length === 0) return DecorationSet.empty
 
   const breakIndexSet = new Set(breakIndices)
+  const forcedIndexSet = new Set(forcedIndices)
   const decorations: Decoration[] = []
   view.state.doc.forEach((_node, offset, index) => {
     if (breakIndexSet.has(index)) {
+      const manual = forcedIndexSet.has(index)
       decorations.push(
         Decoration.widget(
           offset,
           () => {
             const spacer = document.createElement('div')
-            spacer.className = 'page-break-spacer'
+            // The `--manual` modifier makes a user-forced break distinguishable from an
+            // automatic overflow break in the DOM (seitenumbruch-req.md §1.3/§6.7); the
+            // visible label sits on the page_break node itself (.pm-page-break).
+            spacer.className = manual ? 'page-break-spacer page-break-spacer--manual' : 'page-break-spacer'
             spacer.style.height = `${PAGE_GAP_PX}px`
             spacer.setAttribute('aria-hidden', 'true')
             spacer.setAttribute('contenteditable', 'false')
             return spacer
           },
-          { side: -1, key: `page-break-${index}` },
+          { side: -1, key: `page-break-${index}${manual ? '-manual' : ''}` },
         ),
       )
     }

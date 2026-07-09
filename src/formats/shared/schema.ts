@@ -101,6 +101,27 @@ const nodes: Record<string, NodeSpec> = {
     },
   },
 
+  // Manual, user-forced page break (specs/seitenumbruch-req.md §3.3). Modelled as its
+  // own atom block node (not a paragraph attribute): one uniform representation for
+  // every position (between paragraphs, before/after tables/images/lists, at the doc
+  // end), directly selectable/deletable like an image, and one clean undo step. The
+  // cross-format asymmetry is resolved in the writers/readers: DOCX encodes it as an
+  // inline `<w:br w:type="page"/>` run (docx/writer.ts), ODF as `fo:break-before="page"`
+  // on the following paragraph's style (odt/writer.ts) — see §3.4–3.7 of the req.
+  // parseDOM/toDOM keep it intact across in-editor copy/paste (§3.11).
+  page_break: {
+    group: 'block',
+    atom: true,
+    selectable: true,
+    // Plain-text extractions (clipboard) have no page concept — a line break is the
+    // closest lossless-ish stand-in (same rationale as hard_break's leafText).
+    leafText: () => '\n',
+    parseDOM: [{ tag: 'div[data-page-break]' }],
+    toDOM() {
+      return ['div', { 'data-page-break': 'true', class: 'pm-page-break', role: 'separator', 'aria-label': 'Seitenumbruch' }]
+    },
+  },
+
   // Placeholder for content the reader could not fully interpret (e.g. a DOCX/ODT
   // textbox, embedded chart/OLE object) — keeps at least the recoverable text/blocks
   // visible and editable instead of silently dropping them (see datei-oeffnen-req.md
