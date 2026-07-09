@@ -33,3 +33,6 @@ tsconfig.node.tsbuildinfo
 *.njsproj
 *.sln
 *.sw?
+
+# generated at runtime by tests/e2e/cut.spec.ts (Testfall 8b)
+tests/e2e/fixtures/tiny-cut-8b.png

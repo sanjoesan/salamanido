@@ -40,6 +40,28 @@ async function exportBytes(page: Page): Promise<Buffer> {
   return fs.readFile((await download.path())!)
 }
 
+/** Wartet, bis das Layout der ersten Tabellenzelle über mehrere Messungen stabil steht.
+ * Unter CI-Last (beobachtet auf dem WebKit-Tablet-Projekt) brauchen große Fremddateien
+ * einen Moment, bis Schriften geladen sind und die Paginierung konvergiert — ein sofortiger
+ * Zell-Klick scheitert sonst an einem noch wandernden Ziel ("element is not stable"). */
+async function waitForStableLayout(page: Page) {
+  await page.waitForFunction(
+    () => {
+      const el = document.querySelector('.ProseMirror td, .ProseMirror th')
+      if (!el) return false
+      const r = el.getBoundingClientRect()
+      const key = `${r.x.toFixed(1)},${r.y.toFixed(1)},${r.width.toFixed(1)},${r.height.toFixed(1)}`
+      const w = window as unknown as { __pwStableKey?: string; __pwStableCount?: number }
+      if (w.__pwStableKey === key) w.__pwStableCount = (w.__pwStableCount ?? 0) + 1
+      else w.__pwStableCount = 0
+      w.__pwStableKey = key
+      return (w.__pwStableCount ?? 0) >= 4
+    },
+    undefined,
+    { polling: 150, timeout: 20_000 },
+  )
+}
+
 /** Re-imports previously exported bytes through the real upload UI (back via "Formate"). */
 async function reimport(
   page: Page,
@@ -431,8 +453,11 @@ test.describe('Rundreise: reale Fremddatei-Fixtures', () => {
         return clone.textContent ?? ''
       })
 
-      // Alle Tabellen einzeln über den echten Button löschen (bei Verschachtelung entfernt
-      // ein Klick in eine innere Zelle zuerst die innere Tabelle — die Schleife räumt auf).
+      // Erst das Layout zur Ruhe kommen lassen (CI-Last/WebKit, s. waitForStableLayout) …
+      await waitForStableLayout(page)
+      // … dann alle Tabellen einzeln über den echten Button löschen (bei Verschachtelung
+      // entfernt ein Klick in eine innere Zelle zuerst die innere Tabelle — die Schleife
+      // räumt auf).
       for (let guard = 0; guard < 40 && (await tables(page).count()) > 0; guard++) {
         // Klick nahe der Zell-Ecke (nicht Mitte): landet auch bei verschachtelten Tabellen
         // oder Bildern im Zellinhalt zuverlässig IN der Zelle; 5px bleibt selbst bei durch
