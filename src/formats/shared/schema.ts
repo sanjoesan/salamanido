@@ -249,7 +249,9 @@ const marks: Record<string, MarkSpec> = {
       },
     ],
     toDOM(mark) {
-      return ['a', { href: mark.attrs.href }, 0]
+      // title = Ziel-URL als Hover-Tooltip (hyperlink-einfuegen-req.md §1 #8) — das
+      // Ziel ist so ohne Klick prüfbar; die Optik kommt aus index.css (§3.6).
+      return ['a', { href: mark.attrs.href, title: mark.attrs.href }, 0]
     },
   },
 }

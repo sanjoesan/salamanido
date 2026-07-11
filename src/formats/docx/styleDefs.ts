@@ -24,6 +24,11 @@ export function headingStylesXml(): string {
     `<w:styles ${WORD_NAMESPACE_DECLARATIONS}>` +
     `<w:docDefaults/>` +
     `<w:style w:type="paragraph" w:default="1" w:styleId="Normal"><w:name w:val="Normal"/></w:style>` +
+    // Zeichenvorlage für verlinkte Läufe (hyperlink-einfuegen-req.md §3.12): Words
+    // Hyperlink-Optik (blau #0563C1, unterstrichen) kommt über die referenzierte
+    // Vorlage, nicht über direkte rPr-Werte — so liest der Reader beim Reimport keine
+    // künstlichen textColor/underline-Marks zurück.
+    `<w:style w:type="character" w:styleId="Hyperlink"><w:name w:val="Hyperlink"/><w:rPr><w:color w:val="0563C1"/><w:u w:val="single"/></w:rPr></w:style>` +
     styles +
     `</w:styles>`
   )

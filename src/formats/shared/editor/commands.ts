@@ -572,6 +572,109 @@ export function activeColor(state: EditorState, markName: ColorMarkName): string
   return color ?? null
 }
 
+/**
+ * Normalises raw dialog input into a safe, usable href — or null when the input must be
+ * rejected (specs/hyperlink-einfuegen-req.md §3.3, Grenzfall 4.9):
+ * - leer/Whitespace → null (kein `href=""`),
+ * - `javascript:`/`data:`/`vbscript:` (case-insensitive, auch mit eingestreutem
+ *   Whitespace/Steuerzeichen) → null — XSS-Vektor über `toDOM`s `<a href>` und Export,
+ * - http/https/mailto/tel → unverändert,
+ * - ohne Schema (`beispiel.de/pfad`) → `https://` vorangestellt (Word-/Docs-Verhalten),
+ * - alles Übrige (ftp:, relative Pfade, …) → Rohwert; eine Auflösung relativer Ziele
+ *   wird nicht unterstützt, aber Eingaben dürfen nie crashen.
+ */
+export function normalizeLinkHref(raw: string): string | null {
+  const trimmed = raw.trim()
+  if (!trimmed) return null
+  const schemeProbe = trimmed.replace(/[\s -]+/g, '').toLowerCase()
+  if (/^(javascript|data|vbscript):/.test(schemeProbe)) return null
+  if (/^[a-z][a-z0-9+.-]*:/i.test(trimmed)) return trimmed
+  if (/^[/.#]/.test(trimmed)) return trimmed // relativer Pfad/Anker: roh übernehmen
+  return `https://${trimmed}`
+}
+
+/**
+ * The contiguous linked range around the caret: mark boundaries decide the range, not
+ * the cursor position (specs/hyperlink-einfuegen-req.md §3.4/§3.5). Null when the caret
+ * is not inside a link.
+ */
+export function linkAtSelection(state: EditorState): { href: string; from: number; to: number } | null {
+  const linkType = wordSchema.marks.link
+  const { $from } = state.selection
+  const probe = linkType.isInSet($from.marks())
+  if (!probe) return null
+  const href = probe.attrs.href as string
+  // Inline-Läufe des Absatzes sind lückenlos — vom Lauf unter dem Cursor aus über
+  // direkt angrenzende, GLEICH-verlinkte Läufe (z. B. teils fette Linkteile) wachsen.
+  const parentStart = $from.start()
+  const runs: Array<{ from: number; to: number; linked: boolean }> = []
+  $from.parent.forEach((child, offset) => {
+    const mark = linkType.isInSet(child.marks)
+    runs.push({
+      from: parentStart + offset,
+      to: parentStart + offset + child.nodeSize,
+      linked: !!mark && mark.attrs.href === href,
+    })
+  })
+  const at = runs.findIndex((run) => run.linked && run.from <= $from.pos && $from.pos <= run.to)
+  if (at < 0) return null
+  let { from, to } = runs[at]
+  for (let i = at - 1; i >= 0 && runs[i].linked; i--) from = runs[i].from
+  for (let i = at + 1; i < runs.length && runs[i].linked; i++) to = runs[i].to
+  return { href, from, to }
+}
+
+/**
+ * Applies a link (specs/hyperlink-einfuegen-req.md §3.1/§3.2/§3.4) in ONE transaction:
+ * - non-empty selection → the WHOLE selection gets the link (a mixed/partially linked
+ *   selection becomes uniformly the new URL — same-type marks replace each other),
+ * - collapsed caret INSIDE a link → edit: the new URL replaces the href on the whole
+ *   contiguous linked range,
+ * - collapsed caret elsewhere + `text` → the text is inserted at the caret, already
+ *   linked (dialog's Anzeigetext field, §3.2b). Without text: no-op (`false`) — the
+ *   dialog prevents this path by requiring the field.
+ */
+export function applyLink(href: string, text?: string): Command {
+  return (state, dispatch) => {
+    const linkType = wordSchema.marks.link
+    const mark = linkType.create({ href })
+    const { from, to, empty } = state.selection
+    if (!empty) {
+      if (dispatch) dispatch(state.tr.addMark(from, to, mark).scrollIntoView())
+      return true
+    }
+    const existing = linkAtSelection(state)
+    if (existing) {
+      if (dispatch) dispatch(state.tr.addMark(existing.from, existing.to, mark).scrollIntoView())
+      return true
+    }
+    if (!text || !text.trim()) return false
+    if (dispatch) {
+      const node = wordSchema.text(text, [...(state.storedMarks || state.selection.$from.marks()), mark])
+      dispatch(state.tr.replaceSelectionWith(node, false).scrollIntoView())
+    }
+    return true
+  }
+}
+
+/** Removes ONLY the link mark (§3.5): from the selection, or — with a collapsed caret
+ * inside a link — from the whole contiguous linked range. Every other mark and the text
+ * itself stay untouched. */
+export function removeLink(): Command {
+  return (state, dispatch) => {
+    const linkType = wordSchema.marks.link
+    const { from, to, empty } = state.selection
+    if (!empty) {
+      if (dispatch) dispatch(state.tr.removeMark(from, to, linkType).scrollIntoView())
+      return true
+    }
+    const existing = linkAtSelection(state)
+    if (!existing) return false
+    if (dispatch) dispatch(state.tr.removeMark(existing.from, existing.to, linkType).scrollIntoView())
+    return true
+  }
+}
+
 /** True when a non-empty selection exists (Text/Image/Cell/All) — the single
  * condition for enabling the "Ausschneiden" toolbar button/keybinding. */
 export function canCut(state: EditorState): boolean {

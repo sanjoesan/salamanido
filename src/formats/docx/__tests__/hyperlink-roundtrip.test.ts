@@ -30,7 +30,11 @@ describe('DOCX-Rundreise: Hyperlink', () => {
     const zip = await JSZip.loadAsync(blob)
     const documentXml = await zip.file('word/document.xml')!.async('text')
     const relsXml = await zip.file('word/_rels/document.xml.rels')!.async('text')
-    expect(documentXml).toMatch(/<w:hyperlink r:id="rId\d+" w:history="1"><w:r><w:t>Beispiel<\/w:t><\/w:r><\/w:hyperlink>/)
+    // verlinkte Läufe referenzieren die Hyperlink-Zeichenvorlage (Optik in Word) statt
+    // direkter w:color/w:u-Werte — req §3.12
+    expect(documentXml).toMatch(
+      /<w:hyperlink r:id="rId\d+" w:history="1"><w:r><w:rPr><w:rStyle w:val="Hyperlink"\/><\/w:rPr><w:t>Beispiel<\/w:t><\/w:r><\/w:hyperlink>/,
+    )
     expect(relsXml).toContain('Target="https://example.test/?a=1&amp;b=2" TargetMode="External"')
 
     const result = await readDocx(blob)

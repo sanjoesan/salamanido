@@ -18,8 +18,8 @@ interface JsonNode {
 
 const JC_BY_ALIGN: Record<string, string> = { left: 'left', center: 'center', right: 'right', justify: 'both' }
 
-function runPropertiesXml(marks: JsonNode['marks']): string {
-  const props: string[] = []
+function runPropertiesXml(marks: JsonNode['marks'], leading = ''): string {
+  const props: string[] = [leading].filter(Boolean)
   for (const mark of marks ?? []) {
     if (mark.type === 'strong') props.push('<w:b/>')
     if (mark.type === 'em') props.push('<w:i/>')
@@ -53,9 +53,16 @@ function inlineToRuns(nodes: JsonNode[] | undefined, rels?: RelationshipRegistry
 
   const flush = () => {
     if (!buffer) return
+    const href = hrefOf(buffer.marks)
+    // Verlinkte Läufe referenzieren die Zeichenvorlage "Hyperlink" (styleDefs.ts) —
+    // Word zeigt sie damit blau/unterstrichen, OHNE dass direkte w:color/w:u-Werte in
+    // die rPr geschrieben würden (die der Reader als explizite Marks zurücklesen und
+    // die Rundreise verfälschen würden; hyperlink-einfuegen-req.md §3.12). Eine
+    // explizit gesetzte Schriftfarbe folgt dahinter und gewinnt als direkte
+    // Formatierung über die Vorlage (§3.8).
     segments.push({
-      xml: `<w:r>${runPropertiesXml(buffer.marks)}${encodeRunText(buffer.text)}</w:r>`,
-      href: hrefOf(buffer.marks),
+      xml: `<w:r>${runPropertiesXml(buffer.marks, href ? '<w:rStyle w:val="Hyperlink"/>' : '')}${encodeRunText(buffer.text)}</w:r>`,
+      href,
     })
     buffer = null
   }

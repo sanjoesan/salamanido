@@ -10,14 +10,18 @@ import { dropCursor } from 'prosemirror-dropcursor'
 import { gapCursor, GapCursor } from 'prosemirror-gapcursor'
 import { wordSchema } from '../schema'
 import {
+  applyLink,
   cutSelection,
   indentListItem,
   insertHardBreak,
   insertPageBreak,
   insertTable,
+  linkAtSelection,
   outdentListItem,
+  removeLink,
   selectedImage,
 } from './commands'
+import { LinkDialog } from './LinkDialog'
 import { clipboardTextSerializer } from './clipboard'
 import { createPastePlugin } from './paste'
 import { createPaginationPlugin } from './pagination'
@@ -145,6 +149,12 @@ export function WordEditor({ document: doc, onChange }: FormatEditorProps<WordDo
   // backdrop intercepts editor clicks, so the ProseMirror selection captured when the button was
   // pressed (onMouseDown preventDefault) stays put until "Einfügen" runs — no separate save/restore.
   const [tableDialogOpen, setTableDialogOpen] = useState(false)
+  // Link-Dialog (hyperlink-einfuegen-req.md §1 #3): geöffnet über Toolbar-Button ODER
+  // Strg/Cmd+K. Der Keymap-Handler lebt im einmalig erstellten Plugin-Array und erreicht
+  // den React-State über diese Ref (gleiches Muster wie onChangeRef).
+  const [linkDialogOpen, setLinkDialogOpen] = useState(false)
+  const openLinkDialogRef = useRef(() => {})
+  openLinkDialogRef.current = () => setLinkDialogOpen(true)
 
   // Visible-but-transient feedback (never a permanent/blocking state).
   useAutoDismiss(cutError, setCutError)
@@ -273,6 +283,12 @@ export function WordEditor({ document: doc, onChange }: FormatEditorProps<WordDo
           // (liste-einruecken-tab-req.md §2/§3.1–3.6).
           Tab: indentListItem(),
           'Shift-Tab': outdentListItem(),
+          // Strg/Cmd+K = Link einfügen/bearbeiten (hyperlink-einfuegen-req.md §1 #2) —
+          // öffnet denselben Dialog wie der Toolbar-Button.
+          'Mod-k': () => {
+            openLinkDialogRef.current()
+            return true
+          },
           'Shift-Enter': insertHardBreak(),
           // Strg/Cmd+Enter = manueller Seitenumbruch — der in Word UND LibreOffice
           // identische Standard-Shortcut (seitenumbruch-req.md §1.2). Bewusst getrennt
@@ -407,9 +423,24 @@ export function WordEditor({ document: doc, onChange }: FormatEditorProps<WordDo
     view.dom.addEventListener('mousedown', onMouseDown)
     view.dom.addEventListener('mouseup', onMouseUp)
 
+    // Links im Editor (hyperlink-einfuegen-req.md §3.9): ein einfacher Klick setzt nur
+    // den Cursor (contenteditable navigiert ohnehin nicht — und die Klick-Reparatur
+    // oben bleibt dadurch unberührt); Strg/Cmd+Klick öffnet das Ziel in einem neuen
+    // Tab — sonst gäbe es keinerlei Weg, einen Link testweise zu öffnen. `noopener`
+    // verhindert Zugriff der Zielseite auf den Editor-Kontext.
+    const onLinkClick = (event: MouseEvent) => {
+      if (!event.ctrlKey && !event.metaKey) return
+      const anchor = (event.target as HTMLElement).closest?.('a[href]')
+      if (!anchor || !view.dom.contains(anchor)) return
+      event.preventDefault()
+      window.open(anchor.getAttribute('href')!, '_blank', 'noopener,noreferrer')
+    }
+    view.dom.addEventListener('click', onLinkClick)
+
     return () => {
       view.dom.removeEventListener('mousedown', onMouseDown)
       view.dom.removeEventListener('mouseup', onMouseUp)
+      view.dom.removeEventListener('click', onLinkClick)
       view.destroy()
       viewRef.current = null
     }
@@ -465,6 +496,7 @@ export function WordEditor({ document: doc, onChange }: FormatEditorProps<WordDo
           cutError={cutError}
           setCutError={setCutError}
           onOpenTableDialog={() => setTableDialogOpen(true)}
+          onOpenLinkDialog={() => setLinkDialogOpen(true)}
           onNotice={setPasteNotice}
         />
       )}
@@ -478,6 +510,30 @@ export function WordEditor({ document: doc, onChange }: FormatEditorProps<WordDo
           onClose={() => {
             setTableDialogOpen(false)
             activeView.focus() // return focus to the editor on cancel/escape/outside (§2.1)
+          }}
+        />
+      )}
+      {activeView && linkDialogOpen && (
+        <LinkDialog
+          initialHref={linkAtSelection(activeView.state)?.href ?? null}
+          needsText={activeView.state.selection.empty && !linkAtSelection(activeView.state)}
+          onApply={(href, text) => {
+            setLinkDialogOpen(false)
+            applyLink(href, text)(activeView.state, activeView.dispatch)
+            activeView.focus()
+          }}
+          onRemove={
+            linkAtSelection(activeView.state) || !activeView.state.selection.empty
+              ? () => {
+                  setLinkDialogOpen(false)
+                  removeLink()(activeView.state, activeView.dispatch)
+                  activeView.focus()
+                }
+              : null
+          }
+          onClose={() => {
+            setLinkDialogOpen(false)
+            activeView.focus()
           }}
         />
       )}

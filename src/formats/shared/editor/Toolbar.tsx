@@ -42,6 +42,8 @@ interface ToolbarProps {
   setCutError: (message: string | null) => void
   /** Opens the table-size chooser (replaces the old fixed 2×2 insert). */
   onOpenTableDialog: () => void
+  /** Opens the link dialog (insert/edit/remove — hyperlink-einfuegen-req.md §1 #1). */
+  onOpenLinkDialog: () => void
   /** Transient, auto-dismissing status banner (shared with the paste pipeline) —
    * used by the page-break fallback inside tables/lists (seitenumbruch-req.md §3.10). */
   onNotice: (message: string) => void
@@ -261,6 +263,15 @@ const IconTableDelete = (
     <path d="M4.5 5.5l15 13M19.5 5.5l-15 13" />
   </TableIcon>
 )
+// Kettenglied-Icon für „Link einfügen" (hyperlink-einfuegen-req.md §1 #1 — eingebettetes
+// SVG, kein Unicode-Zeichen).
+const IconLink = (
+  <TableIcon>
+    <path d="M10 14a4 4 0 0 0 6 .5l3-3a4 4 0 0 0-5.7-5.7l-1.6 1.6" />
+    <path d="M14 10a4 4 0 0 0-6-.5l-3 3a4 4 0 0 0 5.7 5.7l1.6-1.6" />
+  </TableIcon>
+)
+
 // Seitenumbruch: obere und untere Seitenhälfte, getrennt durch eine gestrichelte
 // Umbruchlinie (seitenumbruch-req.md §1.1 — eingebettetes SVG, kein Unicode-Zeichen).
 const IconPageBreak = (
@@ -334,7 +345,7 @@ function TableOpButton({
   )
 }
 
-export function Toolbar({ view, cutError, setCutError, onOpenTableDialog, onNotice }: ToolbarProps) {
+export function Toolbar({ view, cutError, setCutError, onOpenTableDialog, onOpenLinkDialog, onNotice }: ToolbarProps) {
   function currentHeadingLevel(): string {
     const { $from } = view.state.selection
     for (let depth = $from.depth; depth >= 0; depth--) {
@@ -570,6 +581,26 @@ export function Toolbar({ view, cutError, setCutError, onOpenTableDialog, onNoti
         🖼 Bild
         <input type="file" accept="image/*" className="hidden" onChange={handleImagePick} />
       </label>
+
+      {/* Link einfügen/bearbeiten (hyperlink-einfuegen-req.md §1 #1/#7): öffnet den
+          Dialog (gleicher Weg wie Strg+K); aria-pressed zeigt „Cursor steht in einem
+          Link" mit derselben Ganz-Range-Semantik wie die übrigen Mark-Buttons. */}
+      <button
+        type="button"
+        title="Link einfügen (Strg+K)"
+        aria-label="Link einfügen"
+        aria-pressed={isMarkActive(view.state, wordSchema.marks.link)}
+        onMouseDown={(e) => e.preventDefault()}
+        onClick={onOpenLinkDialog}
+        className={`px-2 py-1 rounded text-sm border inline-flex items-center gap-1 ${
+          isMarkActive(view.state, wordSchema.marks.link)
+            ? 'bg-neutral-900 text-white border-neutral-900 dark:bg-neutral-100 dark:text-neutral-900'
+            : 'border-transparent hover:bg-neutral-100 dark:hover:bg-neutral-800 text-neutral-700 dark:text-neutral-300'
+        }`}
+      >
+        {IconLink}
+        <span>Link</span>
+      </button>
 
       {/* Manueller Seitenumbruch (seitenumbruch-req.md §1.1) — eigenes SVG-Icon (kein
           Unicode-Zeichen), zugänglicher Name über title UND aria-label, Aktivierung über
