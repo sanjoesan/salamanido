@@ -107,6 +107,40 @@ test('Entfernen mit Bestätigung: nicht-leere Fußzeile fragt nach und verschwin
   await expect(footerButton(page)).toHaveAttribute('aria-pressed', 'false')
 })
 
+test('Folgeseiten-Kopien: Kopf-/Fußzeile erscheint auf Seite 2 und folgt Änderungen live (§4 Option a, Stufe 2)', async ({
+  page,
+}) => {
+  await openEditor(page)
+  await headerButton(page).click()
+  await page.keyboard.type('Briefkopf')
+  await footerButton(page).click()
+  await page.keyboard.type('Fußtext')
+  // Einseitiges Dokument: nur die editierbaren Bereiche, KEINE Kopien
+  await expect(page.getByTestId('header-copy')).toHaveCount(0)
+  await expect(page.getByTestId('footer-copy')).toHaveCount(0)
+
+  await bodyEditor(page).click()
+  await page.getByRole('button', { name: 'Seitenumbruch einfügen' }).click()
+
+  // Zweiseitig: je EINE Kopie mit demselben Inhalt, deutlich unterhalb des Originals
+  await expect(page.getByTestId('header-copy')).toHaveText('Briefkopf')
+  await expect(page.getByTestId('footer-copy')).toHaveText('Fußtext')
+  const editableBox = await page.getByTestId('header-editor').boundingBox()
+  const copyBox = await page.getByTestId('header-copy').boundingBox()
+  expect(copyBox!.y).toBeGreaterThan(editableBox!.y + 300) // Seite-2-Band, nicht Seite 1
+
+  // Kopie folgt Änderungen live aus dem EINEN editierbaren Bereich
+  await headerEditor(page).click()
+  await page.keyboard.press('ControlOrMeta+a')
+  await page.keyboard.type('Neuer Kopf')
+  await expect(page.getByTestId('header-copy')).toHaveText('Neuer Kopf')
+
+  // Seitenumbruch rückgängig → wieder einseitig → Kopien verschwinden
+  await bodyEditor(page).click()
+  await page.keyboard.press('ControlOrMeta+z')
+  await expect(page.getByTestId('header-copy')).toHaveCount(0)
+})
+
 test('Logo-Bild in der Kopfzeile: Export mit Part-eigenen Rels, Reimport zeigt das Bild (§0.A/1)', async ({
   page,
 }) => {

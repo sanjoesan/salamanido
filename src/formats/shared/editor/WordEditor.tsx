@@ -24,7 +24,7 @@ import {
 import { LinkDialog } from './LinkDialog'
 import { SearchBar } from './SearchBar'
 import { createSearchPlugin } from './search'
-import { HeaderFooterEditor, emptyHeaderFooter } from './HeaderFooterEditor'
+import { HeaderFooterEditor, HeaderFooterCopy, emptyHeaderFooter } from './HeaderFooterEditor'
 import { clipboardTextSerializer } from './clipboard'
 import { createPastePlugin } from './paste'
 import { createPaginationPlugin } from './pagination'
@@ -35,6 +35,7 @@ import {
   PAGE_MARGIN_PX,
   PAGE_CONTENT_HEIGHT_PX,
   PAGE_GAP_PX,
+  PAGE_SEPARATOR_PX,
 } from './pageLayout'
 import { Toolbar } from './Toolbar'
 import { TableSizeDialog } from './TableSizeDialog'
@@ -268,6 +269,7 @@ export function WordEditor({ document: doc, onChange }: FormatEditorProps<WordDo
   // to full height. Derived from the CONTENT flow height (containerRef), which the sheet's
   // own min-height does not influence — measuring the sheet itself would feed back.
   const [pageMinHeight, setPageMinHeight] = useState(PAGE_HEIGHT_PX)
+  const [pageCount, setPageCount] = useState(1)
   useEffect(() => {
     const el = containerRef.current
     if (!el) return
@@ -280,6 +282,7 @@ export function WordEditor({ document: doc, onChange }: FormatEditorProps<WordDo
       // PAGE_GAP_PX, so this ResizeObserver re-runs on every pagination change.
       const spacerPages = el.querySelectorAll('.page-break-spacer').length + 1
       const pages = Math.max(flowPages, spacerPages)
+      setPageCount(pages)
       setPageMinHeight(pages * FLOW_PERIOD - PAGE_GAP_PX + 2 * PAGE_MARGIN_PX)
     }
     update()
@@ -645,8 +648,9 @@ export function WordEditor({ document: doc, onChange }: FormatEditorProps<WordDo
             className="shadow-lg"
           >
             {/* Kopf-/Fußzeile im oberen/unteren Seitenrand der ersten Seite (req §1 #3;
-                Layout-Entscheidung §4 Option (a), Stufe 1 — Folgeseiten-Kopien folgen
-                als eigene Scheibe, in req §10 vermerkt). Absolut positioniert: berührt
+                Layout-Entscheidung §4 Option (a)): EIN editierbarer Bereich auf Seite 1,
+                nicht-editierbare Kopien auf allen Folgeseiten. Absolut positioniert
+                (der scale()-Transform des Sheets ist der containing block): berührt
                 weder Inhaltsfluss noch Paginierung. */}
             {doc.content.header && (
               <div
@@ -664,7 +668,13 @@ export function WordEditor({ document: doc, onChange }: FormatEditorProps<WordDo
             {doc.content.footer && (
               <div
                 className="absolute left-0 right-0"
-                style={{ bottom: Math.round(PAGE_MARGIN_PX * 0.3), padding: `0 ${PAGE_MARGIN_PX}px` }}
+                style={{
+                  // untere Randzone der ERSTEN Seite (nicht des Sheets — das wäre bei
+                  // mehrseitigen Dokumenten die letzte Seite); Kopien folgen unten.
+                  top: PAGE_HEIGHT_PX - Math.round(PAGE_MARGIN_PX * 0.3),
+                  transform: 'translateY(-100%)',
+                  padding: `0 ${PAGE_MARGIN_PX}px`,
+                }}
               >
                 <HeaderFooterEditor
                   kind="footer"
@@ -674,6 +684,35 @@ export function WordEditor({ document: doc, onChange }: FormatEditorProps<WordDo
                 />
               </div>
             )}
+            {/* Folgeseiten-Kopien (Option-a-Stufe 2): Seite N beginnt bei N·Periode —
+                rein rechnerisch, keine DOM-Messung; live gespeist aus demselben Inhalt. */}
+            {Array.from({ length: Math.max(0, pageCount - 1) }, (_, i) => {
+              const pageTop = (i + 1) * (PAGE_HEIGHT_PX + PAGE_SEPARATOR_PX)
+              return (
+                <div key={i} className="contents">
+                  {doc.content.header && (
+                    <div
+                      className="absolute left-0 right-0 pointer-events-none"
+                      style={{ top: pageTop + Math.round(PAGE_MARGIN_PX * 0.3), padding: `0 ${PAGE_MARGIN_PX}px` }}
+                    >
+                      <HeaderFooterCopy kind="header" content={doc.content.header} />
+                    </div>
+                  )}
+                  {doc.content.footer && (
+                    <div
+                      className="absolute left-0 right-0 pointer-events-none"
+                      style={{
+                        top: pageTop + PAGE_HEIGHT_PX - Math.round(PAGE_MARGIN_PX * 0.3),
+                        transform: 'translateY(-100%)',
+                        padding: `0 ${PAGE_MARGIN_PX}px`,
+                      }}
+                    >
+                      <HeaderFooterCopy kind="footer" content={doc.content.footer} />
+                    </div>
+                  )}
+                </div>
+              )
+            })}
             <div ref={containerRef} className="word-editor-surface outline-none" />
           </div>
         </div>

@@ -1,5 +1,6 @@
 import { useEffect, useRef } from 'react'
 import { EditorState, TextSelection } from 'prosemirror-state'
+import { DOMSerializer } from 'prosemirror-model'
 import { EditorView } from 'prosemirror-view'
 import { history, undo, redo } from 'prosemirror-history'
 import { keymap } from 'prosemirror-keymap'
@@ -131,4 +132,32 @@ export function HeaderFooterEditor({
 /** Leeres Kopf-/Fußzeilen-Dokument (ein leerer Absatz — `doc` verlangt `block+`). */
 export function emptyHeaderFooter(): ProseMirrorJSON {
   return { type: 'doc', content: [{ type: 'paragraph', attrs: { align: 'left' } }] } as ProseMirrorJSON
+}
+
+/**
+ * Nicht-editierbare Kopie des Kopf-/Fußzeilen-Inhalts für die Folgeseiten-Bänder
+ * (kopfzeile-/fusszeile-bearbeiten-req.md §4 Option (a), Stufe 2): gespeist aus
+ * demselben doc-JSON, gerendert über den Schema-DOMSerializer — aktualisiert sich
+ * dadurch live mit jeder Änderung im EINEN editierbaren Bereich der ersten Seite.
+ * aria-hidden + pointer-events:none: rein visuell, Bearbeitung findet zentral statt.
+ */
+export function HeaderFooterCopy({ kind, content }: { kind: 'header' | 'footer'; content: ProseMirrorJSON }) {
+  const ref = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    const host = ref.current
+    if (!host) return
+    const node = PMNode.fromJSON(wordSchema, content as Parameters<typeof PMNode.fromJSON>[1])
+    host.replaceChildren(DOMSerializer.fromSchema(wordSchema).serializeFragment(node.content))
+  }, [content])
+  return (
+    <div
+      aria-hidden
+      data-testid={`${kind}-copy`}
+      className={`hf-copy pointer-events-none select-none px-1 ${
+        kind === 'header' ? 'border-b' : 'border-t'
+      } border-dashed border-neutral-200`}
+    >
+      <div ref={ref} />
+    </div>
+  )
 }

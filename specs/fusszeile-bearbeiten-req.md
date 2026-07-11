@@ -628,6 +628,16 @@ hätten parallele Kopf-/Fußzeilen-Änderungen zurückgerollt). E2E `kopf-fussze
 7 Testfälle grün auf Desktop Chrome, Mobile und Tablet inkl. DOCX- (header1/footer1.xml)
 und ODT-Rundreise (styles.xml master-page).
 
-**Scheibe B (offen):** Folgeseiten-Kopien (Option-a-Stufe 2), DOCX-Kopf-/Fußzeilen-
-Bild-Rels-Fix (0.A/1), Doppelklick in den Seitenrand (§1 #2), Suche-in-Kopf/Fußzeile
-(suchen-req §16).
+**Scheibe B, Stand 2026-07-11:**
+- **Folgeseiten-Kopien (Option-a-Stufe 2): UMGESETZT.** Ein `HeaderFooterCopy` je
+  Folgeseite rendert den Inhalt des EINEN editierbaren Bereichs (DOMSerializer über
+  dasselbe doc-JSON → aktualisiert sich live) in das untere Randband der Seite N
+  (Position rein rechnerisch aus der Seitenperiode). Für die Fußzeile besonders
+  relevant: der editierbare Bereich ist vom Sheet-Ende an das Ende der ERSTEN Seite
+  gewandert — vorher lag „die" Fußzeile bei mehrseitigen Dokumenten optisch nur auf
+  der letzten Seite. Kopien sind `pointer-events: none` + `aria-hidden` und tragen
+  bewusst KEINE `.ProseMirror`-Klasse (Test-Locator-Invariante). E2E: Kopie erscheint
+  ab Seite 2, folgt Änderungen live, verschwindet bei Rückkehr zur Einseitigkeit.
+- DOCX-Bild-Rels-Fix (0.A/1): BEHOBEN, siehe Entscheidung 5.
+- **Offen:** Doppelklick in den Seitenrand (§1 #2), Suche-in-Kopf/Fußzeile
+  (suchen-req §16).

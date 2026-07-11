@@ -289,3 +289,52 @@ body {
 .hf-editor-surface .ProseMirror p {
   margin: 0;
 }
+/* Folgeseiten-Kopien (§4 Option (a), Stufe 2): typografisch identisch zum editierbaren
+   Bereich (gleicher Inhalt via DOMSerializer, aber bewusst KEINE .ProseMirror-Klasse —
+   Test-Locators zählen .ProseMirror-Instanzen). Die relevanten Darstellungsregeln des
+   Editors sind hier gespiegelt: Grundschrift, Blockabstände, Bilder, Links, Listen, Tabellen. */
+.hf-copy {
+  min-height: 1.4em;
+  padding: 1px 0;
+  font-size: 11pt;
+}
+.hf-copy p,
+.hf-copy h1,
+.hf-copy h2,
+.hf-copy h3,
+.hf-copy h4,
+.hf-copy h5,
+.hf-copy h6 {
+  margin: 0;
+}
+.hf-copy img {
+  max-width: 100%;
+  height: auto;
+}
+.hf-copy a {
+  color: #0563c1;
+  text-decoration: underline;
+}
+.hf-copy ul,
+.hf-copy ol {
+  padding-left: 1.4em;
+  margin: 0;
+}
+.hf-copy ol { list-style-type: decimal; }
+.hf-copy ol ol { list-style-type: lower-alpha; }
+.hf-copy ol ol ol { list-style-type: lower-roman; }
+.hf-copy table {
+  border-collapse: collapse;
+  width: 100%;
+  margin: 0;
+}
+.hf-copy td,
+.hf-copy th {
+  border: 1px solid #9ca3af;
+  padding: 4px 8px;
+  vertical-align: top;
+}
+.hf-copy th {
+  background: #f3f4f6;
+  font-weight: 600;
+}
