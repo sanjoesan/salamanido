@@ -232,6 +232,34 @@ const marks: Record<string, MarkSpec> = {
     },
   },
 
+  // Schriftgröße in Punkt (specs/schriftgroesse-waehlen-req.md §3.1). parseDOM greift
+  // beim HTML-Paste UND beim internen Copy/Paste (toDOM-Zwischenform): pt-Werte werden
+  // EXAKT übernommen (importierte Größen wie 10.3pt dürfen intern nie driften, §2.5),
+  // px-Werte (externe Zwischenablage) werden nach pt umgerechnet und wie eine
+  // Neueingabe behandelt (0,5er-Raster + 1–400-Clamp, §4.9). NaN/±Infinity fängt
+  // getAttrs ab — `validate: 'number'` allein ließe NaN durch (§3.1).
+  fontSize: {
+    attrs: { pt: { validate: 'number' } },
+    parseDOM: [
+      {
+        style: 'font-size',
+        getAttrs: (value) => {
+          const raw = String(value).trim()
+          const match = /^([\d.]+)\s*(pt|px)$/i.exec(raw)
+          if (!match) return false
+          const n = Number(match[1])
+          if (!Number.isFinite(n) || n <= 0) return false
+          if (match[2].toLowerCase() === 'pt') return { pt: n }
+          const pt = Math.min(400, Math.max(1, Math.round((n * 72) / 96 / 0.5) * 0.5))
+          return { pt }
+        },
+      },
+    ],
+    toDOM(mark) {
+      return ['span', { style: `font-size: ${mark.attrs.pt}pt` }, 0]
+    },
+  },
+
   // Hyperlink (specs/hyperlink-einfuegen-req.md) — Datenmodell-Scheibe: das Mark trägt
   // die Ziel-URL; Import/Export laufen über text:a (ODT) bzw. w:hyperlink+Relationship
   // (DOCX, folgt). `inclusive: false`, damit direkt hinter einem Link getippter Text

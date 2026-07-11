@@ -40,6 +40,7 @@ function runPropsFromMarks(marks: JsonNode['marks']): RunProps {
     if (mark.type === 'strike') props.strike = true
     if (mark.type === 'textColor') props.color = mark.attrs?.color as string
     if (mark.type === 'highlight') props.highlight = mark.attrs?.color as string
+    if (mark.type === 'fontSize') props.fontSizePt = mark.attrs?.pt as number
   }
   return props
 }

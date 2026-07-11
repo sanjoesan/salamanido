@@ -7,10 +7,21 @@ export interface RunProps {
   strike?: boolean
   color?: string
   highlight?: string
+  /** Schriftgröße in pt — exakt, auch nicht-0,5er-Importwerte wie 10.3
+   * (schriftgroesse-waehlen-req.md §2.5). */
+  fontSizePt?: number
 }
 
 function isEmpty(props: RunProps): boolean {
-  return !props.bold && !props.italic && !props.underline && !props.strike && !props.color && !props.highlight
+  return (
+    !props.bold &&
+    !props.italic &&
+    !props.underline &&
+    !props.strike &&
+    !props.color &&
+    !props.highlight &&
+    props.fontSizePt === undefined
+  )
 }
 
 /**
@@ -53,6 +64,11 @@ function buildTextStyleXml(name: string, props: RunProps): string {
     )
   }
   if (props.strike) attrs.push('style:text-line-through-style="solid" style:text-line-through-type="single"')
+  if (props.fontSizePt !== undefined) {
+    attrs.push(
+      `fo:font-size="${props.fontSizePt}pt" style:font-size-asian="${props.fontSizePt}pt" style:font-size-complex="${props.fontSizePt}pt"`,
+    )
+  }
   if (props.color) attrs.push(`fo:color="${escapeXml(props.color)}"`)
   if (props.highlight) attrs.push(`fo:background-color="${escapeXml(props.highlight)}"`)
   return `<style:style style:name="${name}" style:family="text"><style:text-properties ${attrs.join(' ')}/></style:style>`

@@ -25,6 +25,13 @@ function runPropertiesXml(marks: JsonNode['marks'], leading = ''): string {
     if (mark.type === 'em') props.push('<w:i/>')
     if (mark.type === 'underline') props.push('<w:u w:val="single"/>')
     if (mark.type === 'strike') props.push('<w:strike/>')
+    if (mark.type === 'fontSize') {
+      // w:sz speichert HALBE Punkte; UI-Werte liegen auf dem 0,5er-Raster, importierte
+      // Werte sind es von Natur aus — die *2-Rundung ist damit verlustfrei
+      // (schriftgroesse-waehlen-req.md §2.5). szCs hält komplexe Skripte konsistent.
+      const half = Math.round(Number(mark.attrs?.pt) * 2)
+      props.push(`<w:sz w:val="${half}"/><w:szCs w:val="${half}"/>`)
+    }
     if (mark.type === 'textColor') props.push(`<w:color w:val="${String(mark.attrs?.color ?? '').replace('#', '')}"/>`)
     if (mark.type === 'highlight') {
       props.push(`<w:shd w:val="clear" w:color="auto" w:fill="${String(mark.attrs?.color ?? '').replace('#', '')}"/>`)

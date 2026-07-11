@@ -130,6 +130,11 @@ function marksFromRunProperties(rPr: Element | null): Array<{ type: string; attr
   const shd = firstChildNS(rPr, OOXML_NAMESPACES.w, 'shd')
   const fill = shd?.getAttributeNS(OOXML_NAMESPACES.w, 'fill')
   if (fill && fill !== 'auto') marks.push({ type: 'highlight', attrs: { color: `#${fill}` } })
+  // w:sz = halbe Punkte → pt exakt (Importwerte werden NIE geclamped/gerundet,
+  // schriftgroesse-waehlen-req.md §2.5).
+  const sz = firstChildNS(rPr, OOXML_NAMESPACES.w, 'sz')
+  const szVal = Number(sz?.getAttributeNS(OOXML_NAMESPACES.w, 'val'))
+  if (sz && Number.isFinite(szVal) && szVal > 0) marks.push({ type: 'fontSize', attrs: { pt: szVal / 2 } })
   return marks
 }
 

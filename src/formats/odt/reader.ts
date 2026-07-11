@@ -18,6 +18,7 @@ interface RunStyle {
   strike?: boolean
   color?: string
   highlight?: string
+  fontSizePt?: number
 }
 
 interface ParsedStyles {
@@ -68,6 +69,15 @@ function parseAutomaticStyles(automaticStylesEl: Element | null): ParsedStyles {
       if (color) style.color = color
       const bg = props.getAttributeNS(ODF_NAMESPACES.fo, 'background-color')
       if (bg) style.highlight = bg
+      // fo:font-size darf beliebige Dezimalstellen tragen (z. B. "10.3pt") — EXAKT
+      // übernehmen, kein Runden/Clampen für Importwerte (schriftgroesse-waehlen-req.md
+      // §2.5). Nicht-pt-Einheiten (%, em) bleiben unübersetzt außen vor.
+      const fontSize = props.getAttributeNS(ODF_NAMESPACES.fo, 'font-size')
+      const ptMatch = fontSize && /^([\d.]+)\s*pt$/i.exec(fontSize.trim())
+      if (ptMatch) {
+        const pt = Number(ptMatch[1])
+        if (Number.isFinite(pt) && pt > 0) style.fontSizePt = pt
+      }
       textStyles.set(name, style)
     } else if (family === 'paragraph') {
       const props = firstChildNS(styleEl, ODF_NAMESPACES.style, 'paragraph-properties')
@@ -132,6 +142,7 @@ function decodeInline(pEl: Element, styles: ParsedStyles): JsonNode[] {
     if (style.strike) marks.push({ type: 'strike' })
     if (style.color) marks.push({ type: 'textColor', attrs: { color: style.color } })
     if (style.highlight) marks.push({ type: 'highlight', attrs: { color: style.highlight } })
+    if (style.fontSizePt !== undefined) marks.push({ type: 'fontSize', attrs: { pt: style.fontSizePt } })
     return marks
   }
 

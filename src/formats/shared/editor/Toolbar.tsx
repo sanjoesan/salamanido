@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import type { ChangeEvent, ReactNode } from 'react'
 import type { EditorView } from 'prosemirror-view'
 import type { Command, EditorState } from 'prosemirror-state'
@@ -19,12 +20,15 @@ import {
   deleteColumnOrTable,
   deleteRowOrTable,
   deleteTableAtSelection,
+  activeFontSize,
+  clampFontSizeInput,
   indentListItem,
   insertImage,
   insertPageBreak,
   isAlignActive,
   isInListItem,
   isInTable,
+  setFontSize,
   isListActive,
   isMarkActive,
   liftFromList,
@@ -58,6 +62,68 @@ function run(view: EditorView, command: Command) {
  * neutral default instead of provoking a React controlled-input warning. */
 function swatchValue(color: string | null, fallback: string): string {
   return color && /^#[0-9a-fA-F]{6}$/.test(color) ? color : fallback
+}
+
+// Preset-Größen des Schriftgrad-Felds (schriftgroesse-waehlen-req.md §1 #2).
+const FONT_SIZE_PRESETS = [8, 9, 10, 10.5, 11, 12, 14, 16, 18, 20, 24, 28, 36, 48, 72]
+
+/** pt-Zahl → deutsche Anzeige (Komma, ohne überflüssige Nullen). */
+function formatPt(pt: number): string {
+  return String(pt).replace('.', ',')
+}
+
+/**
+ * Editierbare Schriftgrad-Combobox (schriftgroesse-waehlen-req.md §1): Freitext +
+ * Datalist-Presets in einem Feld. Zeigt die EFFEKTIVE Größe (Mark → Überschriften-
+ * Vorlage → 11-pt-Anzeige-Standard) bzw. „—"-Platzhalter nur bei echt gemischter
+ * Selektion (§2.3). Enter/Blur committen (Eingabe → 0,5er-Raster + 1–400-Clamp,
+ * sichtbar korrigiert §2.5), Escape verwirft den Entwurf. Während des Tippens hält
+ * ein lokaler Draft den Feldwert, damit der Selektions-Sync ihn nicht überschreibt.
+ */
+function FontSizeField({ view }: { view: EditorView }) {
+  const active = activeFontSize(view.state)
+  const [draft, setDraft] = useState<string | null>(null)
+  const shown = draft ?? (active === null ? '' : formatPt(active))
+
+  const commit = (refocus: boolean) => {
+    if (draft === null) return
+    const parsed = Number(draft.replace(',', '.').trim())
+    const pt = clampFontSizeInput(parsed)
+    setDraft(null)
+    if (pt === null) return // unbrauchbare Eingabe → Feld springt auf den Ist-Wert zurück
+    setFontSize(pt)(view.state, view.dispatch)
+    if (refocus) view.focus()
+  }
+
+  return (
+    <label className="flex items-center gap-1 text-sm text-neutral-600 dark:text-neutral-400" title="Schriftgröße (pt)">
+      <input
+        aria-label="Schriftgröße"
+        type="text"
+        inputMode="decimal"
+        list="font-size-presets"
+        placeholder="—"
+        className="w-14 min-h-8 px-1.5 rounded border border-neutral-300 dark:border-neutral-600 bg-white dark:bg-neutral-800 text-neutral-800 dark:text-neutral-100"
+        value={shown}
+        onChange={(e) => setDraft(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter') {
+            e.preventDefault()
+            commit(true)
+          } else if (e.key === 'Escape') {
+            e.preventDefault()
+            setDraft(null)
+          }
+        }}
+        onBlur={() => commit(false)}
+      />
+      <datalist id="font-size-presets">
+        {FONT_SIZE_PRESETS.map((pt) => (
+          <option key={pt} value={formatPt(pt)} />
+        ))}
+      </datalist>
+    </label>
+  )
 }
 
 /**
@@ -415,6 +481,9 @@ export function Toolbar({ view, cutError, setCutError, onOpenTableDialog, onOpen
       </select>
 
       <div className="w-px h-5 bg-neutral-300 dark:bg-neutral-700 mx-1" />
+
+      {/* Schriftgröße (schriftgroesse-waehlen-req.md §1) — in der Zeichenformat-Gruppe. */}
+      <FontSizeField view={view} />
 
       <MarkButton view={view} mark="strong" label="F" title="Fett" glyphClassName="font-bold" />
       <MarkButton view={view} mark="em" label="K" title="Kursiv" glyphClassName="italic" />

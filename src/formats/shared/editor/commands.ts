@@ -572,6 +572,98 @@ export function activeColor(state: EditorState, markName: ColorMarkName): string
   return color ?? null
 }
 
+// ---- Schriftgröße (specs/schriftgroesse-waehlen-req.md) ------------------------------
+
+/** Implizite Vorlagen-Größen der Überschriften in pt (req §2.4) — identisch zu den
+ * Werten, die beide Writer in ihre Vorlagen schreiben (docx/styleDefs.ts halbe Punkte
+ * 48/40/36/32/28/26, odt/styleRegistry.ts dieselben pt-Werte). */
+const HEADING_PT: Record<number, number> = { 1: 24, 2: 20, 3: 18, 4: 16, 5: 14, 6: 13 }
+
+/** App-Standard NUR als UI-/Anzeige-Wert (req §3.4 — bewusst NICHT in den Export
+ * geschrieben; „Kein Produktstandard" aus neues-dokument bleibt bestehen). */
+export const DEFAULT_FONT_SIZE_PT = 11
+
+/** Eingabe-Normalisierung (req §2.5): 0,5-pt-Raster, geclamped auf 1–400. Gilt für
+ * Feld-Eingaben und externe Zwischenablagen-Werte — NIE für importierte Dateiwerte. */
+export function clampFontSizeInput(pt: number): number | null {
+  if (!Number.isFinite(pt) || pt <= 0) return null
+  return Math.min(400, Math.max(1, Math.round(pt / 0.5) * 0.5))
+}
+
+function effectiveFontSizeAt($pos: { node(depth: number): PMNode; depth: number }): number {
+  for (let depth = $pos.depth; depth > 0; depth--) {
+    const node = $pos.node(depth)
+    if (node.type.name === 'heading') return HEADING_PT[node.attrs.level as number] ?? DEFAULT_FONT_SIZE_PT
+  }
+  return DEFAULT_FONT_SIZE_PT
+}
+
+/**
+ * Die EFFEKTIVE Schriftgröße der Selektion (req §1 #4, §2.3): expliziter fontSize-Mark,
+ * sonst implizite Überschriften-Größe, sonst der 11-pt-Anzeige-Standard. Für eine
+ * Range-Selektion werden die exakten pt-Werte JE LAUF verglichen (kein Runden vor dem
+ * Vergleich — 10,3 neben 10,5 ist „gemischt"); uneinheitlich → null (Feld zeigt „—").
+ */
+export function activeFontSize(state: EditorState): number | null {
+  const type = wordSchema.marks.fontSize
+  const { empty, $from, ranges } = state.selection
+  if (empty) {
+    const mark = type.isInSet(state.storedMarks || $from.marks())
+    return mark ? (mark.attrs.pt as number) : effectiveFontSizeAt($from)
+  }
+  let size: number | null | undefined
+  for (const range of ranges) {
+    state.doc.nodesBetween(range.$from.pos, range.$to.pos, (node, pos) => {
+      if (!node.isText) return
+      const mark = type.isInSet(node.marks)
+      const nodeSize = mark ? (mark.attrs.pt as number) : effectiveFontSizeAt(state.doc.resolve(pos + 1))
+      if (size === undefined) size = nodeSize
+      else if (size !== nodeSize) size = null
+    })
+  }
+  return size ?? null
+}
+
+/** Setzt die Schriftgröße — bei kollabierter Schreibmarke als storedMark für als
+ * Nächstes getippten Text (req §2.2, ausdrücklich das toggleMark-Muster, NICHT das
+ * frühere No-Op-Verhalten der Farb-Commands); alle selection.ranges in EINER
+ * Transaktion = ein Undo-Schritt. */
+export function setFontSize(pt: number): Command {
+  return (state, dispatch) => {
+    const mark = wordSchema.marks.fontSize.create({ pt })
+    if (dispatch) {
+      const { empty, ranges } = state.selection
+      let tr = state.tr
+      if (empty) {
+        tr = tr.addStoredMark(mark)
+      } else {
+        for (const range of ranges) tr = tr.addMark(range.$from.pos, range.$to.pos, mark)
+      }
+      dispatch(tr)
+    }
+    return true
+  }
+}
+
+/** Entfernt den expliziten fontSize-Mark (zurück zur Vorlagen-/Standardgröße); an der
+ * Schreibmarke wird eine vorgemerkte Größe zurückgenommen. */
+export function clearFontSize(): Command {
+  return (state, dispatch) => {
+    const type = wordSchema.marks.fontSize
+    if (dispatch) {
+      const { empty, ranges } = state.selection
+      let tr = state.tr
+      if (empty) {
+        tr = tr.removeStoredMark(type)
+      } else {
+        for (const range of ranges) tr = tr.removeMark(range.$from.pos, range.$to.pos, type)
+      }
+      dispatch(tr)
+    }
+    return true
+  }
+}
+
 /**
  * Normalises raw dialog input into a safe, usable href — or null when the input must be
  * rejected (specs/hyperlink-einfuegen-req.md §3.3, Grenzfall 4.9):

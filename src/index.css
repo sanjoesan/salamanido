@@ -29,6 +29,11 @@ body {
      typing (basis-stabilisierung-req.md Querschnitt §2.6). */
   white-space: pre-wrap;
   word-wrap: break-word;
+  /* App-Standard 11 pt (Word-Optik) — BEWUSST nur als UI-/CSS-Wert, nie in den Export
+     geschrieben („Kein Produktstandard", schriftgroesse-waehlen-req.md §3.4): das
+     Schriftgrad-Feld zeigt für unformatierten Fließtext die 11, und die Darstellung
+     entspricht ihr, ohne dass Dokumente einen stillen Default-Mark erhielten. */
+  font-size: 11pt;
 }
 
 /*
