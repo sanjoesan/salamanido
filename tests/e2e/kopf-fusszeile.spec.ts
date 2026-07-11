@@ -107,6 +107,65 @@ test('Entfernen mit Bestätigung: nicht-leere Fußzeile fragt nach und verschwin
   await expect(footerButton(page)).toHaveAttribute('aria-pressed', 'false')
 })
 
+// Seitengeometrie wie src/formats/shared/editor/pageLayout.ts (A4 bei 96 dpi, gerundet)
+const PAGE = { width: 794, height: 1123, margin: 94, separator: 32 }
+
+/** Doppelklick in das obere/untere Randband der Seite `pageIndex` (zoom-bereinigt).
+ *  `edge` steuert die Tiefe im Band: 0.5 = Bandmitte, 0.15 = nahe der Seitenkante
+ *  (AUSSERHALB eines bereits gemounteten editierbaren Bereichs). */
+async function dblclickMargin(page: Page, band: 'top' | 'bottom', edge = 0.5, pageIndex = 0) {
+  let box = (await page.getByTestId('page-sheet').boundingBox())!
+  const scale = box.width / PAGE.width
+  const pageTop = pageIndex * (PAGE.height + PAGE.separator)
+  const y =
+    band === 'top' ? pageTop + PAGE.margin * edge : pageTop + PAGE.height - PAGE.margin * edge
+  // Zielpunkt sichtbar scrollen (Mobile/Tablet: eine Seite ist höher als der Viewport;
+  // mouse.dblclick arbeitet mit Viewport-Koordinaten)
+  await page.evaluate((yScaled) => {
+    const sheet = document.querySelector('[data-testid="page-sheet"]') as HTMLElement
+    const scroller = sheet.closest('.overflow-auto') as HTMLElement
+    const sheetTop =
+      sheet.getBoundingClientRect().top - scroller.getBoundingClientRect().top + scroller.scrollTop
+    scroller.scrollTop = Math.max(0, sheetTop + yScaled - scroller.clientHeight / 2)
+  }, y * scale)
+  box = (await page.getByTestId('page-sheet').boundingBox())!
+  await page.mouse.dblclick(box.x + box.width / 2, box.y + y * scale)
+}
+
+test('Doppelklick in den oberen Seitenrand aktiviert die Kopfzeile und fokussiert sie (§1 #2)', async ({
+  page,
+}) => {
+  await openEditor(page)
+  await expect(headerButton(page)).toHaveAttribute('aria-pressed', 'false')
+  await dblclickMargin(page, 'top')
+  await expect(headerButton(page)).toHaveAttribute('aria-pressed', 'true')
+  await page.keyboard.type('Per Doppelklick')
+  await expect(headerEditor(page)).toHaveText('Per Doppelklick')
+})
+
+test('Doppelklick in den unteren Seitenrand aktiviert die Fußzeile (§1 #2)', async ({ page }) => {
+  await openEditor(page)
+  await dblclickMargin(page, 'bottom')
+  await expect(footerButton(page)).toHaveAttribute('aria-pressed', 'true')
+  await page.keyboard.type('Fuß per Doppelklick')
+  await expect(footerEditor(page)).toHaveText('Fuß per Doppelklick')
+})
+
+test('Doppelklick bei AKTIVER Kopfzeile fokussiert sie nur — kein Entfernen, Inhalt bleibt (§1 #2)', async ({
+  page,
+}) => {
+  await openEditor(page)
+  await headerButton(page).click()
+  await page.keyboard.type('Bestand')
+  await bodyEditor(page).click()
+  await page.keyboard.type('Haupttext')
+  // nahe der Seitenkante klicken — oberhalb des gemounteten Kopfzeilen-Bereichs
+  await dblclickMargin(page, 'top', 0.15)
+  await page.keyboard.type(' bleibt')
+  await expect(headerEditor(page)).toHaveText('Bestand bleibt')
+  await expect(bodyEditor(page)).toContainText('Haupttext')
+})
+
 test('Folgeseiten-Kopien: Kopf-/Fußzeile erscheint auf Seite 2 und folgt Änderungen live (§4 Option a, Stufe 2)', async ({
   page,
 }) => {
@@ -148,6 +207,10 @@ test('Logo-Bild in der Kopfzeile: Export mit Part-eigenen Rels, Reimport zeigt d
     'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII='
   await openEditor(page, docxCard)
   await headerButton(page).click()
+  // Erst wenn die neue Kopfzeilen-View fokussiert ist, ist die Toolbar an sie gebunden —
+  // setInputFiles feuert sonst gelegentlich vor dem Mount-Effekt und das Bild landet im Body
+  // (für Menschen unerreichbares Mikrosekunden-Fenster, unter Testlast reproduzierbar).
+  await expect(headerEditor(page)).toBeFocused()
   await page.locator('label:has-text("Bild")').locator('input[type=file]').setInputFiles({
     name: 'logo.png',
     mimeType: 'image/png',

@@ -698,5 +698,16 @@ und ODT-Rundreise (styles.xml master-page).
   Seite). E2E: Kopien erscheinen ab Seite 2 mit identischem Inhalt, folgen Änderungen
   live und verschwinden, wenn das Dokument wieder einseitig wird.
 - DOCX-Bild-Rels-Fix (0.A/1): BEHOBEN, siehe Entscheidung 5.
-- **Offen:** Doppelklick in den Seitenrand (§1 #2), Suche-in-Kopf/Fußzeile
-  (suchen-req §16).
+- **Doppelklick in den Seitenrand (§1 #2): UMGESETZT.** dblclick-Handler auf dem
+  Seiten-Container; das getroffene Randband wird rechnerisch bestimmt (Y modulo
+  Seitenperiode, zoom-bereinigt über die gemessene Sheet-Breite) — funktioniert damit
+  auf JEDER Seite, die pointer-events-freien Kopien-Bänder der Folgeseiten inklusive.
+  Oberes Band → Kopfzeile, unteres Band → Fußzeile; nicht vorhanden → aktivieren
+  (der neue Bereich fokussiert sich selbst), vorhanden → nur fokussieren (scrollt
+  zum editierbaren Bereich auf Seite 1; KEIN Entfernen-Pfad vom Doppelklick aus).
+  Doppelklick IM Body oder in einem editierbaren Bereich bleibt ProseMirror-
+  Wortselektion. E2E: oben/unten aktivieren, Aktiv-Fall (fokussiert statt entfernt,
+  Inhalt bleibt). Dabei E2E-Flake im Logo-Test gehärtet: auf Fokus der neuen
+  Kopfzeilen-View warten, bevor setInputFiles feuert (sonst bindet die Toolbar
+  gelegentlich noch am Body — für Menschen unerreichbares Zeitfenster).
+- **Offen:** Suche-in-Kopf/Fußzeile (suchen-req §16).

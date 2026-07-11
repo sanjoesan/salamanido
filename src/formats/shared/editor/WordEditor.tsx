@@ -554,6 +554,37 @@ export function WordEditor({ document: doc, onChange }: FormatEditorProps<WordDo
     view.focus()
   }
 
+  // Doppelklick in den oberen/unteren Seitenrand — auf JEDER Seite, die Kopien-Bänder
+  // der Folgeseiten eingeschlossen — aktiviert die Kopf-/Fußzeile bzw. fokussiert den
+  // EINEN editierbaren Bereich auf Seite 1 (req §1 #2, Word-/LibreOffice-Standard).
+  // Das Randband wird rechnerisch bestimmt (Y modulo Seitenperiode, zoom-bereinigt) —
+  // die Kopien sind pointer-events:none, das Ziel ist also stets das Sheet selbst.
+  const activateHeaderFooterFromMargin = (event: ReactMouseEvent) => {
+    const view = viewRef.current
+    const sheet = sheetRef.current
+    if (!view || !sheet) return
+    if (view.dom.contains(event.target as Node)) return // Wortselektion im Body gehört PM
+    if ((event.target as HTMLElement).closest?.('[data-testid="header-editor"], [data-testid="footer-editor"]')) return
+    const rect = sheet.getBoundingClientRect()
+    const scale = rect.width / PAGE_WIDTH_PX // == zoom, aus dem DOM statt aus dem State
+    const yInPage = (event.clientY - rect.top) / scale % (PAGE_HEIGHT_PX + PAGE_SEPARATOR_PX)
+    const kind =
+      yInPage < PAGE_MARGIN_PX
+        ? ('header' as const)
+        : yInPage > PAGE_HEIGHT_PX - PAGE_MARGIN_PX && yInPage < PAGE_HEIGHT_PX
+          ? ('footer' as const)
+          : null // Inhaltsbereich oder Seitenzwischenraum
+    if (!kind) return
+    event.preventDefault()
+    if (!docContentRef.current[kind]) {
+      toggleHeaderFooter(kind) // aktivieren — der neue Bereich fokussiert sich selbst
+      return
+    }
+    const surface = sheet.querySelector<HTMLElement>(`[data-testid="${kind}-editor"] .ProseMirror`)
+    surface?.scrollIntoView({ block: 'nearest' })
+    surface?.focus() // feuert den focus-Handler der HF-View → Toolbar bindet um
+  }
+
   const activeView = viewRef.current
   const editView = targetView ?? activeView
   return (
@@ -633,6 +664,7 @@ export function WordEditor({ document: doc, onChange }: FormatEditorProps<WordDo
             ref={sheetRef}
             data-testid="page-sheet"
             onMouseDown={focusEditorFromSheet}
+            onDoubleClick={activateHeaderFooterFromMargin}
             style={{
               width: PAGE_WIDTH_PX,
               // B4: an empty/short document still shows one FULL A4 sheet, and the last

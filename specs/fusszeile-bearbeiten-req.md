@@ -639,5 +639,8 @@ und ODT-Rundreise (styles.xml master-page).
   bewusst KEINE `.ProseMirror`-Klasse (Test-Locator-Invariante). E2E: Kopie erscheint
   ab Seite 2, folgt Änderungen live, verschwindet bei Rückkehr zur Einseitigkeit.
 - DOCX-Bild-Rels-Fix (0.A/1): BEHOBEN, siehe Entscheidung 5.
-- **Offen:** Doppelklick in den Seitenrand (§1 #2), Suche-in-Kopf/Fußzeile
-  (suchen-req §16).
+- **Doppelklick in den Seitenrand (§1 #2): UMGESETZT** (gemeinsamer Handler mit der
+  Kopfzeile, Details dort): unteres Randband jeder Seite → Fußzeile aktivieren bzw.
+  den editierbaren Bereich auf Seite 1 fokussieren; kein Entfernen-Pfad vom
+  Doppelklick aus.
+- **Offen:** Suche-in-Kopf/Fußzeile (suchen-req §16).
