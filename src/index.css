@@ -96,6 +96,24 @@ body {
 }
 
 /*
+ * Such-Hervorhebung (suchen-req.md §4): flüchtige Decorations, gegen die IMMER helle
+ * Dokumentseite kalibriert. Ring + halbtransparente Fläche, damit (a) darunterliegende
+ * Zeichenformatierung und echte Textmarker-Hervorhebungen sichtbar bleiben und (b) die
+ * Suche optisch von einer Nutzer-Hintergrundfarbe unterscheidbar ist. Der AKTIVE Treffer
+ * unterscheidet sich zusätzlich per kräftigerem Ring — nicht nur über den Farbton
+ * (Farbfehlsichtigkeit).
+ */
+.ProseMirror .search-match {
+  background-color: rgba(250, 204, 21, 0.35);
+  box-shadow: 0 0 0 1px rgba(202, 138, 4, 0.7);
+  border-radius: 1px;
+}
+.ProseMirror .search-match--active {
+  background-color: rgba(249, 115, 22, 0.4);
+  box-shadow: 0 0 0 2px #c2410c;
+}
+
+/*
  * Manueller Seitenumbruch (seitenumbruch-req.md §1.3): der page_break-Node rendert als
  * gestrichelte Linie mit dem Label „Seitenumbruch" — visuell UND per DOM-Attribut
  * (data-page-break) klar von einem automatischen Umbruch (nackter .page-break-spacer)

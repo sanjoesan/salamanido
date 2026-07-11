@@ -22,6 +22,8 @@ import {
   selectedImage,
 } from './commands'
 import { LinkDialog } from './LinkDialog'
+import { SearchBar } from './SearchBar'
+import { createSearchPlugin } from './search'
 import { clipboardTextSerializer } from './clipboard'
 import { createPastePlugin } from './paste'
 import { createPaginationPlugin } from './pagination'
@@ -155,6 +157,25 @@ export function WordEditor({ document: doc, onChange }: FormatEditorProps<WordDo
   const [linkDialogOpen, setLinkDialogOpen] = useState(false)
   const openLinkDialogRef = useRef(() => {})
   openLinkDialogRef.current = () => setLinkDialogOpen(true)
+
+  // Suche (suchen-req.md §2): searchNonce > 0 = Leiste offen; jede Erhöhung fokussiert/
+  // selektiert das Suchfeld erneut (Grenzfall „erneutes Strg+F bei offener Leiste").
+  const [searchNonce, setSearchNonce] = useState(0)
+  // Strg/Cmd+F auf WORKSPACE-Ebene — muss auch greifen, wenn der Editor noch keinen
+  // Fokus hatte (direkt nach Import); echte Formularfelder AUSSERHALB der Suche behalten
+  // ihr natives Verhalten (§2 „Fokus-Klarstellung").
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (!(event.ctrlKey || event.metaKey) || (event.key !== 'f' && event.key !== 'F')) return
+      const target = event.target as HTMLElement
+      const isFormField = /^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName)
+      if (isFormField && !target.hasAttribute('data-search-input')) return
+      event.preventDefault()
+      setSearchNonce((n) => n + 1)
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [])
 
   // Visible-but-transient feedback (never a permanent/blocking state).
   useAutoDismiss(cutError, setCutError)
@@ -335,6 +356,7 @@ export function WordEditor({ document: doc, onChange }: FormatEditorProps<WordDo
         // the one-time init effect is safe. See specs/einfuegen-code.md 5.3.
         createPastePlugin({ onNotice: setPasteNotice }),
         dropCursor(),
+        createSearchPlugin(),
         createPaginationPlugin(),
       ],
     })
@@ -497,8 +519,12 @@ export function WordEditor({ document: doc, onChange }: FormatEditorProps<WordDo
           setCutError={setCutError}
           onOpenTableDialog={() => setTableDialogOpen(true)}
           onOpenLinkDialog={() => setLinkDialogOpen(true)}
+          onOpenSearch={() => setSearchNonce((n) => n + 1)}
           onNotice={setPasteNotice}
         />
+      )}
+      {activeView && searchNonce > 0 && (
+        <SearchBar view={activeView} focusNonce={searchNonce} onClose={() => setSearchNonce(0)} />
       )}
       {activeView && tableDialogOpen && (
         <TableSizeDialog

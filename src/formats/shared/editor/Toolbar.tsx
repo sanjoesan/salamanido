@@ -49,6 +49,8 @@ interface ToolbarProps {
   onOpenTableDialog: () => void
   /** Opens the link dialog (insert/edit/remove — hyperlink-einfuegen-req.md §1 #1). */
   onOpenLinkDialog: () => void
+  /** Öffnet/fokussiert die Suchleiste (suchen-req.md §2 #1) — derselbe Weg wie Strg+F. */
+  onOpenSearch: () => void
   /** Transient, auto-dismissing status banner (shared with the paste pipeline) —
    * used by the page-break fallback inside tables/lists (seitenumbruch-req.md §3.10). */
   onNotice: (message: string) => void
@@ -330,6 +332,14 @@ const IconTableDelete = (
     <path d="M4.5 5.5l15 13M19.5 5.5l-15 13" />
   </TableIcon>
 )
+// Lupen-Icon für „Suchen" (suchen-req.md §2 #1 — eingebettetes SVG, kein Unicode).
+const IconSearch = (
+  <TableIcon>
+    <circle cx="10.5" cy="10.5" r="6.5" />
+    <path d="m15.5 15.5 5 5" />
+  </TableIcon>
+)
+
 // Kettenglied-Icon für „Link einfügen" (hyperlink-einfuegen-req.md §1 #1 — eingebettetes
 // SVG, kein Unicode-Zeichen).
 const IconLink = (
@@ -412,7 +422,15 @@ function TableOpButton({
   )
 }
 
-export function Toolbar({ view, cutError, setCutError, onOpenTableDialog, onOpenLinkDialog, onNotice }: ToolbarProps) {
+export function Toolbar({
+  view,
+  cutError,
+  setCutError,
+  onOpenTableDialog,
+  onOpenLinkDialog,
+  onOpenSearch,
+  onNotice,
+}: ToolbarProps) {
   function currentHeadingLevel(): string {
     const { $from } = view.state.selection
     for (let depth = $from.depth; depth >= 0; depth--) {
@@ -654,6 +672,18 @@ export function Toolbar({ view, cutError, setCutError, onOpenTableDialog, onOpen
         🖼 Bild
         <input type="file" accept="image/*" className="hidden" onChange={handleImagePick} />
       </label>
+
+      {/* Suchen (suchen-req.md §2 #1): öffnet dieselbe Suchleiste wie Strg+F. */}
+      <button
+        type="button"
+        title="Suchen"
+        aria-label="Suchen"
+        onMouseDown={(e) => e.preventDefault()}
+        onClick={onOpenSearch}
+        className="px-2 py-1 rounded text-sm border border-transparent hover:bg-neutral-100 dark:hover:bg-neutral-800 text-neutral-700 dark:text-neutral-300 inline-flex items-center"
+      >
+        {IconSearch}
+      </button>
 
       {/* Link einfügen/bearbeiten (hyperlink-einfuegen-req.md §1 #1/#7): öffnet den
           Dialog (gleicher Weg wie Strg+K); aria-pressed zeigt „Cursor steht in einem
