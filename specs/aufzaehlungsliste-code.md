@@ -1,132 +1,199 @@
 # Umsetzungsplan: Feature „Aufzählungsliste (Bullet)"
 
-Gegenstück zu `specs/aufzaehlungsliste-req.md` (Anforderung). Dieses Dokument ist der
-**dateigenaue Entwicklungsplan**: was am bestehenden Code nachweislich falsch/
-unvollständig ist (durch eigene Codesichtung verifiziert, nicht nur aus der
-Anforderung übernommen), welche Dateien sich ändern bzw. neu entstehen, und in
-welcher Reihenfolge. Alle Datei:Zeile-Angaben wurden gegen den tatsächlichen
-Quellcode geprüft (Stand dieses Plans); abweichende/nicht reproduzierbare
-Verdachtsmomente aus der Anforderung sind unten explizit als solche markiert.
+Gegenstück zu `specs/aufzaehlungsliste-req.md` (Anforderung). Dateigenauer
+Entwicklungsplan: was am bestehenden Code **nachweislich** falsch/unvollständig ist,
+welche Dateien sich ändern, in welcher Reihenfolge, und welche Änderungen mit den
+Geschwister-Plänen geteilt werden.
+
+Alle Datei:Zeile-Angaben unten wurden am aktuellen Quellstand (dieser Sichtung)
+direkt verifiziert. Symbolnamen sind maßgeblich, Zeilennummern können verrutschen.
 
 ---
 
-## 0. Geltungsbereich und Abgrenzung zu Geschwister-Plänen
+## 0. Korrekturhinweis — diese Fassung ersetzt eine veraltete Vorfassung
 
-`bullet_list`/`ordered_list`/`list_item` (`src/formats/shared/schema.ts:74-104`) sind
-ein gemeinsamer Schema-Knoten für **vier** separate Backlog-Slugs mit eigenen
-Anforderungsdateien:
+> Die **vorherige** Fassung dieses Plans (und, Stand dieser Sichtung, ebenso
+> `nummerierte-liste-code.md` und `liste-einruecken-tab-code.md`) beschrieb einen
+> **älteren Codestand** und enthielt mehrere Aussagen, die gegen den **aktuellen**
+> Quellcode **falsch** sind. `aufzaehlungsliste-req.md` warnt in Abschnitt 5 genau
+> davor („ältere Fassungen … enthielten Aussagen, die inzwischen überholt sind").
+> Die Vorfassung ist trotzdem in die Falle getappt. Konkret **widerlegt** durch die
+> aktuelle Codesichtung (Belege in Abschnitt 1B):
 
-| Slug | Datei | Verhältnis zu diesem Plan |
-|---|---|---|
-| `aufzaehlungsliste` | `specs/aufzaehlungsliste-req.md` | **Dieser Plan.** Erzeugen/Umschalten von Bullet-Listen, aktiver/deaktivierter Button-Zustand, ODT-Bullet-Fallback-Bug, DOCX-Listentrennungs-Bug, Basis-Rundreise beider Formate, E2E-Grundabdeckung für Listen (aktuell **keine** vorhanden). |
-| `nummerierte-liste` | `specs/nummerierte-liste-req.md` | Geschwister-Feature, **kein eigener Codeplan bislang vorhanden**. Teilt `commands.ts`/`Toolbar.tsx`. Die hier unter 3./4.2 geplante Reparatur von `toggleList` wirkt **identisch** auf „1. Liste" — das wird unten explizit gekennzeichnet, keine Doppelarbeit vorgesehen. |
-| `liste-aufheben` | `specs/liste-aufheben-req.md` | Eigene, ausführliche Anforderung für den „⇧ Liste"-Button selbst (kein Codeplan bislang vorhanden). Dieser Plan übernimmt **nur** die in Abschnitt 3.10/DoD von `aufzaehlungsliste-req.md` geforderte `disabled`-Rückmeldung (siehe 4.3), **nicht** die dort im Detail behandelte mehrstufige Lift-Semantik. |
-| `liste-einruecken-tab` | `specs/liste-einruecken-tab-req.md` | Eigene, sehr ausführliche Anforderung (18 Grenzfälle, eigene Rundreise-Matrix für 9 Ebenen) für Tab/Umschalt+Tab, `sinkListItem`, DOCX-`w:ilvl`-Erhaltung über Import **und** Export, ODT-Ebenen-Stildefinitionen. **Wird hier bewusst NICHT implementiert** — Begründung und Übergabe in Abschnitt 6. |
+| Behauptung der Vorfassung | Realität im aktuellen Code |
+|---|---|
+| „DOCX-Export ignoriert Verschachtelung, schreibt hart `w:ilvl=0`" | **Falsch.** `docx/writer.ts` führt `interface ListContext { numId, level }` (Z. 96–99), klammert auf `MAX_LIST_ILVL = 8` (Z. 103) und schreibt `<w:ilvl w:val="${listContext.level}"/>` mit der **tatsächlichen** Tiefe (Z. 115); ein verschachtelter Listenknoten erbt `numId` und erhöht `level` (Z. 134–136). |
+| „DOCX-Import liest `w:ilvl` nicht" | **Falsch.** `listMarkerFor` liest `w:ilvl` (`docx/reader.ts` Z. 298–300); `groupLists` rekonstruiert die Verschachtelung aus der flachen `ilvl`-Sequenz über einen Frame-Stack (Z. 379–440). |
+| „`numberingXml` definiert nur eine Ebene (`ilvl=0`)" | **Falsch.** `docx/styleDefs.ts` erzeugt **alle 9 Ebenen** je `abstractNum` über `bulletLevelsXml()`/`orderedLevelsXml()` (Z. 50–74), Bullet-Glyphen zyklisch `['•','◦','▪']` (Z. 43). |
+| „`schema.ts` `list_item` = `paragraph block*`" | **Falsch.** `list_item.content` ist `'block+'` (`schema.ts` Z. 147), **bewusst** so, damit ein Punkt ohne führenden Absatz (reine Container-Unterliste oder Bild) gültig ist — der Kommentar Z. 139–145 nennt exakt `listLevel10.odt`/`imageWithinList.odt` als Grund. |
+| „Es gibt keine Listen-E2E-Tests" | **Falsch.** `tests/e2e/roundtrip-fidelity.spec.ts` prüft die zweistufige Listen-Verschachtelung über Upload → Export → Reimport für **DOCX und ODT** (`.ProseMirror li ul, li ol` = 1 vor/nach, Z. 50/120/166/233). |
 
-**Konsequenz für dieses Dokument:** Es deckt vollständig ab, was in
-`aufzaehlungsliste-req.md` Abschnitt 1–5 als spezifisch für das *Erzeugen/
-Umschalten einer einstufigen Bullet-Liste* beschrieben ist, plus die für dieses
-Feature bereits heute (auch ohne Tab-Funktion) über ODT-Import erreichbare
-Mehrstufigkeit (Lesbarkeit/Robustheit, nicht Bedienbarkeit). Es liefert **keine**
-Tab/Umschalt+Tab-Tastenbindung — das wird in Abschnitt 6 begründet und an
-`liste-einruecken-tab-code.md` übergeben.
-
----
-
-## 1. Bestätigter Ist-Stand (eigene Codesichtung)
-
-Alle 11 Verdachtsmomente aus `aufzaehlungsliste-req.md` Abschnitt 5 wurden gegen den
-tatsächlichen Code geprüft:
-
-| # | Verdacht | Ergebnis der Prüfung |
-|---|---|---|
-| 1 | Kein Ein-/Ausrücken implementiert | **Bestätigt.** `WordEditor.tsx:71-79` bindet nur `Enter`/`Mod-z`/`Mod-y`/`Mod-Shift-z`/`Mod-b`/`Mod-i`/`Mod-u`. Kein `Tab`/`Shift-Tab`. `grep -r sinkListItem src` (außerhalb `node_modules`) liefert **keinen** Treffer. `baseKeymap` aus `prosemirror-commands` bindet ebenfalls kein `Tab` (verifiziert per Node-Repl: `Object.keys(baseKeymap)` → `['Enter','Mod-Enter','Backspace','Mod-Backspace','Shift-Backspace','Delete','Mod-Delete','Mod-a']`). Tab wird also aktuell **nicht** abgefangen → Browser-Standardverhalten (Fokuswechsel) ist zu erwarten. |
-| 2 | DOCX-Export ignoriert Verschachtelungsebenen | **Bestätigt.** `docx/writer.ts:112-118`: `bullet_list`/`ordered_list` rekursiert per `flatMap` über `item.content`; jeder Aufruf von `blockToDocx(child, …, numId)` setzt in Zeile 103 hart `<w:ilvl w:val="0"/>`. Ein verschachtelter `bullet_list`-Knoten als weiteres Kind eines `list_item` würde beim rekursiven Aufruf erneut in den `bullet_list`-Fall laufen und **dieselbe** `BULLET_NUM_ID`/`ilvl=0` erhalten wie die Elternebene → vollständige Abflachung zu gleichrangigen Punkten derselben Liste. |
-| 3 | DOCX-Import liest `w:ilvl` nicht | **Bestätigt.** `listMarkerFor` (`docx/reader.ts:196-201`) liest ausschließlich `w:numId`, keinerlei Zugriff auf `w:ilvl` im gesamten Reader. |
-| 4 | Feste globale Listen-ID/-Stil ohne Bullet-Konsequenz | **Bestätigt, mit einer wichtigen Ergänzung.** `BULLET_NUM_ID=1` (`docx/styleDefs.ts:34`) ist nicht nur „global fix, aber ohne optische Konsequenz" — es hat eine **strukturelle** Konsequenz: siehe neuer Befund unten (1a). |
-| 5 | Kein eigenes Bullet-Zeichen wählbar | **Bestätigt.** `schema.ts:74-81` (`bullet_list`) hat kein Attribut. `docx/styleDefs.ts:41` und `odt/styleRegistry.ts:100` codieren `•` fest. |
-| 6 | Kein Symbolwechsel je Ebene | **Bestätigt.** Je nur eine `w:lvl`/`text:list-level-style-bullet`-Definition. |
-| 7 | `toggleList` kein echtes Toggle | **Bestätigt und im Bibliothekscode nachvollzogen** (`node_modules/prosemirror-schema-list/dist/index.js:92-111`, `prosemirror-schema-list@1.5.1`): `wrapRangeInList` behandelt „Cursor am Anfang eines Nicht-Erst-Punkts" als `doJoin=true`-Pfad (Zeilen 94-104, potenzielle Verschachtelung) und „Cursor im allerersten Punkt" als striktes `return false` (Zeilen 96-98, „Don't do anything if this is the top of the list"). `commands.ts:57-60` ruft ausnahmslos `wrapInList` auf, keine Prüfung auf bereits vorhandenen Listentyp. |
-| 8 | ODT-Fallback auf „bullet" | **Bestätigt, Ursache genauer lokalisiert.** `elementToBlocks` (`odt/reader.ts:181`) nutzt `|| 'bullet'`. Ursache: `listKinds` wird ausschließlich aus `parseAutomaticStyles(contentAutomaticStyles)` befüllt (`readOdt`, `odt/reader.ts:245-246`); `styles.xml` wird zwar eingelesen (`odt/reader.ts:252-270`), aber dessen `listKinds` (`stylesForChrome.listKinds`) wird **nur** für Kopf-/Fußzeilen verwendet, **nicht** mit `contentStyles.listKinds` zusammengeführt. Ein in `styles.xml` (egal ob `office:styles` oder dessen `office:automatic-styles`) definierter, von `content.xml` nur referenzierter Listenstil ist für den **Dokumentkörper** damit grundsätzlich unauffindbar → Fallback `'bullet'` greift immer, unabhängig vom tatsächlichen Typ. |
-| 9 | Kein aktiver Button-Zustand | **Bestätigt.** `Toolbar.tsx:192-224`: alle drei Listen-Buttons ohne `aria-pressed`, im Gegensatz zu `MarkButton` (Zeile 48) und `AlignButton` (Zeile 70). |
-| 10 | Tests decken nur den einfachen Fall ab | **Bestätigt.** `docx/__tests__/roundtrip.test.ts:135-171` hat den Trennungs-Test (Zeile 161-170), `odt/__tests__/roundtrip.test.ts:135-160` hat **kein** Äquivalent. Beide `external-fixtures.test.ts`-Dateien (`docx/__tests__/external-fixtures.test.ts:74-85`, `odt/__tests__/external-fixtures.test.ts:43-54`) prüfen ausschließlich „wirft keinen Fehler", keine Strukturprüfung. |
-| 11 | Keine Listen-E2E-Tests | **Bestätigt.** `tests/e2e/{docx,odt,lifecycle,selection-regression}.spec.ts` enthalten keinen Treffer für „list"/„Liste"/„bullet" (per Grep bestätigt). |
-
-### 1a. Zusätzliche, durch diese Sichtung neu gefundene Befunde (nicht in der Anforderung benannt)
-
-1. **DOCX: Zwei benachbarte, nicht durch Absatz getrennte Bullet-Listen verschmelzen beim Reimport tatsächlich zu einer** (Grenzfall 3.12 der Anforderung — Verdacht **bestätigt**, mit exakter Ursache). `groupLists` (`docx/reader.ts:258-283`) flusht eine Liste nur bei `numId`-Wechsel oder einem Nicht-Listen-Block (Zeile 273: `if (currentNumId !== null && currentNumId !== marker.numId) flush()`). Da **jede** Bullet-Liste beim Export dieselbe feste `BULLET_NUM_ID=1` erhält (`docx/writer.ts:114`, `docx/styleDefs.ts:34`), sind zwei unmittelbar aufeinanderfolgende, eigentlich getrennte Bullet-Listen beim Reimport durch nichts zu unterscheiden — sie werden zu **einer** Liste zusammengefasst. Das ist ein echter Datenverlust (Listenzahl, nicht nur Formatierung) und direkt durch Abschnitt 4.1 Punkt 5 der Anforderung geforderte Rundreise abgedeckt.
-2. **DOCX: `parseNumberingXml` wählt den „ersten Kind-`<w:lvl>` in Dokumentreihenfolge", nicht gezielt `w:ilvl="0"`.** `docx/reader.ts:83`: `const lvl = firstChildNS(abstractEl, OOXML_NAMESPACES.w, 'lvl')` — `firstChildNS` liefert `childElements(...)[0]`, also den XML-ersten `<w:lvl>`, unabhängig von dessen `w:ilvl`-Wert. Für die konkret in der Anforderung (Abschnitt 4.2, referenziert als vermeintlicher Beleg für „Abschnitt 5 Punkt 7") genannte Datei `NumberingWithOutOfOrderId.docx` **tritt der Fehler nicht auf** (per direkter ZIP/XML-Prüfung verifiziert: die Datei hat genau ein `abstractNum` mit `abstractNumId="1"`, dessen erstes `<w:lvl>` bereits `w:ilvl="0"` mit `w:numFmt="bullet"` ist; ihre einzige `<w:p>` liegt auf `ilvl="0"`) — der Dateiname bezieht sich auf eine ungewöhnliche numId/abstractNumId-Nummerierung (beide „1", nicht bei 0 beginnend), nicht auf eine `w:lvl`-Reihenfolge. Der referenzierte Anforderungs-Abschnitt „5, Punkt 7" ist zudem in der Anforderungsdatei tatsächlich „`toggleList` kein echtes Toggle", **nicht** „falsche Bullet/Nummeriert-Erkennung" — dieser Querverweis in der Anforderung ist also intern inkonsistent/fehlbeschriftet. Der Code-Befund selbst (dokumentenreihenfolge- statt attributbasierte Auswahl) ist trotzdem real und ein **latentes** Risiko für andere, hypothetische Dateien mit uneinheitlicher `w:lvl`-Reihenfolge — wird unten als Härtung mit niedriger Priorität eingeplant, nicht als „durch diese Datei nachgewiesener aktiver Bug".
-3. **`Numbering.docx` und `NumberingWOverrides.docx` enthalten tatsächlich Bullet-Ebenen** (per Auszählung der `w:numFmt`-Werte in `word/numbering.xml` verifiziert: `Numbering.docx` → `{bullet: 9, decimal: 18, lowerLetter: 9, lowerRoman: 9, custom: 1}`; `NumberingWOverrides.docx` → u. a. `{bullet: 35, decimal: 262, …}`), **`ComplexNumberedLists.docx` dagegen nicht** (`{decimal: 18, lowerLetter: 18, lowerRoman: 18}`, kein `bullet`-Format). Für die Bullet-Verifikation (Abschnitt 4.2 der Anforderung) sind also `Numbering.docx`, `NumberingWOverrides.docx` und `NumberingWithOutOfOrderId.docx` relevant, `ComplexNumberedLists.docx` **nicht** (das ist reines Nummerierungs-Testmaterial, gehört zu `nummerierte-liste-req.md`).
-4. **DOCX: Ein bild-einziger Listenpunkt wird beim Import faktisch aus der Liste „ausgestoßen", statt einen Schema-Crash zu riskieren.** `readBodyChildren` (`docx/reader.ts:319`): `items.push({ marker: block.type === 'paragraph' ? marker : { numId: null }, block })` — für einen `<w:p>`, der (z. B. weil er nur eine Bild-Drawing-Run ohne Text enthält) zu einem `image`-Block statt einem `paragraph`-Block wird, wird die Liste-Zugehörigkeit (`marker.numId`) verworfen. Ergebnis: Das Bild erscheint als eigenständiger Block **außerhalb** der Liste, die Liste wird an dieser Stelle in zwei separate `bullet_list`-Knoten gespalten. Kein Crash, kein Textverlust, aber eine stillschweigende Strukturänderung (das Bild „verlässt" optisch die Liste). Für `imageWithinList.odt` (ODT-Fixture aus Abschnitt 4.2) betrifft das die **ODT**-Seite direkt (siehe 2b/Fix 6 unten); für DOCX ist kein Fixture mit genau diesem Muster im Korpus bekannt, daher hier nur als **dokumentierter, nicht behobener Fund** festgehalten (Test empfohlen, siehe Abschnitt 5.1).
-5. **ODT: `list_item` ohne führenden Absatz ist tatsächlich konstruierbar, nicht nur theoretisch.** Sowohl bei einem `text:list-item`, dessen einziges Kind ein verschachteltes `text:list` ist (Grenzfall 3.7 der Anforderung), als auch bei einem `text:list-item`, dessen `text:p` **nur** einen `draw:frame` ohne vorausgehenden Text enthält (Grenzfall 3.9 — `paragraphToBlocks`, `odt/reader.ts:144-154`: `flushText()` pusht nur bei nicht-leerem `textBuffer`, ein `draw:frame` als allererstes Kind erzeugt daher `blocks = [image, …]` **ohne führenden `paragraph`**), entsteht ein `list_item.content`, dessen erstes Element **kein** `paragraph` ist. Das widerspricht dem Schema (`list_item: { content: 'paragraph block*' }`, `schema.ts:99`) und würde bei `wordSchema.nodeFromJSON(...)` (`WordEditor.tsx:65`) eine Schema-Validierungs-Exception auslösen — mit dem in `FEATURE-SPEC-DOCX-ODT.md` Abschnitt 1.2 ausdrücklich ausgeschlossenen Ergebnis „leere weiße Seite ohne verständliche Fehlermeldung". Muss vor Produktivsetzung behoben werden (siehe Fix 6).
+**Konsequenz:** Die Persistenz/Rundreise der Verschachtelung ist **bereits
+implementiert und grün getestet** (Belege: `docx`/`odt` `roundtrip.test.ts`
+„preserves a nested list two levels deep"; `roundtrip-fidelity.spec.ts`). Sie ist
+**Regressionsschutz**, kein Bauauftrag. Zwei Fixvorschläge der Vorfassung sind
+deshalb **zurückgezogen** bzw. **ersetzt**, weil sie diese grünen Tests **brechen**
+würden (siehe Abschnitt 2, F6-alt und F7-alt).
 
 ---
 
-## 2. Priorisierte Fehler-/Lückenliste (Umsetzungsgegenstand dieses Plans)
+## 1. Geltungsbereich, Geschwister-Pläne und geteilter Code
 
-„Muss" = blockierend für die Definition of Done aus `aufzaehlungsliste-req.md`
-Abschnitt 7. „Soll" = empfohlen, nicht blockierend. „Dokumentiert" = bewusst nicht
-behoben, aber nachweislich als Einschränkung festgehalten (zulässig laut Abschnitt 7
-der Anforderung für einzelne Verdachtsmomente).
+`bullet_list`/`ordered_list`/`list_item` (`schema.ts` Z. 115–152), `toggleList`/
+`liftFromList` (`commands.ts` Z. 57–64), die drei Listen-Buttons (`Toolbar.tsx`
+Z. 241–273) und der DOCX/ODT-Listencode werden von **vier** Backlog-Slugs geteilt.
+Die zugehörigen Codepläne **existieren bereits alle** (anders als die Vorfassung
+behauptete):
 
-| # | Befund | Einstufung | Fix in Abschnitt |
+| Slug | Req | Code | Verhältnis zu diesem Plan |
 |---|---|---|---|
-| F1 | `toggleList` kein echtes Toggle (Verdacht 7, Grenzfall 3.2–3.4, Anforderung 2.6) | **Muss** | 4.2 |
-| F2 | Kein `aria-pressed`/aktiver Zustand (Verdacht 9) | **Muss** | 4.3 |
-| F3 | Kein sichtbares Feedback bei No-Op (Grenzfall 3.5, 3.10; DoD nennt beide explizit) | **Muss** | 4.2/4.3 |
-| F4 | Tastatur-Aktivierung (Enter/Leertaste) am Button funktioniert nicht (Abschnitt 1 Zeile 8) | **Muss** | 4.3 |
-| F5 | ODT: Listenstil-Fallback auf „bullet" bei Referenz auf `styles.xml` (Verdacht 8, Grenzfall 3.13) | **Muss** | 4.8 |
-| F6 | ODT: `list_item` ohne führenden Absatz kann Schema-Crash auslösen (Grenzfall 3.7, 3.9, Neufund 1a.5) | **Muss** | 4.8 |
-| F7 | DOCX: zwei benachbarte Bullet-Listen ohne Trennabsatz verschmelzen beim Reimport (Grenzfall 3.12, Neufund 1a.1) | **Muss** | 4.6/4.7 |
-| F8 | DOCX: `w:lvl`-Auswahl nach Dokumentreihenfolge statt `w:ilvl="0"` (Neufund 1a.2, latent) | **Soll** | 4.5 |
-| F9 | Fehlende Struktur-Tests für reale Fixtures (Verdacht 10, Abschnitt 4.2 der Anforderung) | **Muss** | 5.1 |
-| F10 | Keine Listen-E2E-Tests (Verdacht 11) | **Muss** | 5.2 |
-| F11 | DOCX: Verschachtelung wird bei Export flachgelegt (Verdacht 2/3) | **Dokumentiert** (Fix bei `liste-einruecken-tab`) | 6 |
-| F12 | Kein Tab/Umschalt+Tab (Verdacht 1) | **Dokumentiert** (Fix bei `liste-einruecken-tab`) | 6 |
-| F13 | Kein eigenes Bullet-Zeichen, kein Symbolwechsel je Ebene (Verdacht 5/6) | **Dokumentiert** (Backlog Priorität 4) | 7 |
-| F14 | Keine Input-Rules („- " → Liste) | **Dokumentiert** (Nice-to-have) | 7 |
-| F15 | DOCX: Bild-einziger Listenpunkt „verlässt" die Liste beim Import (Neufund 1a.4) | **Dokumentiert** (Test statt Fix) | 5.1 |
+| `aufzaehlungsliste` | `aufzaehlungsliste-req.md` | **dieser Plan** | Bullet-spezifische Abnahme + die bullet-eigenen Format-Robustheitsfixes. |
+| `nummerierte-liste` | `nummerierte-liste-req.md` | `nummerierte-liste-code.md` (existiert) | **Autoritative Quelle des geteilten Editor-Codes:** echtes `toggleList` (dort §2.1), `isListActive`/aktiver Zustand (§2.2), `NumberingRegistry`/`numId` je Top-Level-Liste (§2.5) **und** der DOCX-Tabellenzellen-Import-Fix `readParagraphsAndTables` (§2.6, hier F9/2.2/4.5). Dieser Plan **implementiert diese geteilten Stellen nicht doppelt**, sondern übernimmt sie und ergänzt die Bullet-Abnahme. **F9 (§2.6) ist dabei kein optionaler Bonus für dieses Feature** — ohne ihn kann die in `aufzaehlungsliste-req.md` 4.1.5 geforderte DOCX-Rundreise „Liste in Tabellenzelle" nicht bestehen, unabhängig davon, ob `nummerierte-liste` ihn priorisiert. |
+| `liste-aufheben` | `liste-aufheben-req.md` | `liste-aufheben-code.md` (existiert) | Eigenes Feature für „⇧ Liste". Dieser Plan liefert dort nur den `disabled`-Zustand mit (Abschnitt 4.3), nicht die mehrstufige Lift-Semantik. |
+| `liste-einruecken-tab` | `liste-einruecken-tab-req.md` | `liste-einruecken-tab-code.md` (existiert) | Tab/Umschalt+Tab, `sinkListItem`. **Bewusst nicht hier** (Abschnitt 6). |
+
+**Wichtige Koordinationslage:** `nummerierte-liste-code.md` §2.1 stellt selbst fest,
+dass sein `toggleList`/`isListActive`-Umbau „zugleich `aufzaehlungsliste-req.md`
+Ist-Stand Punkt 9 erfüllt, aber nicht dessen eigene Abnahme ersetzt". Genau diese
+Arbeitsteilung übernimmt dieser Plan: **eine** Implementierung des geteilten Codes
+(dort verortet), **zwei** Abnahmen (bullet-eigene Tests hier). Achtung: Auch
+`nummerierte-liste-code.md`/`liste-einruecken-tab-code.md` tragen noch die in
+Abschnitt 0 widerlegten Alt-Aussagen (u. a. „`numberingXml` hat nur `ilvl=0`",
+„`schema` = `paragraph block*`"); ihre geteilten Fixes müssen als **Inkrement auf
+dem bereits verschachtelungsfähigen Code** umgesetzt werden, nicht als Neubau (siehe
+4.6/4.7). Dieser Widerspruch ist an die Pflegenden jener Pläne zu melden; dieser Plan
+beschreibt nur den korrekten Zielzustand.
 
 ---
 
-## 3. Kernentscheidung: Ein einheitliches Muster für Toggle + aktiver Zustand + Deaktivierung
+## 2. Verifizierte Fehler-/Lückenliste
 
-Statt drei Einzelmaßnahmen wird **ein** Muster für alle drei Listen-Buttons
-verwendet, das sich strikt an bereits im Projekt vorhandene Idiome anlehnt (kein
-neues Infrastruktur-Element nötig):
+„Muss" = blockierend für die Definition of Done (`aufzaehlungsliste-req.md`
+Abschnitt 7). „Soll" = empfohlen, nicht blockierend. „Dokumentiert" = bewusst nicht
+gebaut, als Einschränkung festzuhalten.
 
-1. **Aktiver Zustand** (`aria-pressed`): analog zu `AlignButton`
-   (`Toolbar.tsx:64-84`) und `isInTable(view.state)` (`Toolbar.tsx:231`) — reiner
-   Lesezugriff auf `view.state`, pro Render neu berechnet.
-2. **Deaktivierter Zustand** (`disabled`): ProseMirror-Commands unterstützen laut
-   eigener Dokumentation (`wrapInList`-Docstring, `node_modules/prosemirror-schema-list/dist/index.js:65-70`:
-   „If `dispatch` is null, only return a value to indicate whether this is
-   possible") einen **Dry-Run**: `command(view.state, undefined)` liefert `true`/
-   `false`, ohne etwas zu verändern. Dasselbe Muster wird bereits implizit von
-   `isInTable` nachgeahmt. Jeder der drei Buttons berechnet so `disabled={!command(view.state)}`.
-3. **Echtes Toggle statt `wrapInList`-Blindaufruf**: neue Logik in `commands.ts`
-   (Abschnitt 4.2), die zuerst prüft, ob die Selektion bereits in einer Liste
-   steckt, und je nach Fall `liftListItem`, `setNodeMarkup` (Typwechsel) oder
-   `wrapInList` (Neuanlage) aufruft.
+| # | Befund | Verifiziert an | Einstufung | Ort/Owner |
+|---|---|---|---|---|
+| F1 | `toggleList` ist kein echtes Toggle (nur `wrapInList`) | `commands.ts` Z. 57–60 | **Muss** | geteilt → `nummerierte-liste-code.md` §2.1; Bullet-Abnahme hier 4.2/5 |
+| F2 | Kein `aria-pressed`/aktiver Zustand der Listen-Buttons | `Toolbar.tsx` Z. 241–273 (vgl. `MarkButton` Z. 75, `AlignButton` Z. 97, Tabelle Z. 281) | **Muss** | geteilt → §2.2; Bullet-Abnahme hier 4.3/5 |
+| F3 | Kein sichtbares Feedback bei No-Op (Grenzfall 3.2/3.5/3.10) | dieselben Buttons, kein `disabled` | **Muss** | geteilt (Dry-Run-`disabled`); hier 4.3 |
+| F4 | Tastatur-Aktivierung (Enter/Leertaste) am Button fehlt (nur `onMouseDown`) | `Toolbar.tsx` alle Buttons | **Muss** | geteilt (Toolbar); Bullet-Verifikation hier 4.3/5 |
+| F5 | ODT: Listentyp-Fallback auf `'bullet'`, wenn Listenstil nur in `styles.xml` steht | `odt/reader.ts` Z. 364/288/374 | **Muss** | **bullet-eigen** (req 5.6/Grenzfall 3.13); hier 4.8 |
+| F7 | DOCX: zwei benachbarte Bullet-Listen **ohne** Trennabsatz verschmelzen beim Reimport | `docx/writer.ts` Z. 136 + `docx/reader.ts` Z. 419 | **Muss** | geteilt → `NumberingRegistry` (§2.5), **muss Verschachtelung erhalten**; hier 4.6/4.7 |
+| F8 | DOCX: `parseNumberingXml` wählt „erstes `<w:lvl>`", nicht gezielt `ilvl=0` | `docx/reader.ts` Z. 84 | **Soll** (latent) | hier 4.5 |
+| F9 | **DOCX-Import: Eine Aufzählungsliste in einer Tabellenzelle wird komplett zu flachem Text ohne Listenstruktur** (kein `bullet_list`/`list_item`, nicht nur eine falsche `numId`) | `docx/reader.ts` `parseTable` Z. 337–339: Zellinhalt läuft über `childElements(tcEl,…,'p').flatMap((p) => paragraphToBlocks(p,…))` — **ohne** `listMarkerFor`/`groupLists`, anders als `readBodyChildren` Z. 474/482 | **Muss** | geteilt → `nummerierte-liste-code.md` §2.6 (`readParagraphsAndTables`); **hier zusätzlich verbindlich**, weil `aufzaehlungsliste-req.md` 2.7 und Rundreise 4.1.5 die Tabellenzellen-Rundreise explizit für **Aufzählungslisten in beiden Formaten** verlangt. Details/Testauftrag in 2.2 und 4.5 |
+| T1 | Kein Unit-Test für `toggleList`/`liftFromList` | `commands.test.ts` (kein Treffer) | **Muss** | hier 5.1 |
+| T2 | ODT-Test „zwei getrennte Listen mit Trennabsatz" fehlt (DOCX hat ihn) | `odt/roundtrip.test.ts` Z. 143–193; `docx/roundtrip.test.ts` Z. 167 | **Muss** | hier 5.1 |
+| T3 | `external-fixtures.test.ts` prüft nur „stürzt nicht ab", keine Struktur | `docx`/`odt` `external-fixtures.test.ts` | **Muss** | hier 5.1 |
+| T4 | Kein **dediziertes** Bullet-Abnahme-E2E-Spec (Erstellen/Toggle/aktiv/Tastatur) | `tests/e2e/*` (Bullet-Klicks nur als Setup in clipboard/cut/odt/docx-Specs) | **Muss** | hier 5.2 |
+| F6-alt | ~~„`list_item` ohne führenden Absatz löst Schema-Crash aus"~~ | `schema.ts` Z. 146–152 (`block+`, bewusst) | **Zurückgezogen (Nicht-Bug)** | 2.1 |
+| F11-alt | ~~„Verschachtelung wird bei DOCX-Export flachgelegt"~~ | `docx/writer.ts` Z. 96–140; grüne Tests | **Zurückgezogen (falsch)** | Abschnitt 0 |
+| D1 | Kein eigenes Bullet-Zeichen / kein Zeichen je Ebene (ODT) | `schema.ts` (kein Attribut), `odt/styleRegistry.ts` Z. 98–103 (1 Ebene) | **Dokumentiert** | 7 |
+| D2 | Keine Input-Rules („- "→ Liste) | kein `inputRules` im Projekt | **Dokumentiert** | 7 |
+| F12 | Kein Tab/Umschalt+Tab-Einrücken im Editor | `WordEditor.tsx` Z. 77–99 (kein `Tab`) | **Übergabe** an `liste-einruecken-tab` | 6 |
 
-Damit werden **in einem Zug** behoben: F1 (echtes Toggle), F2 (aktiver Zustand),
-F3 (No-Op wird als `disabled` sichtbar, nicht mehr als wirkungsloser Klick) sowie
-symmetrisch — weil `Toolbar.tsx` von allen drei Listen-Slugs gemeinsam genutzt
-wird — der entsprechende Zustand für „1. Liste" (`nummerierte-liste`) und
-„⇧ Liste" (`liste-aufheben`).
+### 2.1 Zurückgezogen: F6-alt („Schema-Crash bei Punkt ohne führenden Absatz") ist ein Nicht-Bug — und der vorgeschlagene Fix war schädlich
 
-**Bekannte Grenze dieses Musters (zu dokumentieren, nicht zu lösen):**
-`liftListItem`s Dry-Run (`node_modules/prosemirror-schema-list/dist/index.js:206-219`,
-Zeile 212-213: `if (!dispatch) return true;`) gibt bereits `true` zurück, sobald
-`$from.blockRange($to, pred)` **irgendeinen** Bereich findet — er prüft **nicht**
-zusätzlich, ob der nachfolgende `liftToOuterList`/`liftOutOfList`-Aufruf tatsächlich
-erfolgreich wäre (beide können intern `false` liefern, z. B. wenn `liftTarget`
-`null` ergibt). Es bleibt also ein theoretisches Restrisiko, dass „⇧ Liste" trotz
-`disabled={false}` bei einem echten Klick nichts tut. Für den in dieser
-Anforderung relevanten einstufigen Fall (keine Verschachtelung, da im Editor nicht
-erzeugbar) tritt dieser Fall nicht auf; er wird als dokumentierte Restlücke
-festgehalten und sollte bei `liste-einruecken-tab` (wo Mehrstufigkeit real
-entsteht) erneut geprüft werden.
+Die Vorfassung behauptete, ein `list_item`, dessen erster Block kein `paragraph`
+ist (reine Container-Unterliste, Grenzfall 3.7; oder ein bild-only `text:p`,
+Grenzfall 3.9), löse bei `wordSchema.nodeFromJSON` eine Schema-Exception aus, und
+schlug vor, jedem solchen Punkt einen **leeren Absatz voranzustellen**.
+
+Das ist **falsch und schädlich**:
+- `schema.ts` Z. 146–152: `list_item: { content: 'block+' }` — **nicht**
+  `paragraph block*`. Der Kommentar Z. 139–145 begründet ausdrücklich, dass
+  `paragraph block*` „real, importierbare Dokumente in einen harten Importfehler"
+  verwandelte und deshalb **absichtlich** auf `block+` geändert wurde, mit genau
+  `listLevel10.odt`/`imageWithinList.odt` als Belegfixtures.
+- `odt/reader.ts` Z. 289–297 erzeugt bereits gültige Punkte: `content` wird nur bei
+  **komplett leerem** Inhalt auf `[emptyParagraph()]` zurückgesetzt (Z. 296); ein
+  führender verschachtelter `bullet_list` oder ein `image` bleibt unangetastet und
+  ist unter `block+` gültig.
+- Der vorgeschlagene „leeren Absatz voranstellen"-Fix würde in **jeden**
+  Container-/Bild-Punkt einen Fremd-Leerabsatz einschleusen, der beim Export wieder
+  herausgeschrieben wird → Inhaltsänderung/Rundreise-Bruch — genau die Verschmutzung,
+  die das `block+`-Schema vermeidet. **Nicht umsetzen.** Statt eines Fixes nur ein
+  Absicherungstest (5.1), dass diese Punkte weiterhin ohne Crash und ohne
+  Leerabsatz-Injektion importieren.
+
+### 2.2 Neu identifiziert bei dieser Prüfung: F9 — DOCX verwirft eine Aufzählungsliste in einer Tabellenzelle beim Import vollständig
+
+Weder die Vorfassung dieses Plans noch `aufzaehlungsliste-req.md` selbst benennen
+diesen Befund; er wurde bei der direkten Sichtung von `docx/reader.ts` für diese
+Prüfung gefunden und ist **schwerwiegender** als die in 4.6 behandelte
+`numId`-Frage (F7), die nur die Top-Level-Zuordnung betrifft:
+
+- `readBodyChildren` (`docx/reader.ts` Z. 464–485) liest für Body-Absätze **immer**
+  zuerst `listMarkerFor(child)` (Z. 474) und reicht das Ergebnis an `groupLists`
+  (Z. 482) durch, das daraus `bullet_list`/`ordered_list`/`list_item`-Knoten
+  rekonstruiert.
+- `parseTable` (Z. 311–364) tut das für den Inhalt einer Zelle **nicht**: Z. 337–339
+  baut den Zellinhalt ausschließlich über
+  `childElements(tcEl, …, 'p').flatMap((p) => paragraphToBlocks(p, headingInfo,
+  imageRels))` — `listMarkerFor`/`groupLists` werden **nirgends** aufgerufen.
+  Ein `<w:p>` mit `<w:numPr>` innerhalb einer Zelle liefert deshalb schlicht einen
+  gewöhnlichen `paragraph`-Block; das `w:numPr` wird komplett ignoriert.
+- **Konsequenz:** Eine Aufzählungsliste innerhalb einer Tabellenzelle — egal ob
+  eine Ebene oder mehrstufig, egal ob Bullet oder Nummerierung — geht beim
+  DOCX-**Import** vollständig verloren: kein `bullet_list`, kein `list_item`, kein
+  Bullet-Symbol, nur der reine Text bleibt (als Absatzfolge) erhalten. Das ist
+  **kein** Rand-/Kosmetikfehler, sondern echter Strukturverlust, exakt der von
+  `aufzaehlungsliste-req.md` 2.7 verlangte Fall: „Eine Aufzählungsliste innerhalb
+  einer Tabellenzelle muss möglich sein und bei Rundreise erhalten bleiben" — und
+  Rundreise 4.1.5 verlangt das ausdrücklich für **DOCX und ODT**.
+- **Export ist nicht betroffen.** `tableToDocx` (`writer.ts` Z. 158–201) ruft je
+  Zellinhalt generisch `blockToDocx(child, images, rels)` auf (Z. 189); trifft dieser
+  Aufruf auf einen `bullet_list`/`ordered_list`-Knoten, greift derselbe Listenfall wie
+  im Body (Z. 125–140) und schreibt korrektes `w:numPr` — der Fehler ist eine reine
+  **Import**-Asymmetrie, keine Export-Lücke (bestätigt durch Lesen von Z. 158–201).
+- **ODT ist nicht betroffen.** `odt/reader.ts` `elementToBlocks` rekursiert für
+  `table:table-cell` generisch über **dieselbe** Funktion, die auch den Body
+  verarbeitet (Z. 307 ruft `elementToBlocks` rekursiv auf, derselbe Codepfad wie der
+  `text:list`-Fall Z. 286–299) — eine ODT-Liste in einer Zelle wird deshalb schon
+  heute korrekt erkannt. Das ist der Grund, warum die ODT-Fixtures `listsInTable.odt`/
+  `simple-table-with-lists.odt` funktionieren, ein DOCX-Äquivalent davon im Korpus
+  aber fehlt (per Verzeichnis-Listing bestätigt: kein `*.docx`-Fixture mit Tabelle **und**
+  Liste existiert unter `tests/fixtures/external/docx/`) — der Bug wäre mit den
+  vorhandenen Fixtures allein nicht aufgefallen, ein synthetischer Test ist nötig
+  (5.1).
+- **Fix liegt bereits geplant, aber unter einem anderen Namen/Scope.**
+  `nummerierte-liste-code.md` §1.5/§2.6 beschreibt exakt diesen Befund (dort generisch
+  für „Nummerierte/Aufzählungs-Liste") und plant die gemeinsame Hilfsfunktion
+  `readParagraphsAndTables(children, headingInfo, imageRels, numberingInfo, depth)`,
+  die sowohl `readBodyChildren` als auch der Zellpfad in `parseTable` aufrufen sollen.
+  Diese Prüfung bestätigt: der Fix ist **kein** reines Nummerierungs-Anliegen,
+  sondern eine **gemeinsame Voraussetzung** für die Rundreise-Pflicht dieses Plans
+  (4.1.5) — die Fassung in 4.5 unten macht diese Abhängigkeit für die
+  Bullet-Abnahme explizit, statt sie implizit dem Geschwisterplan zu überlassen.
+
+---
+
+## 3. Kernentscheidung: ein Muster für Toggle + aktiver Zustand + Deaktivierung (geteilt)
+
+Für die drei Listen-Buttons wird **ein** Muster verwendet, das sich an vorhandene
+Idiome anlehnt (`AlignButton`, `isInTable`, der bereits `disabled`-fähige
+Ausschneiden-Button, `Toolbar.tsx` Z. 143–156):
+
+1. **Aktiver Zustand** (`aria-pressed`) über `isListActive(state, ordered)` —
+   Ahnenketten-Suche wie `isAlignActive` (`commands.ts` Z. 29–38), Design in
+   `nummerierte-liste-code.md` §2.2.
+2. **Deaktivierter Zustand** (`disabled`) über den **Dry-Run** eines Commands
+   (`command(state, undefined)` liefert `true`/`false` ohne Nebenwirkung — dasselbe,
+   was `canCut` (`commands.ts` Z. 126–128) und der Ausschneiden-Button schon nutzen).
+3. **Echtes Toggle** statt `wrapInList`-Blindaufruf — Design in
+   `nummerierte-liste-code.md` §2.1 (klassifiziert die Selektion selbst: Zieltyp
+   bereits vorhanden → aufheben; anderer Typ → `setNodeMarkup`; kein Listenteil →
+   `wrapInList`; Überschrift im Bereich → überspringen statt Totalausfall).
+
+Damit fallen F1–F4 **in einem Zug** und **einmalig** (nicht je Slug) — für „• Liste"
+**und** „1. Liste" **und** „⇧ Liste". Dieser Plan liefert dafür die **Bullet-Abnahme**
+(4.2/4.3 Detailanforderungen, 5.1 Unit-Tests, 5.2 E2E).
+
+**Dokumentierte Restgrenze (nicht zu lösen):** Der Dry-Run von `liftListItem` kann
+`true` liefern, obwohl der echte Lift in einem Randfall doch `false` wäre
+(`liftTarget === null`). Für den hier relevanten **einstufigen** Fall (im Editor
+keine Verschachtelung erzeugbar) tritt das nicht auf; bei `liste-einruecken-tab`
+(echte Mehrstufigkeit) erneut zu prüfen.
 
 ---
 
@@ -134,404 +201,274 @@ entsteht) erneut geprüft werden.
 
 ### 4.1 `src/formats/shared/schema.ts` — keine Änderung
 
-`bullet_list`/`ordered_list`/`list_item` bleiben unverändert (Zeilen 74-104). Kein
-Attribut für ein eigenes Bullet-Zeichen (siehe F13, bewusst nicht umgesetzt,
-Abschnitt 7). Die Content-Ausdrücke sind für Mehrstufigkeit bereits ausreichend
-(bestätigt in Abschnitt 1); keine Änderung nötig, auch nicht vorgreifend für
-`liste-einruecken-tab`.
+`bullet_list` (Z. 115–122), `ordered_list` (Z. 124–137), `list_item` (`block+`,
+Z. 146–152) bleiben unverändert. **Kein** neues Bullet-Zeichen-Attribut (D1,
+Abschnitt 7). `block+` **nicht** anfassen (siehe 2.1).
 
-### 4.2 `src/formats/shared/editor/commands.ts` — echtes Toggle
+### 4.2 `src/formats/shared/editor/commands.ts` — echtes Toggle + `isListActive` (geteilt)
 
-Ersetzt die aktuelle Implementierung (Zeilen 57-64):
+Die geteilte Implementierung ist in `nummerierte-liste-code.md` §2.1/§2.2 verortet.
+Für den Bullet-Weg (`ordered=false`) sind dabei **verbindlich**:
+- `toggleList(false)` mit Cursor in einem Bullet-Punkt → hebt die Punkte im
+  erfassten Bereich **auf** (deterministisch, kein stiller No-Op, keine neue
+  Verschachtelung) — deckt Grenzfälle 3.2/3.3/3.4.
+- `toggleList(false)` auf eine bestehende **`ordered_list`** → `setNodeMarkup` auf
+  `bullet_list` (kein Attribut nötig; `ordered_list.start` entfällt) — Typwechsel
+  ohne Verschachtelung (req 2.6).
+- `toggleList(false)` außerhalb jeder Liste → `wrapInList(bullet_list)` wie bisher.
+- Selektion über Überschrift + Absätze (Grenzfall 3.5): Absatzläufe werden zur
+  Liste, die Überschrift wird **übersprungen** (Schema lässt `heading` in
+  `list_item` zwar zu, `wrapInList`/`findWrapping` aber nicht) — **kein**
+  Totalausfall. Falls die geteilte Implementierung diesen Lauf-Split (noch) nicht
+  liefert, greift ersatzweise der `disabled`-Zustand (4.3) als sichtbare Rückmeldung;
+  das erfüllt die DoD („kein stiller Fehlschlag") ohne neue Toast-Infrastruktur (im
+  `src` kein `aria-live`/`toast`/`snackbar` vorhanden — per Grep bestätigt).
+- `liftFromList()` (`commands.ts` Z. 62–64) bleibt `liftListItem(list_item)`.
 
-```ts
-const LIST_NODE_TYPES = [wordSchema.nodes.bullet_list, wordSchema.nodes.ordered_list]
+`isListActive(state, false)` muss `true` sein, sobald der Cursor in einem
+`bullet_list` steht, sonst `false` (Ahnenketten-Suche, §2.2).
 
-/** Findet den nächstgelegenen umschließenden Listenknoten (bullet_list/ordered_list)
- *  der aktuellen Selektion, falls vorhanden — nutzt ProseMirrors eigene
- *  Node-Range-Suche (`blockRange` mit Prädikat), keine eigene Baum-Traversierung. */
-function ancestorListRange(state: EditorState): NodeRange | null {
-  const { $from, $to } = state.selection
-  return $from.blockRange($to, (node) => LIST_NODE_TYPES.includes(node.type))
-}
+Kein neuer Fremdimport nötig außer den in §2.1/§2.2 genannten
+(`NodeRange`/`liftListItem` bereits vorhanden, `wrapInList` bereits importiert
+Z. 2).
 
-export function toggleList(ordered: boolean): Command {
-  const listType = ordered ? wordSchema.nodes.ordered_list : wordSchema.nodes.bullet_list
-  return (state, dispatch) => {
-    const range = ancestorListRange(state)
-    if (range) {
-      if (range.parent.type === listType) {
-        // Bereits derselbe Listentyp: echtes Toggle-Off statt No-Op/Verschachtelung
-        // (löst Grenzfall 3.2, 3.3, 3.4 der Anforderung deterministisch).
-        return liftListItem(wordSchema.nodes.list_item)(state, dispatch)
-      }
-      // Anderer Listentyp: Typ der gefundenen Liste direkt umschreiben, keine
-      // Verschachtelung, kein Lift+Wrap (Anforderung 2.6).
-      if (dispatch) {
-        const pos = range.$from.before(range.depth)
-        const attrs = ordered ? { start: 1 } : null
-        dispatch(state.tr.setNodeMarkup(pos, listType, attrs))
-      }
-      return true
-    }
-    // Keine umschließende Liste: normale Neuanlage.
-    return wrapInList(listType)(state, dispatch)
-  }
-}
+### 4.3 `src/formats/shared/editor/Toolbar.tsx` — Buttons anpassen (geteilt) + Bullet-Verifikation
 
-export function isListActive(state: EditorState, ordered: boolean): boolean {
-  const listType = ordered ? wordSchema.nodes.ordered_list : wordSchema.nodes.bullet_list
-  const range = ancestorListRange(state)
-  return range?.parent.type === listType
-}
+Aktueller Stand (verifiziert): drei Listen-Buttons Z. 241–273, alle **ohne**
+`aria-pressed`, **ohne** `disabled`, Handler ausschließlich `onMouseDown`. Die
+`disabled:`-Utility-Klassen existieren bereits am Ausschneiden-Button (Z. 153) und
+sind wiederverwendbar (keine neue Infrastruktur).
 
-export function liftFromList(): Command {
-  return liftListItem(wordSchema.nodes.list_item)
-}
-```
-
-Wichtige Detailpunkte für die Implementierung:
-- `NodeRange.parent` (`node_modules/prosemirror-model/dist/index.js:1130`) liefert
-  den gefundenen Listenknoten selbst; `range.$from.before(range.depth)` liefert
-  dessen **eigene** Dokumentposition (nicht die des Contents) — verifiziert anhand
-  der `NodeRange`-Klassendefinition (`start`/`parent`-Getter,
-  `prosemirror-model/dist/index.js:1093-1138`).
-- `setNodeMarkup` erhält für `ordered_list` explizit `{ start: 1 }`, für
-  `bullet_list` `null` (kein Attribut) — **nicht** `null` in beiden Fällen, um
-  keine ungültigen/fehlenden Attribute zu riskieren; mit einem Unit-Test
-  abzusichern (siehe 5.1).
-- **Grenzfall 3.5 (Selektion über eine Überschrift hinweg):** `wrapInList` scheitert
-  weiterhin strukturell für den die Überschrift enthaltenden Bereich
-  (`findWrapping` liefert `null`, Bibliotheksverhalten unverändert). Der in
-  Abschnitt 3 dieses Plans beschriebene `disabled`-Zustand macht diesen Fall
-  **sichtbar** (Button ist deaktiviert, sobald die Selektion eine Überschrift
-  einschließt und dadurch kein Wrap möglich ist) — das erfüllt die DoD-Vorgabe
-  „sichtbar zurückmelden" **ohne** eine neue Toast-/Benachrichtigungs-Infrastruktur
-  einzuführen (im Projekt aktuell nicht vorhanden, siehe Grep-Ergebnis: kein
-  Treffer für „toast"/„snackbar"/„notification"/„aria-live" im gesamten `src`).
-  **Empfehlung als optionale Verbesserung** (nicht blockierend): Selektion in
-  zusammenhängende Läufe aus wrapbaren Blöcken (alles außer `heading`) aufteilen
-  und pro Lauf einzeln wrappen, damit auch die Absätze in einer gemischten
-  Selektion tatsächlich zur Liste werden. Das erfordert mehrere
-  `ReplaceAroundStep`-Anwendungen in umgekehrter Dokumentreihenfolge (analog zu
-  `doWrapInList`, `node_modules/prosemirror-schema-list/dist/index.js:112-131`) und
-  wird hier bewusst **nicht** in den Blocking-Scope aufgenommen, da der
-  `disabled`-Zustand die DoD-Anforderung bereits ohne dieses Mehr an Komplexität
-  erfüllt.
-
-**Cross-Cutting-Hinweis:** `toggleList`/`isListActive` werden von **beiden**
-Buttons „• Liste" und „1. Liste" verwendet (`ordered` Parameter). Die
-Toggle-Reparatur behebt damit automatisch denselben Verdacht für die nummerierte
-Liste (kein separater Fix in einem künftigen `nummerierte-liste-code.md`
-notwendig) — dort nur noch zu verifizieren/zu erwähnen, nicht erneut zu bauen.
-
-### 4.3 `src/formats/shared/editor/Toolbar.tsx`
-
-Änderungen an den drei Listen-Buttons (aktuell Zeilen 192-224) und – aus
-Konsistenzgründen mit geringem Zusatzaufwand über den gemeinsamen `run()`-Helfer –
-an **allen** Toolbar-Buttons für die Tastatur-Aktivierung (F4).
-
-```tsx
-function ListButton({
-  view,
-  ordered,
-  label,
-  title,
-}: {
-  view: EditorView
-  ordered: boolean
-  label: string
-  title: string
-}) {
-  const active = isListActive(view.state, ordered)
-  const command = toggleList(ordered)
-  const canApply = command(view.state, undefined) // Dry-Run, siehe Abschnitt 3
-  return (
-    <button
-      type="button"
-      title={title}
-      aria-label={title}
-      aria-pressed={active}
-      disabled={!canApply}
-      onMouseDown={(e) => {
-        e.preventDefault()
-        run(view, command)
-      }}
-      onKeyDown={(e) => {
-        if (e.key === 'Enter' || e.key === ' ') {
-          e.preventDefault()
-          run(view, command)
-        }
-      }}
-      className={/* aktiver/disabled-Zustand analog MarkButton/AlignButton, zzgl. disabled:opacity-40 disabled:cursor-not-allowed */}
-    >
-      {label}
-    </button>
-  )
-}
-```
-
-- „• Liste" → `<ListButton view={view} ordered={false} label="• Liste" title="Aufzählung" />`
-- „1. Liste" → `<ListButton view={view} ordered={true} label="1. Liste" title="Nummerierte Liste" />`
-- „⇧ Liste" bekommt denselben `disabled`-Mechanismus (`liftFromList()(view.state, undefined)`),
-  aber **keinen** `aria-pressed` (kein sinnvoller „aktiver Zustand" für eine
-  Aktion, die aus der Liste heraus führt) — das behebt F3 für Grenzfall 3.10, ohne
-  in den Zuständigkeitsbereich von `liste-aufheben-req.md` (mehrstufiges Lift-
-  Verhalten) einzugreifen.
-- **`onKeyDown`-Ergänzung wird für alle Toolbar-Buttons vorgenommen** (nicht nur
-  die Listen-Gruppe), da der gemeinsame `run()`-Helfer und das
-  `onMouseDown`-Muster identisch für `MarkButton`, `AlignButton`, den
-  Tabellen-Button etc. gilt (`Toolbar.tsx:44-84`, `228-239`). Begründung: Ein
-  fokussierter `<button>` löst bei Aktivierung per Tastatur (Enter/Leertaste) laut
-  Web-Plattform-Semantik ein `click`-Ereignis aus, **kein** `mousedown` — ein
-  reiner `onMouseDown`-Handler bleibt für Tastaturnutzer:innen wirkungslos. Ein
-  zusätzlicher `onClick`-Handler würde bei echten Mausklicks zur **doppelten**
-  Befehlsausführung führen (`mousedown` **und** nachfolgendes `click` feuern
-  beide), daher gezielt `onKeyDown` für `Enter`/`' '` statt `onClick` — Mausklicks
-  bleiben unverändert einmalig über `onMouseDown`. Für die Listen-Gruppe ist dies
-  laut Anforderung (Abschnitt 1, Zeile 8) **explizit** mit echter Browser-Bedienung
-  zu verifizieren (siehe E2E-Test in 5.2); die Ausweitung auf die übrige Toolbar
-  ist ein niedrig-riskanter Mitzieheffekt, kein separates Feature.
-- CSS/Tailwind-Klassen für `disabled`: neue Utility-Klasse
-  `disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-transparent`
-  ergänzen (Tailwind-`disabled:`-Variante, keine neue Infrastruktur nötig, da
-  Tailwind bereits im Projekt verwendet wird).
+Änderungen (gemeinsame Umsetzung, hier für die Bullet-Abnahme spezifiziert):
+- „• Liste": `aria-pressed={isListActive(view.state, false)}`,
+  `disabled={!toggleList(false)(view.state, undefined)}`, aktives/`disabled`-Styling
+  analog `MarkButton`/`AlignButton` + `disabled:opacity-40
+  disabled:cursor-not-allowed disabled:hover:bg-transparent`.
+- „1. Liste": dieselbe Behandlung mit `ordered=true` (Owner: `nummerierte-liste`).
+- „⇧ Liste": `disabled={!liftFromList()(view.state, undefined)}`, **kein**
+  `aria-pressed` (keine sinnvolle „aktiv"-Semantik für eine Aus-der-Liste-Aktion).
+  Deckt Grenzfall 3.10 (Button außerhalb einer Liste sichtbar deaktiviert).
+- **F4 (Tastatur):** zusätzlich `onKeyDown` für `Enter`/`' '` auf allen
+  Toolbar-Buttons, das denselben `run(view, command)` auslöst. Begründung: ein
+  fokussierter `<button>` feuert bei Enter/Leertaste ein `click`, **kein**
+  `mousedown`; ein reiner `onMouseDown`-Handler bleibt für Tastaturnutzer:innen
+  wirkungslos. **Nicht** stattdessen `onClick` ergänzen — das würde bei echten
+  Mausklicks (`mousedown` **und** `click`) doppelt auslösen. Für die Listen-Gruppe
+  ist F4 laut req Abschnitt 1 Zeile 8 mit echter Browser-Bedienung zu verifizieren
+  (5.2).
 
 ### 4.4 `src/formats/shared/editor/WordEditor.tsx` — keine Änderung
 
-Kein neuer Keymap-Eintrag (siehe Abschnitt 6 — Tab/Umschalt+Tab bewusst nicht Teil
-dieses Plans). `Enter: splitListItem(...)` (Zeile 75) bleibt unverändert; wird in
-5.2 mit einem echten E2E-Test abgesichert (bisher **nicht** durch einen
-Browser-Test verifiziert, nur durch Bibliotheks-Vertrauen, siehe Anforderung
-Abschnitt 2.3).
+Keymap-Plugin (~Z. 85–107) bleibt: `Enter: splitListItem(list_item)` (Z. 96),
+`Shift-Enter: insertHardBreak()` (Z. 97). **Kein** `Tab`/`Shift-Tab` (Abschnitt 6).
+Das `splitListItem`-Verhalten (neuer Punkt / leerer Punkt beendet Liste / Split in
+der Mitte) ist bisher **nicht** per Browser-Test belegt (nur Bibliotheks-Vertrauen)
+— req 2.3 verlangt echten Nachweis → E2E in 5.2.
 
-### 4.5 `src/formats/docx/reader.ts`
+### 4.5 `src/formats/docx/reader.ts` — Fix F9 (Muss, geteilt) + Fix F8 (Soll, Härtung)
 
-**Fix F8 (Soll, Härtung):** `parseNumberingXml` (Zeilen 77-97), Zeile 83:
-
-```ts
-// vorher:
-const lvl = firstChildNS(abstractEl, OOXML_NAMESPACES.w, 'lvl')
-// nachher: gezielt Ebene 0 suchen, mit Fallback auf „erstes Element" für
-// Dateien, die überhaupt kein ilvl="0" definieren (defensiv, kein bekannter
-// Fixture-Fall, aber schadet nicht):
-const lvlCandidates = childElements(abstractEl, OOXML_NAMESPACES.w, 'lvl')
-const lvl = lvlCandidates.find((l) => l.getAttributeNS(OOXML_NAMESPACES.w, 'ilvl') === '0') ?? lvlCandidates[0] ?? null
-```
-
-Kein Verhaltensunterschied für die aktuell bekannten Fixtures (siehe Neufund 1a.2),
-aber schließt eine plausible Fehlerquelle für zukünftige/andere Dateien mit
-unüblicher `w:lvl`-Reihenfolge. Test: neuer Unit-Test mit synthetisch
-umsortiertem `numbering.xml` (Ebene 1 vor Ebene 0 deklariert), siehe 5.1.
-
-**Kein Fix für F11/F12** (Verschachtelung/`w:ilvl`) — siehe Abschnitt 6.
-
-### 4.6 `src/formats/docx/writer.ts` — Fix F7 (per-Liste eindeutige `numId`)
-
-Aktuell (Zeilen 94-126): `blockToDocx` erhält `listNumId: number | null` und setzt
-im `bullet_list`/`ordered_list`-Fall (Zeile 114) die **globale, feste**
-`BULLET_NUM_ID`/`ORDERED_NUM_ID`. Neu: jede **JSON-Listenknoten-Instanz** (jedes
-Auftreten von `bullet_list`/`ordered_list` im Dokumentbaum, ob oberste Ebene oder
-als weiterer Block innerhalb eines `list_item`) bekommt eine **frische** `numId`
-aus einer neuen `NumberingRegistry` (siehe 4.7), gebunden an denselben festen
-`abstractNumId` (Format bleibt gemeinsam: `BULLET_ABSTRACT_ID=0`/
-`ORDERED_ABSTRACT_ID=1`).
+**F9 zuerst (blockierend für die Rundreise-Pflicht 4.1.5):** `parseTable`
+(Z. 311–364), Zellinhalt Z. 337–339, muss denselben Weg wie `readBodyChildren`
+(Z. 464–485: `listMarkerFor` + `groupLists`) gehen, statt Absätze roh über
+`paragraphToBlocks` einzulesen. Konkret (Signatur/Name folgt der bereits in
+`nummerierte-liste-code.md` §2.6 geplanten gemeinsamen Funktion, **hier nicht
+zweit-implementieren**):
 
 ```ts
-function blockToDocx(
-  node: JsonNode,
-  images: ImageCollector,
-  rels: RelationshipRegistry,
-  numbering: NumberingRegistry,     // neu
-  listNumId: number | null = null,
-): string {
-  switch (node.type) {
-    // ... paragraph/heading/table/image unverändert ...
-    case 'bullet_list':
-    case 'ordered_list': {
-      const numId = numbering.allocate(node.type === 'ordered_list' ? 'ordered' : 'bullet')
-      return (node.content ?? [])
-        .flatMap((item) => (item.content ?? []).map((child) => blockToDocx(child, images, rels, numbering, numId)))
-        .join('')
-    }
-    // ...
-  }
-}
+// gemeinsam mit readBodyChildren genutzt, statt Z. 337–339 direkt:
+const cellItems = childElements(tcEl, OOXML_NAMESPACES.w, 'p').map((p) => ({
+  marker: listMarkerFor(p),
+  block: paragraphToBlocks(p, headingInfo, imageRels)[0], // siehe Anmerkung unten
+}))
+const content = groupLists(cellItems, kindByNumId)
 ```
 
-`blocksToDocx`/`tableToDocx`/`writeDocx` erhalten `numbering` als zusätzlichen,
-durchgereichten Parameter (**eine** Registry-Instanz pro `writeDocx`-Aufruf, geteilt
-über Body/Header/Footer, damit `numId`-Werte dokumentweit eindeutig bleiben).
-`numberingXml()` wird zu `numberingXml(numbering)` (siehe 4.7) und **nach**
-Erzeugung von `bodyXml`/`headerXml`/`footerXml` aufgerufen (Reihenfolge in
-`writeDocx`, Zeilen 222-264, bleibt dafür bereits korrekt — die Registry wird beim
-Erzeugen der Body/Header/Footer-XML als Seiteneffekt befüllt, bevor
-`numberingXmlContent = numberingXml(numbering)` aufgerufen wird).
+(Die tatsächliche Umsetzung muss — wie `readBodyChildren` es bereits tut — auch den
+Fall behandeln, dass ein `<w:p>` mehrere Blöcke liefert, z. B. Bild+Text gemischt;
+`readParagraphsAndTables` aus `nummerierte-liste-code.md` §2.6 kapselt das bereits
+korrekt für beide Aufrufer. Dieser Plan **fordert nur die Anwendung auf `parseTable`
+ein**, nicht eine eigene, zweite Implementierung.) `kindByNumId` muss dafür bis in
+`parseTable` durchgereicht werden (heute nicht Teil von dessen Parameterliste,
+Z. 311) — reine Signaturerweiterung, keine Verhaltensänderung an bestehenden
+Body-/Header-/Footer-Aufrufen.
 
-**Wichtiger Nebeneffekt, der zu dokumentieren ist:** Diese Änderung löst **nicht**
-das unter F11 dokumentierte Verschachtelungsproblem, ändert aber dessen sichtbares
-Symptom leicht: Ein `list_item`, das intern (z. B. durch ODT-Import) eine
-verschachtelte `bullet_list` als weiteren Block enthält, bekommt nach diesem Fix
-eine **eigene** `numId` (statt der Eltern-`numId`). Beim Reimport werden Eltern-
-und Kindebene dadurch als **zwei separate, benachbarte** `bullet_list`-Knoten
-erkannt (nicht mehr als **eine** verschmolzene Liste). Die tatsächliche
-Hierarchie (Kind gehört unter einen bestimmten Elternpunkt) bleibt weiterhin
-verloren — das ist unverändert Sache von `liste-einruecken-tab` — aber der Inhalt
-wird nicht mehr fälschlich in die Elternliste einsortiert. Muss mit einem
-dedizierten Test dokumentiert werden (siehe 5.1, Test „nested list survives
-export as two flat sibling lists, not merged").
+**Test zuerst rot, dann grün (5.1):** Da im Fixture-Korpus **keine** DOCX-Datei mit
+Tabelle **und** Liste existiert (Abschnitt 2.2, per Verzeichnis-Listing bestätigt),
+muss der Nachweis über einen selbst geschriebenen Rundreise-Test laufen: Bullet-Liste
+(2 Punkte) als `table_cell`-Inhalt konstruieren → `writeDocx` → `readDocx` →
+`bullet_list`/`list_item` bleiben erhalten (heute: Test schlägt fehl, Zelle enthält
+nur `paragraph`-Knoten mit dem reinen Text).
 
-**Kein Änderungsbedarf auf der ODT-Seite für das Äquivalent von F7:** `text:list`
-ist in ODF ein eigenständiges, selbst-abgrenzendes XML-Element
-(`odt/writer.ts:75-85`, `odt/reader.ts:179-187`) — zwei unmittelbar
-aufeinanderfolgende `<text:list style-name="LB">`-Elemente bleiben beim Reimport
-**strukturell** zwei separate Elemente und damit zwei separate `bullet_list`-
-JSON-Knoten, unabhängig vom gemeinsam genutzten `style-name`. Das wurde geprüft
-(Lesart von `elementToBlocks`, `odt/reader.ts:164-187`: jedes Kind von
-`office:text` wird einzeln über `Array.from(bodyTextEl.children).flatMap(...)`
-verarbeitet, `odt/reader.ts:234`) und ist **kein** Bug — nur mit einem
-Regressionstest abzusichern (5.1), nicht zu ändern.
-
-### 4.7 `src/formats/docx/styleDefs.ts`
-
-Neue Klasse `NumberingRegistry`, `numberingXml()` erhält Parameter:
+**Danach F8 (Soll, Härtung):** `parseNumberingXml` (Z. 78–98), Z. 84 wählt via
+`firstChildNS` das **XML-erste**
+`<w:lvl>`, unabhängig von dessen `w:ilvl`. Für eigene Exporte unschädlich
+(`bulletLevelsXml` emittiert `ilvl=0` zuerst), aber latent falsch für Fremddateien
+mit umsortierten Ebenen. Gezielt Ebene 0 suchen, Fallback „erstes Element":
 
 ```ts
-export const BULLET_ABSTRACT_ID = 0
-export const ORDERED_ABSTRACT_ID = 1
-// BULLET_NUM_ID / ORDERED_NUM_ID entfallen (nur noch von writer.ts importiert,
-// grep bestätigt keine weiteren Nutzer im Projekt) — ersetzt durch dynamische
-// Zuteilung über NumberingRegistry.
-
-export class NumberingRegistry {
-  private nums: Array<{ numId: number; abstractNumId: number }> = []
-  private counter = 0
-
-  allocate(kind: 'bullet' | 'ordered'): number {
-    this.counter += 1
-    this.nums.push({ numId: this.counter, abstractNumId: kind === 'bullet' ? BULLET_ABSTRACT_ID : ORDERED_ABSTRACT_ID })
-    return this.counter
-  }
-
-  private serializeNums(): string {
-    return this.nums.map((n) => `<w:num w:numId="${n.numId}"><w:abstractNumId w:val="${n.abstractNumId}"/></w:num>`).join('')
-  }
-
-  toXmlNumsFragment(): string {
-    return this.serializeNums()
-  }
-}
-
-export function numberingXml(registry: NumberingRegistry): string {
-  return (
-    `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>` +
-    `<w:numbering ${WORD_NAMESPACE_DECLARATIONS}>` +
-    `<w:abstractNum w:abstractNumId="${BULLET_ABSTRACT_ID}"><w:lvl w:ilvl="0"><w:numFmt w:val="bullet"/><w:lvlText w:val="•"/></w:lvl></w:abstractNum>` +
-    `<w:abstractNum w:abstractNumId="${ORDERED_ABSTRACT_ID}"><w:lvl w:ilvl="0"><w:numFmt w:val="decimal"/><w:lvlText w:val="%1."/></w:lvl></w:abstractNum>` +
-    registry.toXmlNumsFragment() +
-    `</w:numbering>`
-  )
-}
+const lvls = childElements(abstractEl, OOXML_NAMESPACES.w, 'lvl')
+const lvl = lvls.find((l) => (l.getAttributeNS(OOXML_NAMESPACES.w, 'ilvl') ?? '0') === '0') ?? lvls[0] ?? null
 ```
 
-Falls in der Zwischenzeit **kein** einziger Listenblock im Dokument vorkommt,
-bleibt `registry.toXmlNumsFragment()` leer — unschädlich (bestehende
-`<w:abstractNum>`-Definitionen ohne referenzierende `<w:num>` sind gültiges,
-funktionsloses OOXML).
+Kein Verhaltensunterschied für bekannte Fixtures (`NumberingWithOutOfOrderId.docx`
+hat verifiziert bereits `ilvl=0` als erstes `<w:lvl>`); schließt eine plausible
+Fehlerquelle. Test: synthetisch umsortiertes `numbering.xml` (5.1).
 
-### 4.8 `src/formats/odt/reader.ts`
+**Kein Fix an `listMarkerFor`/`groupLists`** — beide sind korrekt und
+regressionsgeschützt (Abschnitt 0). Nicht anfassen.
 
-**Fix F5 (Listenstil-Fallback):** `parseAutomaticStyles` (Zeilen 36-77) bleibt
-strukturell erhalten, wird aber zusätzlich auf `office:styles` (gemeinsame
-Formatvorlagen) anwendbar gemacht, und `readOdt` führt die Ergebnisse aus
-**allen drei** möglichen Fundorten zusammen, bevor der Dokumentkörper geparst
-wird:
+### 4.6 `src/formats/docx/writer.ts` — Fix F7: `numId` je Top-Level-Liste, **Verschachtelung erhalten**
+
+**Problem (verifiziert):** Der `listContext=null`-Zweig (Z. 134–136) vergibt für
+**jede** Top-Level-Liste dieselbe feste `BULLET_NUM_ID`/`ORDERED_NUM_ID`. Zwei
+unmittelbar benachbarte Bullet-Listen ohne Trennabsatz werden dadurch als
+`…<w:p numId=1 ilvl=0>A</w:p><w:p numId=1 ilvl=0>B</w:p>…` exportiert; `groupLists`
+(`reader.ts` Z. 419: „gleiche numId, gleiches ilvl → nichts öffnen/schließen") fasst
+sie beim Reimport zu **einer** Liste zusammen (Grenzfall 3.12, req 4.1.6 — echter
+Strukturverlust). Der Fall **mit** Trennabsatz ist bereits korrekt (grüner DOCX-Test
+Z. 167) und ODT ist strukturell nicht betroffen (jedes `<text:list>` ist
+selbst-abgrenzend, `odt/writer.ts` Z. 99–109; `odt/reader.ts` Z. 286).
+
+**Korrekter Fix (geteilt mit `nummerierte-liste-code.md` §2.5):** nur den
+`listContext=null`-Zweig ändern — jede **Top-Level**-Liste erhält eine **frische**
+`numId` aus einer `NumberingRegistry`; der **verschachtelte** Zweig bleibt
+**unverändert** (erbt `numId` des Elternteils, `level+1`):
 
 ```ts
-// readOdt():
-const stylesXmlText = await zip.file('styles.xml')?.async('text')
-const stylesDoc = stylesXmlText ? parseXmlDocument(stylesXmlText) : null
-const stylesCommonEl = stylesDoc?.getElementsByTagNameNS(ODF_NAMESPACES.office, 'styles')[0] ?? null
-const stylesAutomaticEl = stylesDoc?.getElementsByTagNameNS(ODF_NAMESPACES.office, 'automatic-styles')[0] ?? null
-
-const commonListKinds = parseAutomaticStyles(stylesCommonEl).listKinds       // NEU: office:styles wird jetzt auch auf text:list-style untersucht
-const stylesAutoListKinds = parseAutomaticStyles(stylesAutomaticEl).listKinds
-const contentStyles = parseAutomaticStyles(contentAutomaticStyles)
-
-// Auflösungsreihenfolge: content.xml (lokalste/speziellste Definition) gewinnt,
-// dann styles.xml/automatic-styles, dann styles.xml/office:styles (gemeinsame
-// Vorlagen) als generischster Fallback — erst danach greift der 'bullet'-Fallback
-// in elementToBlocks.
-const mergedListKinds = new Map([...commonListKinds, ...stylesAutoListKinds, ...contentStyles.listKinds])
-const bodyStyles: ParsedStyles = { ...contentStyles, listKinds: mergedListKinds }
-const bodyBlocks = officeText ? await readOfficeTextChildren(officeText, bodyStyles, zip) : []
+const kind = node.type === 'ordered_list' ? 'ordered' : 'bullet'
+// UNVERÄNDERT (Verschachtelung): listContext != null
+//   { numId: listContext.numId, level: Math.min(listContext.level + 1, MAX_LIST_ILVL) }
+// GEÄNDERT (Top-Level): statt fester BULLET_NUM_ID/ORDERED_NUM_ID:
+//   { numId: numbering.allocate(kind, node.attrs?.start ?? 1, node.attrs?.numberingMode ?? 'restart'), level: 0 }
 ```
 
-`parseAutomaticStyles` selbst braucht **keine** Signaturänderung — sie wird nur
-zusätzlich mit dem `office:styles`-Element (statt nur `office:automatic-styles`)
-aufgerufen; die interne Logik für `text:list-style` (Zeilen 69-74) ist bereits
-elementagnostisch (iteriert `childElements(automaticStylesEl, text, 'list-style')`,
-funktioniert identisch für ein `office:styles`-Element). Doku-Kommentar ergänzen,
-dass die Funktion trotz ihres Namens generisch für jeden Style-Container
-verwendbar ist (oder Funktion in `parseListAndTextStyles` umbenennen — Entscheidung
-bei Umsetzung).
+> **Signatur ist NICHT frei wählbar — sie gehört `nummerierte-liste-code.md` §2.5.**
+> Jener (autoritative) Plan definiert `NumberingRegistry.allocate(kind, start,
+> mode)` samt `start`/`continue`-Semantik für die Nummerierung. Der Bullet-Weg
+> ruft dieselbe Signatur mit **bedeutungslosen** Werten auf (`start=1`,
+> `mode='restart'` — Bullets tragen keinen Zählwert, 2.2), damit **eine** Registry
+> beide Typen bedient. Eine bullet-eigene `allocate('bullet'|'ordered')`-Kurzform
+> **nicht** einführen — das wäre die zweite, divergierende Implementierung, die
+> Abschnitt 1 gerade vermeiden will.
 
-`elementToBlocks`s Fallback `|| 'bullet'` (Zeile 181) bleibt als **letzte**
-Sicherheitsstufe erhalten (für Dateien, die den Stil wirklich nirgends
-definieren — dann ist „bullet" weiterhin die dokumentierte, bewusste
-Vereinfachung aus Anforderung Abschnitt 2.2).
+> **Kritisch — die zurückgezogene F7-alt-Variante NICHT bauen.** Die Vorfassung
+> allokierte eine frische `numId` für **jeden** Listenknoten (auch verschachtelte)
+> und verwarf `ListContext`/`level` ganz. Das gäbe einer Unterliste eine **andere**
+> `numId` als ihrem Elternteil → `groupLists` rekonstruiert Verschachtelung nur
+> **innerhalb derselben `numId` über `ilvl`** → die Unterliste würde zur
+> gleichrangigen Schwesterliste **flachgelegt**. Das bricht den grünen Unit-Test
+> „preserves a nested list two levels deep" (`docx/roundtrip.test.ts` Z. 178) **und**
+> die E2E-Assertion `roundtrip-fidelity.spec.ts` Z. 120 → **DoD-Verletzung**
+> (Verschachtelungs-Persistenz muss grün bleiben). Der Fix darf ausschließlich den
+> Top-Level-Zweig betreffen.
 
-**Fix F6 (`list_item` ohne führenden Absatz):** in der `text:list`-Verarbeitung
-(Zeilen 179-187):
+`blockToDocx`/`blocksToDocx`/`tableToDocx`/`writeDocx` reichen **eine**
+`NumberingRegistry`-Instanz (aus der neuen Datei `src/formats/docx/numberingRegistry.ts`,
+§2.5) pro `writeDocx`-Aufruf durch (geteilt über Body/Header/Footer, damit `numId`-Werte
+dokumentweit eindeutig sind). **Wichtig — `tableToDocx` (Z. 158–201) muss die Registry an
+die Zell-Rekursion durchreichen** (heute ruft es `blockToDocx(child, images, rels)` ohne
+Kontext, Z. 189), sonst erhält eine Liste **in einer Tabellenzelle** keine eigene `numId`
+(Grenzfall 3.17 / Rundreise 4.1.5). **Das behebt nur die Export-`numId`-Zuordnung —
+es ersetzt nicht den separaten, gravierenderen Import-Fix F9 (4.5/2.2): ohne F9 geht
+die exportierte Zell-Liste beim Reimport ohnehin komplett verloren, unabhängig davon,
+welche `numId` sie trägt.** Die Registry wird beim Erzeugen der
+Body/Header/Footer-XML befüllt; die `<w:num>`-Einträge werden **danach** serialisiert.
+Reihenfolge in `writeDocx` (Z. 256–296) passt bereits: die XML-Erzeugung (Z. 256/265/270)
+befüllt die Registry, `numberingXmlContent` (Z. 282) entsteht erst danach — dort statt des
+heutigen `numberingXml()` künftig `numberingXml(numbering.serializeNumEntries())` (die
+`<w:num>`-Einträge kommen als Parameter, siehe 4.7).
+
+**Bekannte, durch diesen Fix NICHT geänderte Grenze (dokumentieren):** Weil
+`groupLists` Verschachtelung an gemeinsame `numId` + `ilvl` bindet, teilt eine
+Unterliste zwangsläufig den **Typ** (bullet/ordered) ihres Elternteils. Gemischt
+verschachtelte Typen (Bullet-in-Ordered) sind damit — wie **schon heute** — nicht
+darstellbar. Das ist Sache von `liste-einruecken-tab`/`mehrstufige-liste`, kein durch
+F7 eingeführtes Regress.
+
+### 4.7 `src/formats/docx/styleDefs.ts` — nur `numberingXml`-Signatur; Registry liegt in eigener Datei (geteilt)
+
+> **Korrektur/Abgleich mit der autoritativen Quelle.** Frühere Fassungen dieses
+> Abschnitts verorteten die `NumberingRegistry`-Klasse selbst in `styleDefs.ts`.
+> `nummerierte-liste-code.md` §2.5 legt sie jedoch in eine **neue eigene Datei**
+> `src/formats/docx/numberingRegistry.ts` (Muster wie `RelationshipRegistry`), mit
+> der Schnittstelle `allocate(kind, start, mode) → numId` und `serializeNumEntries()`.
+> Diese Datei ist **dort** verortet und wird **einmal** gebaut; dieser Plan baut sie
+> **nicht** erneut. `styleDefs.ts` bekommt nur die unten genannte Signaturänderung an
+> `numberingXml`.
+
+Vorhanden und **zu erhalten**: `BULLET_ABSTRACT_ID=0`/`ORDERED_ABSTRACT_ID=1`
+(Z. 32–33), `BULLET_GLYPHS`/`ORDERED_FORMATS` (Z. 43–48), `bulletLevelsXml()`/
+`orderedLevelsXml()` mit **9 Ebenen** (Z. 50–62). Die beiden `<w:abstractNum>` mit
+je 9 Ebenen (Z. 68–69) bleiben **unverändert** (sonst verschwindet u. a. der „◦"-Glyph
+auf Ebene 1, den req 4.1 Punkt 3 verlangt).
+
+Ändern nur die `<w:num>`-Zuteilung:
+- Die `<w:num>`-Einträge sind nicht mehr fest (heute die zwei bei Z. 70–71), sondern
+  kommen aus `numberingRegistry.serializeNumEntries()` — ein `<w:num>` **je allokierter
+  `numId`**, das auf `abstractNumId` 0 (bullet) bzw. 1 (ordered) verweist.
+- `numberingXml()` (Z. 64–74) erhält dafür einen Parameter für diese Einträge, z. B.
+  `numberingXml(numEntriesXml: string)`, und setzt ihn anstelle der festen zwei `<w:num>`
+  ein. Die `<w:abstractNum>`-Definitionen bleiben unangetastet.
+- `BULLET_NUM_ID`/`ORDERED_NUM_ID` (Z. 34–35) entfallen nach Umstellung von
+  `writer.ts` (Grep über `src/` bestätigt: **nur** `styleDefs.ts` (Definition) und
+  `writer.ts` (Import) referenzieren sie — sonst nichts).
+- `styleDefs.test.ts` referenziert weder `numberingXml` noch `BULLET_NUM_ID` (Grep
+  bestätigt), die Signaturänderung bricht dort also keinen Bestandstest; ein neuer
+  Test für die dynamische `<w:num>`-Zuteilung gehört zu §2.5 bzw. 5.1 (T-F7).
+
+> Dieselbe Warnung wie 4.6: **nicht** `numberingXml` auf eine Ebene (`ilvl=0`)
+> reduzieren, wie es die Alt-Snippets zeigen. Die 9-Ebenen-`abstractNum` bleiben.
+
+### 4.8 `src/formats/odt/reader.ts` — Fix F5 (Listentyp-Fallback), **kein** F6
+
+**Problem (verifiziert):** `readOdt` baut `contentStyles` nur aus
+`content.xml`/`office:automatic-styles` (Z. 363–364); der Body wird nur damit geparst
+(Z. 366). `styles.xml` wird zwar gelesen, aber dessen `stylesForChrome` (Z. 374) nur
+für Kopf-/Fußzeile genutzt (Z. 380/384), **nie** in die Body-`listKinds` gemischt;
+`office:styles` (gemeinsame Vorlagen) wird gar nicht nach `text:list-style`
+durchsucht. `elementToBlocks` fällt daher bei einem nur in `styles.xml`
+referenzierten Listenstil auf `|| 'bullet'` (Z. 288) zurück → eine eigentlich
+**nummerierte** Liste kommt als **Aufzählung** an (Grenzfall 3.13, req 5.6).
+
+**Fix:** `parseAutomaticStyles` (Z. 37–78; iteriert bereits elementagnostisch über
+`text:list-style`, Z. 70–75) zusätzlich auf **beide** Container aus `styles.xml`
+anwenden (`office:automatic-styles` **und** `office:styles`) und die Ergebnisse für
+den Body zusammenführen — `content.xml` gewinnt (speziellste Definition):
 
 ```ts
-if (ns === ODF_NAMESPACES.text && local === 'list') {
-  const styleName = el.getAttributeNS(ODF_NAMESPACES.style, 'style-name')
-  const kind = (styleName && styles.listKinds.get(styleName)) || 'bullet'
-  const items = childElements(el, ODF_NAMESPACES.text, 'list-item').map((itemEl) => {
-    const content = Array.from(itemEl.children).flatMap((child) => elementToBlocks(child, styles, depth + 1))
-    // Schema verlangt 'paragraph block*' — ein Listenpunkt ohne führenden
-    // Absatz (reine Container-Unterliste, Grenzfall 3.7; oder ein text:p, das
-    // nur ein Bild ohne Text enthält, Grenzfall 3.9) bekäme sonst eine
-    // Schema-Validierungs-Exception bei nodeFromJSON. Normalisierung: leeren
-    // Absatz voranstellen, kein Datenverlust (der eigentliche Inhalt bleibt
-    // als nachfolgender Block erhalten).
-    const normalized = content[0]?.type === 'paragraph' ? content : [{ type: 'paragraph', attrs: { align: 'left' }, content: [] }, ...content]
-    return { type: 'list_item', content: normalized }
-  })
-  return [{ type: kind === 'ordered' ? 'ordered_list' : 'bullet_list', content: items }]
-}
+// in readOdt, vor readOfficeTextChildren:
+const stylesAuto = stylesDoc ? stylesDoc.getElementsByTagNameNS(ODF_NAMESPACES.office, 'automatic-styles')[0] ?? null : null
+const stylesCommon = stylesDoc ? stylesDoc.getElementsByTagNameNS(ODF_NAMESPACES.office, 'styles')[0] ?? null : null
+const mergedListKinds = new Map([
+  ...parseAutomaticStyles(stylesCommon).listKinds,
+  ...parseAutomaticStyles(stylesAuto).listKinds,
+  ...contentStyles.listKinds,
+])
+const bodyStyles = { ...contentStyles, listKinds: mergedListKinds }
+// bodyBlocks mit bodyStyles statt contentStyles parsen
 ```
 
-Test: gezielt mit `listLevel10.odt`/`EasyList.odt`/`EasyListForeignNamespace.odt`
-(Grenzfall 3.7-Kandidaten laut Anforderung) sowie `imageWithinList.odt`
-(Grenzfall 3.9) — Erwartung: Import wirft **keine** Exception, und der ursprünglich
-führende Nicht-Paragraph-Inhalt bleibt als zusätzlicher Block im `list_item`
-erhalten (siehe 5.1).
+(`stylesDoc` wird heute erst im Kopf-/Fußzeilen-Zweig Z. 371–372 geparst; dafür
+einmal weiter oben parsen und wiederverwenden.) Der `|| 'bullet'`-Fallback (Z. 288)
+**bleibt** als letzte Stufe für Dateien, die den Stil wirklich nirgends definieren —
+dann ist „bullet" die dokumentierte bewusste Vereinfachung (req 2.2).
 
-### 4.9 `src/formats/odt/styleRegistry.ts` — keine Änderung
+**Kein F6-Fix** (siehe 2.1): der `list_item`-Zweig (Z. 289–297) bleibt unverändert;
+`block+` erlaubt führende Nicht-Absätze. Nur Absicherungstests (5.1).
 
-`BULLET_LIST_STYLE_NAME`/`ORDERED_LIST_STYLE_NAME` (Zeilen 95-96) und
-`listStyleDefs()` (Zeilen 98-102) bleiben unverändert — die Begründung aus 4.6
-(ODT braucht keine Pro-Listen-Instanz-ID, weil `<text:list>` bereits
-selbst-abgrenzend ist) gilt hier symmetrisch. Zusätzliche Ebenen-Definitionen
-(`text:level="2"` ff.) sind Gegenstand von `liste-einruecken-tab` (Abschnitt 6),
-nicht dieses Plans.
+### 4.9 `src/formats/odt/writer.ts` / `4.10 styleRegistry.ts` — keine Änderung
 
-### 4.10 `src/formats/odt/writer.ts` — keine Änderung
-
-Bestätigt in Abschnitt 1a.5/4.6: generische Rekursion in `blockToOdt` (Zeilen
-75-85) schreibt bereits heute strukturell korrektes, verschachteltes
-`<text:list>`-Markup, falls ein `bullet_list`/`ordered_list`-Knoten als weiterer
-Block in einem `list_item.content` vorkommt (z. B. durch ODT-Reimport eines
-bereits mehrstufigen Fremddokuments). Keine Änderung für dieses Feature
-erforderlich; volle Ebenen-Formatierung bleibt `liste-einruecken-tab` vorbehalten.
+`blockToOdt` (Z. 99–109) schreibt Verschachtelung bereits rekursiv korrekt; jede
+Top-Level-Liste ist ein eigenes `<text:list>` → keine Verschmelzung, kein
+F7-Äquivalent (verifiziert). `BULLET_LIST_STYLE_NAME='LB'` und die 1-Ebenen-
+`listStyleDefs()` (Z. 95–103) bleiben; zusätzliche ODT-Ebenenstile sind
+`liste-einruecken-tab`-Scope. Die DOCX/ODT-Symbol-Asymmetrie je Ebene (DOCX 3
+Glyphen, ODT 1) ist bewusst und zu dokumentieren (req 2.2, Abschnitt 7).
 
 ### 4.11 `src/index.css` — keine Änderung
 
-`.ProseMirror ul, .ProseMirror ol` (Zeilen 63-67, eine gemeinsame, ebenen-
-unabhängige Regel) genügt für einstufige Listen. Ebenenabhängige Darstellung ist
-Gegenstand von `liste-einruecken-tab`/`mehrstufige-liste`.
+Die gemeinsame `.ProseMirror ul, .ProseMirror ol`-Regel genügt für einstufige
+Listen; ebenenabhängige Darstellung ist `liste-einruecken-tab`/`mehrstufige-liste`.
 
 ---
 
@@ -539,272 +476,224 @@ Gegenstand von `liste-einruecken-tab`/`mehrstufige-liste`.
 
 ### 5.1 Unit-Tests (Vitest)
 
-**`src/formats/docx/__tests__/roundtrip.test.ts`** (Ergänzungen zum bestehenden
-Describe-Block „DOCX round trip: lists", Zeilen 135-171):
-1. Echtes Toggle: Liste erzeugen → `toggleList(false)` erneut auf denselben
-   Cursor anwenden → Ergebnis ist ein normaler Absatz, kein verschachtelter
-   `bullet_list`-Knoten (deckt F1/Grenzfall 3.2 auf Command-Ebene ab, zusätzlich
-   zum E2E-Test in 5.2).
-2. Typwechsel ohne Verschachtelung: `ordered_list` erzeugen, `toggleList(false)`
-   darauf anwenden → Ergebnis ist `bullet_list` mit identischem Text/Reihenfolge,
-   **kein** `list_item`, dessen Kind wiederum eine Liste ist (deckt Anforderung
-   2.6 ab).
-3. **Neu, deckt F7:** „zwei unmittelbar aufeinanderfolgende Bullet-Listen ohne
-   trennenden Absatz bleiben nach Reimport zwei separate Listen" — Regressionstest
-   für Grenzfall 3.12; muss **vor** Fix F7 rot sein (zur Verifikation, dass der
-   Test den Bug tatsächlich greift), danach grün.
-4. **Neu, deckt F7-Nebeneffekt:** verschachtelter `bullet_list`-Knoten (synthetisch
-   im Testdatum, wie er per ODT-Import entstehen könnte) → Export → Reimport →
-   Ergebnis sind zwei **benachbarte, flache** `bullet_list`-Knoten (nicht eine
-   verschmolzene Liste) — dokumentiert das in 4.6 beschriebene neue Verhalten.
-5. **Neu, deckt F8:** synthetisches `numbering.xml` mit `<w:lvl>`-Elementen in
-   vertauschter Reihenfolge (Ebene 1 vor Ebene 0) → `parseNumberingXml` erkennt
-   trotzdem korrekt Bullet vs. Ordered anhand von Ebene 0.
-6. **Neu, dokumentiert F15:** `<w:p>` mit `w:numPr` und einer Bild-Drawing-Run
-   ohne Textlauf → Import wirft nicht, Bild landet außerhalb der `bullet_list`
-   (heutiges, dokumentiertes Verhalten) — Test hält das aktuelle Verhalten fest,
-   markiert es per Kommentar explizit als bekannte Einschränkung (kein
-   TODO-Fix in diesem Plan).
+**`src/formats/shared/editor/__tests__/commands.test.ts`** (T1 — heute **keine**
+Listen-Testfälle):
+- `toggleList(false)` auf einen Absatz (ohne Liste) → `bullet_list` mit einem Punkt.
+- `toggleList(false)` erneut mit Cursor im Punkt → zurück zu `paragraph`
+  (deterministisches Toggle-Off, Grenzfall 3.2 auf Command-Ebene).
+- `toggleList(false)` auf `ordered_list` → `bullet_list`, gleicher Text/Reihenfolge,
+  **kein** `list_item`, dessen Kind wieder eine Liste ist (req 2.6).
+- `isListActive(state, false)` true innerhalb / false außerhalb eines `bullet_list`.
+- `liftFromList()` als Dry-Run: `false` außerhalb jeder Liste (Grundlage für
+  `disabled`, Grenzfall 3.10).
 
-**`src/formats/odt/__tests__/roundtrip.test.ts`** (Ergänzungen zum bestehenden
-Describe-Block „ODT round trip: lists", Zeilen 135-160):
-1. Analog zu DOCX Punkt 1/2 (echtes Toggle, Typwechsel ohne Verschachtelung).
-2. **Neu, schließt die in Verdacht 10 benannte Lücke:** „zwei getrennte
-   Aufzählungslisten mit trennendem Absatz bleiben getrennt" — ODT-Äquivalent zum
-   bereits vorhandenen DOCX-Test (Zeile 161-170 dort).
-3. **Neu:** „zwei unmittelbar aufeinanderfolgende Listen **ohne** trennenden
-   Absatz bleiben ebenfalls getrennt" — bestätigt die in 4.6 dargelegte
-   Begründung „kein Fix nötig" mit einem tatsächlichen Test statt nur Argumentation
-   (von der Anforderung Abschnitt 4.3 ausdrücklich verlangt: „muss durch einen
-   tatsächlichen Rundreise-Test … bestätigt werden, nicht nur … angenommen").
-4. **Neu, deckt F5:** Konstruiertes ODT-Testdatum, bei dem `content.xml` einen
-   `text:list` referenziert, dessen `text:list-style` **nur** in `styles.xml`
-   (`office:styles`, nicht `office:automatic-styles`) definiert ist, mit
-   `text:list-level-style-number` (also eine **nummerierte** Liste) → muss nach
-   Fix **nicht** fälschlich als `bullet_list` importiert werden. Muss **vor** Fix
-   F5 rot sein.
-5. **Neu, deckt F6:** `text:list-item` ohne führenden `text:p`, direkt mit
-   verschachteltem `text:list` als einzigem Kind → Import wirft nicht, resultierender
-   `list_item.content` beginnt mit einem (ggf. leeren) `paragraph`-Knoten,
-   gefolgt vom ursprünglichen `bullet_list`/`ordered_list`-Inhalt.
+**`src/formats/docx/__tests__/roundtrip.test.ts`** (Block „DOCX round trip: lists",
+Z. 143–204 — bestehende Tests **nicht** duplizieren):
+- **T-F9 (neu, höchste Priorität — Rundreise-Pflicht 4.1.5):** Bullet-Liste (2 Punkte)
+  als Inhalt einer `table_cell` konstruieren → Export → Reimport → die Zelle enthält
+  weiterhin `bullet_list`/`list_item` mit beiden Punkten (nicht flache `paragraph`-
+  Knoten). Muss **vor** Fix F9 (4.5) rot sein — kein reales Fixture deckt das ab
+  (Abschnitt 2.2), dieser Test ist der **einzige** Nachweis. Zusätzlich: zweistufig
+  verschachtelte Bullet-Liste in einer Zelle → beide Ebenen bleiben erhalten (deckt
+  zugleich, dass `kindByNumId` korrekt bis in `parseTable` durchgereicht wird).
+- **T-F7:** zwei unmittelbar aufeinanderfolgende Bullet-Listen **ohne** Trennabsatz
+  → Export → Reimport → **zwei** `bullet_list`-Knoten. Muss **vor** Fix F7 rot sein.
+- **Regressionswächter:** „preserves a nested list two levels deep" (Z. 178) muss
+  nach Fix F7 **weiter grün** sein (explizit im Testlauf prüfen — der Fix darf ihn
+  nicht brechen).
+- **T-F8:** synthetisches `numbering.xml` mit `<w:lvl>` in vertauschter Reihenfolge
+  (Ebene 1 vor 0) → `parseNumberingXml` erkennt Bullet/Ordered korrekt.
 
-**`src/formats/odt/__tests__/external-fixtures.test.ts` und
-`src/formats/docx/__tests__/external-fixtures.test.ts`** (F9, löst Verdacht 10):
-Ergänzung um **strukturelle** Prüfungen für die in Anforderung Abschnitt 4.2
-gelisteten Fixtures, nicht nur „stürzt nicht ab". Konkret pro Datei mindestens:
-Anzahl gefundener `bullet_list`/`ordered_list`-Knoten > 0 (wo laut Fixture-Name zu
-erwarten), Gesamtzahl der `list_item`-Textinhalte bleibt bei
-Export→Reimport identisch. Priorisierte Dateien (aus Anforderung Abschnitt 4.2 und
-Neufund 1a.3):
-- ODT: `bulletListTest.odt`, `bullet_list.odt`, `simple_bullet_list.odt`,
+**`src/formats/odt/__tests__/roundtrip.test.ts`** (Block „ODT round trip: lists",
+Z. 143–193):
+- **T2:** „zwei getrennte Bullet-Listen **mit** Trennabsatz bleiben getrennt" —
+  ODT-Äquivalent zum bestehenden DOCX-Test (schließt die in req 5.10 benannte Lücke).
+- „zwei benachbarte Listen **ohne** Trennabsatz bleiben getrennt" — belegt die in 4.9
+  begründete „kein Fix nötig"-Aussage mit einem echten Test (req 4.3 verlangt Test
+  statt Argument).
+- **T-F5:** konstruiertes ODT, dessen `text:list` einen nur in `styles.xml`
+  (`office:styles`) mit `text:list-level-style-number` definierten Stil referenziert
+  → nach Fix **`ordered_list`**, nicht `bullet_list`. Muss **vor** Fix F5 rot sein.
+- **T-F6 (Absicherung, kein Fix):** `text:list-item` ohne führenden `text:p`
+  (nur verschachtelter `text:list`), und Punkt mit bild-only `text:p` → Import wirft
+  nicht, es wird **kein** Leerabsatz vorangestellt, der Nicht-Absatz-Inhalt bleibt
+  als erster Block erhalten.
+
+**`docx`/`odt` `external-fixtures.test.ts`** (T3 — heute nur „stürzt nicht ab"):
+strukturelle Assertions je Fixture aus req 4.2 — Anzahl `bullet_list`/`ordered_list`
+> 0 (wo laut Name erwartet), Summe der Punkt-Textinhalte identisch nach
+Export→Reimport. Priorisiert:
+- ODT einstufig: `bulletListTest.odt`, `bullet_list.odt`, `simple_bullet_list.odt`,
   `simple_bullet_list_1_pre_OX.odt`, `feature_bullets_numbering.odt`,
-  `ST_Bullets_Numbering.odt`, `ST_Bullets_Numbering2.odt` — einstufige Kernfälle.
-- ODT: `EasyList.odt`, `EasyListForeignNamespace.odt`,
-  `EasyListForeignNamespaceMSO15_AOO.odt`, `listLevel10.odt` — Import darf nach
-  Fix F6 nicht mehr crashen (falls sie das Muster aus Grenzfall 3.7 enthalten;
-  falls nicht, Test dokumentiert das Nichtvorkommen explizit statt es
-  stillschweigend zu übergehen).
-- ODT: `listsInTable.odt`, `simple-table-with-lists.odt` — Liste in Tabellenzelle
-  bleibt bei Rundreise strukturell erhalten.
-- ODT: `imageWithinList.odt` — nach Fix F6 kein Crash, Bild bleibt als Block im
-  `list_item` erhalten.
-- ODT: `listStyleId.odt`, `ListStyleResolution.odt` — nach Fix F5 korrekte
-  Bullet/Ordered-Unterscheidung, nicht mehr pauschal „bullet".
-- ODT: `brokenList.odt`, `ListOddity.odt` — weiterhin definierter Fallback statt
-  Crash (bereits abgedeckt durch die generische „importiert ohne Absturz"-Prüfung;
-  hier zusätzlich: falls Listenstruktur erkennbar, wird sie geprüft, sonst wird
-  das Fehlen dokumentiert statt stillschweigend ignoriert — deckt den in
-  Grenzfall 3.16 offen gelassenen Prüfpunkt).
-- ODT: `ListRoundtrip.odt` — expliziter Rundreisetest.
-- ODT restliche Basis-Fixtures (`list.odt`, `liste2.odt`, `preparedList.odt`,
+  `ST_Bullets_Numbering.odt`, `ST_Bullets_Numbering2.odt`.
+- ODT Verschachtelung: `EasyList.odt`, `EasyListForeignNamespace.odt`,
+  `EasyListForeignNamespaceMSO15_AOO.odt`, `listLevel10.odt` (Grenzfall 3.6/3.7 —
+  Import ohne Crash, Ebenen erhalten).
+- ODT in Tabellenzelle: `listsInTable.odt`, `simple-table-with-lists.odt`.
+- ODT Bild-in-Punkt: `imageWithinList.odt` (Grenzfall 3.9 — Bild bleibt im Punkt).
+- ODT Stilauflösung: `listStyleId.odt`, `ListStyleResolution.odt` (nach F5 korrekte
+  Typunterscheidung).
+- ODT kaputt: `brokenList.odt` (bewusst nur E2E, jsdom-Ausschluss beibehalten),
+  `ListOddity.odt` — definierter Fallback.
+- ODT Rundreise: `ListRoundtrip.odt`; Kontrolle Bullet-vs-Nummeriert:
+  `ContinueListTest.odt`.
+- ODT Basis (Textinhalt erhalten): `list.odt`, `liste2.odt`, `preparedList.odt`,
   `simpleList.odt`, `simpleList3.odt`, `ListHeading.odt`, `ListHeading2.odt`,
-  `simple-list_MSO14.odt`, `ListTest_AO_MSO15-where_is-blue.odt`, `indentTest.odt`)
-  — mindestens Textinhalt jedes Listenpunkts bleibt bei Rundreise erhalten.
-- DOCX: `Numbering.docx`, `NumberingWOverrides.docx`,
-  `NumberingWithOutOfOrderId.docx` — jeweils prüfen, dass die enthaltenen
-  Bullet-Ebenen (bestätigt in Neufund 1a.3) nach Rundreise weiterhin als
-  `bullet_list` erkennbar sind. `ComplexNumberedLists.docx` **nicht** in die
-  Bullet-Suite aufnehmen (enthält kein Bullet-Format, siehe Neufund 1a.3) —
-  gehört zu `nummerierte-liste-req.md`.
+  `simple-list_MSO14.odt`, `ListTest_AO_MSO15-where_is-blue.odt`, `indentTest.odt`.
+- DOCX (verifiziert bullet-haltig): `Numbering.docx`, `NumberingWOverrides.docx`,
+  `NumberingWithOutOfOrderId.docx` — Bullet-Ebenen bleiben nach Rundreise
+  `bullet_list`. **`ComplexNumberedLists.docx` NICHT** in die Bullet-Suite (enthält
+  kein `numFmt=bullet`; reines Nummerierungsmaterial → `nummerierte-liste`).
 
-### 5.2 Neu: `tests/e2e/lists.spec.ts` (löst F10/Verdacht 11 vollständig neu)
+### 5.2 Neu: `tests/e2e/lists.spec.ts` (T4 — dediziertes Bullet-Abnahme-Spec)
 
-Folgt den bestehenden Konventionen aus `tests/e2e/docx.spec.ts`/`odt.spec.ts`/
-`selection-regression.spec.ts` (`docxCard`/`odtCard`-Locator-Helfer lokal
-dupliziert wie in den bestehenden Dateien, `page.getByTitle(...)`-Selektoren,
-`page.waitForEvent('download')` + `JSZip` für Export-Prüfung). Deckt **beide**
-Formate über echten Datei-Upload/-Download ab, nicht nur interne Reader/Writer-
-Aufrufe. Mindestens folgende Fälle (Nummerierung folgt Anforderung Abschnitt 6):
+Der Bullet-Button wird in `clipboard*.spec.ts`/`cut.spec.ts`/`odt.spec.ts`/
+`docx.spec.ts` nur als **Setup** geklickt, und `roundtrip-fidelity.spec.ts` deckt die
+**Verschachtelungs-Persistenz** ab. Was fehlt, ist ein Spec, das die
+**Bedien-Akzeptanzkriterien** dieses Features per echtem Browser prüft (Konventionen
+aus `docx.spec.ts`/`odt.spec.ts`: `page.getByTitle('Aufzählung')`,
+`page.waitForEvent('download')` + `JSZip`; `docxCard`/`odtCard` lokal wie in den
+Bestandsspecs):
 
-1. Liste erstellen per Cursor ohne Selektion, und per Selektion über mehrere
-   Absätze — echter Klick auf „• Liste".
-2. Enter-Verhalten: nicht-leerer Punkt (neuer Punkt), leerer Punkt (beendet
-   Liste), Cursor mittig im Text (Split ohne Textverlust), Umschalt+Enter
-   (Zeilenumbruch, kein neuer Punkt) — erstmaliger echter Browser-Nachweis für
-   `splitListItem`-Verhalten in dieser App (Anforderung 2.3 verlangt das
-   ausdrücklich, „nicht nur unter Berufung auf Bibliotheksdokumentation").
-3. Erneuter Klick auf „• Liste" bei bereits aktiver Liste: einmal am ersten
-   Punkt, einmal an einem späteren Punkt, einmal bei Selektion der gesamten
-   Liste (Ctrl+A) → jeweils Ergebnis nach Fix F1 prüfen: alle drei Fälle wandeln
-   die betroffenen Punkte zu Absätzen zurück (deterministisches Toggle, siehe
-   Abschnitt 3/4.2), kein stiller No-Op, keine Verschachtelung mehr.
-4. Wechsel Aufzählung ↔ Nummerierung ohne Verschachtelung/Datenverlust
-   (Anforderung 2.6).
-5. „Liste aufheben": Text bleibt vollständig erhalten; zusätzlich `disabled`-
-   Zustand prüfen, wenn Cursor **nicht** in einer Liste steht (Grenzfall 3.10).
-6. **Dokumentationstest für F12 (bewusst kein Fix hier, siehe Abschnitt 6):**
-   Cursor in einem Listenpunkt, `Tab` drücken → Assertion, dass sich die
-   Dokumentstruktur **nicht** ändert (kein Sink passiert) — hält den heutigen
-   Funktionsumfang explizit als offene Lücke fest, statt sie stillschweigend zu
-   überspringen (erfüllt Anforderung Abschnitt 6, Testfall 6, wörtlich: „falls
-   nicht gebaut: expliziter Test, der das aktuelle Fehlen nachweist"). Zusätzlich
-   protokollieren, ob der Fokus den Editor verlässt (bekanntes,
-   dokumentiertes Risiko, siehe Abschnitt 6).
-7. Zusammenspiel: Zeichenformatierung (Fett/Kursiv/Farbe) in einem Listenpunkt,
-   Absatzausrichtung eines einzelnen Punkts, Liste in einer Tabellenzelle
-   (`insertTable` + Klick in Zelle + „• Liste"), Undo/Redo über eine gemischte
-   Sequenz inkl. Toolbar-Klick + Klick-Neupositionierung (Muster aus
-   `selection-regression.spec.ts` wiederverwenden/erweitern, diesmal mit
-   Listen-Aktionen statt nur Fett).
-8. `aria-pressed`: Cursor in eine Aufzählungsliste bewegen und wieder heraus →
-   sichtbarer Zustandswechsel des „• Liste"-Buttons.
-9. Tastatur-Bedienbarkeit: Button per `Tab`-Taste fokussieren (nicht klicken),
-   `Enter` bzw. `Leertaste` drücken → Aktion wird ausgeführt (Nachweis für F4,
-   Anforderung Abschnitt 1 Zeile 8 — bisher nicht verifiziert).
-10. Grenzfall 3.5 (Selektion über eine Überschrift hinweg): Button-Zustand ist
-    `disabled`, kein Klickeffekt.
-11. Rundreise über echten Upload/Export für mindestens: einfache Bullet-Liste (3
-    Punkte), zwei getrennte Listen (mit und ohne Trennabsatz), Liste mit
-    Zeichenformatierung, Liste in Tabellenzelle, Cross-Format (Editor-Liste als
-    ODT exportieren → reimportieren → als DOCX exportieren → reimportieren).
-12. Import einer echten Fixture-Datei je Format (z. B. `bulletListTest.odt`,
-    `ST_Bullets_Numbering.odt`, `Numbering.docx`) über echten Datei-Upload →
-    unverändert exportieren → Downloaddatei mit unabhängigem `JSZip`-Parsing
-    prüfen (Punktzahl/Text/Typ), analog zum bestehenden Muster in `docx.spec.ts`
-    Zeilen 99-125.
+1. Liste erstellen: Cursor ohne Selektion **und** Selektion über mehrere Absätze
+   (jeder Absatz wird ein Punkt derselben Liste).
+2. Enter-Verhalten (erstmaliger Browser-Nachweis, req 2.3): nicht-leerer Punkt (neuer
+   Punkt), leerer Punkt (beendet Liste), Cursor mittig (Split ohne Textverlust),
+   Umschalt+Enter (Zeilenumbruch, kein neuer Punkt).
+3. Erneuter Klick „• Liste" bei aktiver Liste — erster Punkt / späterer Punkt /
+   Ctrl+A über ganze Liste → nach Fix F1 jeweils **Rückwandlung zu Absätzen**, kein
+   No-Op, keine Verschachtelung (Grenzfälle 3.2–3.4).
+4. Wechsel Aufzählung ↔ Nummerierung ohne Verschachtelung/Datenverlust (req 2.6).
+5. „⇧ Liste": Text bleibt erhalten; `disabled`, wenn Cursor **nicht** in Liste
+   (Grenzfall 3.10).
+6. `aria-pressed`: Cursor in/aus Bullet-Liste → sichtbarer Button-Zustandswechsel.
+7. Tastatur: „• Liste" per `Tab` fokussieren (nicht klicken), `Enter`/Leertaste →
+   Aktion läuft (F4, req 1.8).
+8. Grenzfall 3.5: Selektion über Überschrift → Button `disabled` oder Absätze werden
+   Liste unter Auslassung der Überschrift (das tatsächliche, dokumentierte Ergebnis
+   assertieren), kein stiller Totalausfall.
+9. **Dokumentationstest F12** (bewusst kein Fix): Cursor im Punkt, `Tab` → Assertion,
+   dass sich die Dokumentstruktur **nicht** ändert (kein Sink); protokollieren, ob
+   der Fokus den Editor verlässt. Erfüllt req Abschnitt 6 Testfall 6 wörtlich
+   („falls nicht gebaut: expliziter Test, der das Fehlen nachweist").
+10. Zusammenspiel: Fett/Kursiv/Farbe im Punkt, Ausrichtung eines einzelnen Punkts,
+    Liste in Tabellenzelle (`insertTable` + Klick in Zelle + „• Liste"), Undo/Redo
+    über gemischte Sequenz inkl. Toolbar-Klick + Klick-Neupositionierung
+    (Selection-Sync-Regressionsmuster, `reconcileSelectionOnClick`
+    `WordEditor.tsx` Z. 43–50; Muster aus `selection-regression.spec.ts`).
+11. Rundreise über echten Upload/Export: einfache Bullet-Liste (3 Punkte), zwei
+    getrennte Listen (mit/ohne Trennabsatz), Liste mit Zeichenformatierung, Liste in
+    Tabellenzelle, Cross-Format (Editor-Liste → ODT → Reimport → DOCX → Reimport).
+    **Abhängigkeit:** Der DOCX-Teilfall „Liste in Tabellenzelle" schlägt ohne Fix F9
+    (4.5/2.2) fehl — dieser E2E-Fall darf erst nach F9 grün erwartet werden, sonst
+    maskiert ein übersprungener/rot bleibender Test genau den in 2.2 beschriebenen
+    Importverlust.
+12. Import realer Fixture je Format (`bulletListTest.odt`, `Numbering.docx`) → ohne
+    Bearbeitung exportieren → Download mit `JSZip` unabhängig prüfen (Punktzahl/Text/
+    Typ; für DOCX `<w:numFmt w:val="bullet"/>`, `<w:lvlText w:val="•"/>` auf Ebene 0).
 
-### 5.3 Optionale Testinfrastruktur-Verbesserung (nicht blockierend)
+### 5.3 Optional (nicht blockierend)
 
-`docxCard`/`odtCard`-Locator-Funktionen sind aktuell in drei Dateien
-(`docx.spec.ts`, `odt.spec.ts`, `selection-regression.spec.ts`) einzeln
-dupliziert. Mit `lists.spec.ts` käme eine vierte Kopie hinzu. Empfehlung:
-Extraktion nach `tests/e2e/helpers.ts` bei Gelegenheit — nicht Teil dieses Plans,
-da es die bestehende Konvention der anderen Dateien nicht bricht, wenn hier
-zunächst ebenfalls lokal dupliziert wird.
+`docxCard`/`odtCard` sind in mehreren Specs dupliziert; Extraktion nach
+`tests/e2e/helpers.ts` bei Gelegenheit — nicht Teil dieses Plans.
 
 ---
 
-## 6. Bewusste Nicht-Umsetzung: Tab/Umschalt+Tab (F11/F12) — Begründung und Übergabe
+## 6. Bewusste Nicht-Umsetzung: Tab/Umschalt+Tab (F12) — korrigierte Begründung
 
-`aufzaehlungsliste-req.md` fordert in Abschnitt 1 (Zeile 5) und Abschnitt 2.4
-äußerlich, dass Tab/Umschalt+Tab „ergänzt werden muss". Dieser Plan implementiert
-das **bewusst nicht**, aus folgenden Gründen:
+`aufzaehlungsliste-req.md` (Abschnitt 1 Zeile 5, 2.4) nennt Tab/Umschalt+Tab; dieser
+Plan setzt es **nicht** um, sondern übergibt an `liste-einruecken-tab` (Req **und**
+Code-Plan existieren bereits):
 
-1. `specs/liste-einruecken-tab-req.md` ist eine eigenständige, bereits existierende
-   Anforderungsdatei, die **exakt** dieselbe Funktion mit erheblich größerem
-   Detailgrad spezifiziert: eigene Rundreise-Matrix für bis zu 9 Ebenen
-   (Abschnitt 5 dort), 18 Grenzfälle, explizite Vorgaben für
-   `numberingXml()`-Erweiterung um `w:lvl`-Einträge für Ebene 1-8
-   (`styleDefs.ts:37-46`, dort Grenzfall 9) und ODT-Ebenen-Stildefinitionen
-   (`styleRegistry.ts:95-102`, dort Grenzfall 10). Eine parallele,
-   unabgestimmte Zweitimplementierung in diesem Plan würde entweder
-   duplizieren oder mit der dortigen, autoritativen Spezifikation kollidieren.
-2. Eine **isolierte** Tab-Tastenbindung ohne die dort geforderte DOCX-/ODT-
-   Rundreise-Korrektur wäre selbst ein neuer, stiller Fehlschlag: Sie würde im
-   Editor sichtbar funktionieren, aber bei jedem DOCX-Export (F11, bestätigt in
-   Abschnitt 1) sofort wieder stillschweigend flachgelegt — das widerspricht dem
-   in Anforderung Abschnitt 20 der Hauptspezifikation verankerten Grundsatz, den
-   `aufzaehlungsliste-req.md` selbst zitiert. Es ist daher **kein** akzeptabler
-   Teilschritt, dieses Plans wegen des höheren Aufwands nur die Tastenbindung
-   ohne die Exportkorrektur zu liefern.
-3. `aufzaehlungsliste-req.md` selbst erlaubt diesen Umgang explizit: Abschnitt 6,
-   Testfall 6, wörtlich „(Funktion muss ggf. erst gebaut werden … falls nicht
-   gebaut: expliziter Test, der das aktuelle Fehlen nachweist und im
-   Ergebnisbericht als offene Lücke markiert, statt stillschweigend übersprungen
-   zu werden)" — genau dieser Dokumentationstest ist in 5.2 Punkt 6 enthalten.
+1. Eigenständiger Backlog-Slug mit eigener, deutlich detaillierterer Spezifikation
+   (`liste-einruecken-tab-req.md`/`-code.md`, `-qa.md`).
+2. **Korrektur der Vorfassungs-Begründung:** Die Vorfassung argumentierte, eine
+   isolierte Tab-Bindung würde beim DOCX-Export „sofort wieder flachgelegt". Das ist
+   **falsch** — die DOCX/ODT-Persistenz der Verschachtelung ist bereits implementiert
+   und round-trippt (Abschnitt 0). Eine `Tab: sinkListItem`-Bindung würde also
+   **korrekt** persistieren. Die Übergabe ist damit eine reine **Zuständigkeits-/
+   Scope**-Entscheidung (ein Bedienweg-Feature), **nicht** durch einen Persistenzbug
+   erzwungen; die Nachbarfeatures sind sogar billiger als die Vorfassung annahm, weil
+   Reader/Writer bereits fertig sind.
+3. req Abschnitt 6 Testfall 6 erlaubt genau diesen Umgang → Dokumentationstest 5.2/9.
 
-**Übergabe an `specs/liste-einruecken-tab-code.md` (noch nicht geschrieben):**
-Dessen Umsetzung muss, sobald sie erfolgt, mit den Änderungen aus diesem Plan
-kompatibel sein — insbesondere mit der in 4.6/4.7 eingeführten
-`NumberingRegistry` (jede Listeninstanz hat bereits eine eigene `numId`; die
-Ebenen-Erweiterung müsste zusätzlich pro `numId` mehrere `w:lvl`-Einträge
-(0-8) im referenzierten `abstractNum` vorsehen, nicht die `NumberingRegistry`
-selbst ersetzen) sowie mit der in 4.2 eingeführten Toggle-Logik (`toggleList`
-muss weiterhin funktionieren, wenn `list_item`-Knoten künftig echte
-Unterlisten enthalten können — die `ancestorListRange`-Suche über
-`blockRange` mit Prädikat funktioniert bereits korrekt für beliebige
-Verschachtelungstiefe, siehe Begründung in 4.2, kein Nacharbeiten nötig).
+**Kompatibilitätsauflage an `liste-einruecken-tab-code.md`:** dessen Einrück-Weg muss
+auf der in 4.6/4.7 eingeführten `NumberingRegistry` aufsetzen (je Top-Level-Liste
+eine `numId`, verschachtelte erben) und die 9-Ebenen-`abstractNum` **erhalten** — die
+in jenem Plan noch enthaltenen Alt-Aussagen („`numberingXml` hat nur `ilvl=0`") sind
+überholt.
 
-Ebenso **bewusst nicht Gegenstand dieses Plans:** die im Detail in
-`liste-aufheben-req.md` behandelte mehrstufige Lift-Semantik des „⇧ Liste"-
-Buttons (dort eigene Anforderung) — dieser Plan liefert dafür nur den unter F3
-beschriebenen `disabled`-Zustand (Abschnitt 4.3), keine tiefere Semantikänderung.
+Ebenfalls **nicht** hier: die mehrstufige Lift-Semantik von „⇧ Liste"
+(`liste-aufheben-code.md`) — dieser Plan liefert dort nur den `disabled`-Zustand
+(4.3).
 
 ---
 
-## 7. Bewusst nicht umgesetzte Punkte (zu dokumentieren, Backlog-Status)
+## 7. Bewusst nicht umgesetzt (Backlog-Einschränkungen dokumentieren)
 
-Folgende Punkte aus der Anforderung werden **nicht** gebaut und sollen im
-Backlog (`specs/FEATURE-BACKLOG.md`) explizit als bewusste Einschränkung markiert
-werden (kein stiller Fehlschlag, da schriftlich festgehalten):
-
-- **Eigenes Aufzählungszeichen wählbar** (Backlog `eigene-aufzaehlungszeichen`,
-  Priorität 4/nice-to-have laut Anforderung Abschnitt 1 Zeile 6). Kein
-  Schema-Attribut, kein UI-Element.
-- **Unterschiedliches Symbol je Verschachtelungsebene.** Gehört inhaltlich zu
-  `mehrstufige-liste` (Priorität 2, separater Slug) bzw. `liste-einruecken-tab`.
-- **Automatische Umwandlung durch Tippen** (InputRules für „- "/„* " am
-  Zeilenanfang). Im gesamten Projekt existieren aktuell keine ProseMirror-
-  `InputRule`s (verifiziert per Grep); Einführung dieser Infrastruktur nur für
-  dieses eine Feature wäre unverhältnismäßig — als Nice-to-have dokumentiert,
-  nicht gebaut.
-- **Kontextmenü-Eintrag „Aufzählung".** Kein Kontextmenü im Projekt vorhanden
-  (projektweite Lücke, nicht feature-spezifisch).
-- **DOCX: Bild-einziger Listenpunkt wird beim Import aus der Liste
-  „ausgestoßen"** (Neufund 1a.4). Dokumentiert, nicht behoben (kein
-  DOCX-Fixture mit exakt diesem Muster im Korpus bekannt; ODT-Äquivalent über
-  Fix F6 behoben, da dort real durch `imageWithinList.odt` belegt).
+Im Backlog (`specs/FEATURE-BACKLOG.md`) als bewusste Einschränkung markieren:
+- **Eigenes Aufzählungszeichen** (`eigene-aufzaehlungszeichen`, Priorität 4): kein
+  Schema-Attribut, kein UI.
+- **Symbol je Ebene / ODT-Ebenenstile**: DOCX cycelt `['•','◦','▪']` über 9 Ebenen
+  (`styleDefs.ts`), ODT definiert nur Ebene 1 (`styleRegistry.ts` Z. 100). Diese
+  Asymmetrie ist eine bewusste Vereinfachung (req 2.2); weitergehende Ebenen gehören
+  zu `mehrstufige-liste`/`liste-einruecken-tab`.
+- **Gemischt verschachtelte Typen** (Bullet-in-Ordered): durch die flache
+  `numId+ilvl`-Repräsentation nicht darstellbar (Abschnitt 4.6) — unverändert
+  gegenüber heute.
+- **Input-Rules** („- "/„* " → Liste): im Projekt existieren keine `InputRule`s
+  (Grep bestätigt) — Nice-to-have, nicht gebaut.
+- **Kontextmenü „Aufzählung"**: kein Kontextmenü im Projekt (projektweite Lücke).
 
 ---
 
 ## 8. Phasenplan
 
-1. **Phase A (Commands/Toolbar, kein Format-Code):** 4.2 (`commands.ts`), 4.3
-   (`Toolbar.tsx`) — inkl. Unit-Tests für `toggleList`/`isListActive` (isoliert,
-   ohne DOCX/ODT-Abhängigkeit testbar). Kleinster, risikoärmster Schritt zuerst,
-   da er F1-F4 (die höchste-Priorität-Verdachtsmomente laut Anforderung
-   Abschnitt 5 Punkt 7) unabhängig von den Format-Readern behebt.
-2. **Phase B (ODT-Reader-Robustheit):** 4.8 (F5 + F6) — mit den in 5.1 genannten
-   gezielten Unit-Tests, danach Struktur-Erweiterung der bestehenden
-   `external-fixtures.test.ts` (5.1) für die ODT-Fixtures aus Anforderung
-   Abschnitt 4.2.
-3. **Phase C (DOCX-Writer/Reader-Robustheit):** 4.5 (F8), 4.6+4.7 (F7,
-   `NumberingRegistry`) — mit den Roundtrip-Tests aus 5.1, insbesondere dem
-   Regressionstest für Grenzfall 3.12, der vor dem Fix nachweislich rot sein
-   muss.
-4. **Phase D (E2E-Grundlage):** 5.2 (`tests/e2e/lists.spec.ts`), da diese Tests
-   von den Ergebnissen aus Phase A-C abhängen (aktiver/`disabled`-Zustand,
-   echtes Toggle, ODT/DOCX-Fixture-Rundreisen).
-5. **Phase E (Dokumentation):** Backlog-Status-Anmerkungen gemäß Abschnitt 7
-   dieses Plans, Übergabe-Notiz an `liste-einruecken-tab-code.md`/
-   `liste-aufheben-code.md` gemäß Abschnitt 6, sobald diese existieren.
+1. **Phase A — geteilter Editor-Code (Abnahme):** F1–F4 werden in
+   `nummerierte-liste-code.md` §2.1/§2.2 + `Toolbar.tsx` **einmal** umgesetzt; hier
+   die Bullet-Abnahme dazu: `commands.test.ts`-Fälle (5.1) und die Toolbar-Anpassung
+   für „• Liste"/„⇧ Liste" (4.3). Risikoärmster Schritt, unabhängig von den Readern.
+2. **Phase B — ODT-Reader-Robustheit:** 4.8 (F5) + Absicherung F6-Nicht-Bug, mit den
+   ODT-`roundtrip`-Tests (5.1) und der Struktur-Erweiterung von
+   `odt/external-fixtures.test.ts` (5.1).
+3. **Phase C — DOCX-Writer/Reader:** **zuerst F9** (4.5/2.2 — Tabellenzellen-Import,
+   T-F9-Test vor Fix rot; schwerster, datenverlustkritischster Befund dieses Plans,
+   analog zur Hardest-first-Reihenfolge von `nummerierte-liste-code.md` §5), danach
+   F8 (4.5), danach 4.6+4.7 (F7 `NumberingRegistry`, **verschachtelungserhaltend**) mit
+   dem T-F7-Test (vor Fix rot) **und** dem Regressionswächter für den grünen
+   Nested-Test.
+4. **Phase D — E2E:** `tests/e2e/lists.spec.ts` (5.2), abhängig von A–C. Der
+   Tabellenzellen-Rundreise-Fall in Testfall 11 setzt **F9 aus Phase C** voraus
+   (siehe 5.2 Anmerkung) — ohne F9 bleibt dieser Teil des E2E-Specs zwangsläufig rot
+   oder muss provisorisch übersprungen und offen als Lücke vermerkt werden, nicht
+   stillschweigend weggelassen.
+5. **Phase E — Doku:** Backlog-Einschränkungen (Abschnitt 7); Meldung an
+   `nummerierte-liste-code.md`/`liste-einruecken-tab-code.md`, dass deren
+   Alt-Aussagen zur DOCX-Verschachtelung überholt sind.
 
 ---
 
-## 9. Offene Entscheidungen zur Freigabe vor Umsetzungsbeginn
+## 9. Offene Entscheidungen vor Umsetzungsbeginn
 
-1. Soll die in 4.2 als „Empfehlung" markierte Partial-Wrap-Logik für Grenzfall 3.5
-   (Selektion über Überschrift + Absätze) bereits in Phase A mitgebaut werden,
-   oder reicht der `disabled`-Zustand für die erste Abnahme? (Plan empfiehlt:
-   zunächst nur `disabled`, Partial-Wrap als Folge-Ticket.)
-2. Soll `parseAutomaticStyles` umbenannt werden (z. B. zu
-   `parseListAndTextStyles`), da sie nach Fix F5 nicht mehr ausschließlich auf
-   `office:automatic-styles`-Elemente angewendet wird? (Kosmetisch, keine
-   Verhaltensänderung.)
-3. Bestätigung, dass die in 4.6 beschriebene Nebenwirkung der
-   `NumberingRegistry` (verschachtelte Listen werden nach Export/Reimport zu
-   zwei benachbarten flachen Listen statt einer verschmolzenen Liste) als
-   **Verbesserung** und nicht als neues, unerwünschtes Verhalten akzeptiert
-   wird — betrifft ausschließlich den bereits als bekannte Einschränkung
-   dokumentierten F11-Fall (Verschachtelung generell flachgelegt bis
-   `liste-einruecken-tab` das behebt).
+1. Übernimmt `nummerierte-liste-code.md` §2.1 den vollen Lauf-Split für Grenzfall 3.5
+   (Absätze werden Liste, Überschrift ausgelassen), oder genügt für die erste Abnahme
+   der `disabled`-Zustand? (Empfehlung: `disabled` zuerst, Lauf-Split als Folge.)
+2. Wird F5 hier (bullet-eigen) oder in `nummerierte-liste-code.md` verortet? Der Bug
+   betrifft beide Typen (nummeriert → fälschlich bullet). Empfehlung: **hier** fixen
+   (req 5.6 rahmt es als Bullet-Sicht), im Nummerierungsplan referenzieren.
+3. Bestätigung, dass F7 als **echter** Fix (nicht nur Doku) gewünscht ist — er ist
+   geteilt mit `nummerierte-liste-code.md` §2.5 und muss **einmal**, in der
+   verschachtelungserhaltenden Variante (4.6), umgesetzt werden.
+4. `NumberingRegistry` lebt laut §2.5 in der **neuen** Datei
+   `src/formats/docx/numberingRegistry.ts` mit Signatur `allocate(kind, start, mode)` /
+   `serializeNumEntries()` — **nicht** in `styleDefs.ts` (4.7 korrigiert). Bestätigen,
+   dass der Bullet-Weg diese Signatur mit `(kind, 1, 'restart')` mitnutzt und keine
+   zweite bullet-eigene Variante entsteht.
+5. **F9 (neu, Abschnitt 2.2/4.5) muss vor dem DoD-Abschluss dieses Features behoben
+   sein, nicht nur des Nummerierungs-Features.** `aufzaehlungsliste-req.md` 2.7 und
+   Rundreise 4.1.5 verlangen die DOCX-Rundreise „Aufzählungsliste in Tabellenzelle"
+   ausdrücklich für **dieses** Backlog-Item; der Fix selbst ist mit
+   `nummerierte-liste-code.md` §2.6 geteilt (**eine** Implementierung,
+   `readParagraphsAndTables`), aber die **Abnahmepflicht** ist eigenständig. Bestätigen,
+   dass dies vor Abschluss von Phase C/D explizit nachgehalten wird, statt implizit
+   auf den Zeitplan des Geschwisterplans zu vertrauen.

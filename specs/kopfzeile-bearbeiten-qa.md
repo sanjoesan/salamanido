@@ -21,6 +21,14 @@ tatsächlichen Repo-Code verifiziert:
   tatsächlichen App-Architektur **nicht** wie dort beschrieben durchführbar — siehe Abschnitt 0.4, analog
   zum bereits in `seitenumbruch-qa.md` Abschnitt 0.2 dokumentierten Präzedenzfall für dasselbe
   strukturelle Problem.
+- **Determinismus ist bei diesem Feature keine Formalie, sondern das zentrale Test-Risiko.** Das
+  Kopfzeilen-Feature führt eine **zweite** `EditorView` mit ständigem, teils programmatischem Fokuswechsel
+  ein — exakt die Konstellation, in der der im Repo bereits mehrfach reparierte
+  async-`selectionchange`-Race (Commits `db61c89`/`0797d13`) erneut auftritt. Der Testplan legt deshalb in
+  **Abschnitt 0.8** verbindliche Determinismus-Regeln fest (Fokus web-first abwarten, `selectionchange`-Sync
+  vor Struktur-Tasten puffern, keine positionsabhängigen Locator) und wendet sie in **allen** E2E-Codeblöcken
+  konsequent an. Kein E2E-Test dieser Datei feuert eine Tastatureingabe „blind" direkt nach einem
+  Fokuswechsel oder einer nativen Cursorbewegung ab.
 
 Zwei verpflichtende, **getrennte** Testebenen, wie vom Auftrag gefordert:
 
@@ -48,7 +56,10 @@ Tooling-Wahl nötig.
 
 ### 0.1 Bestätigt: DOCX-Reader übernimmt „irgendeine" statt der `default`-Kopf-/Fußzeile (Req Befund 2, Code-Plan 0.1/1.1)
 
-Am tatsächlichen Code verifiziert (`src/formats/docx/reader.ts:352-353`):
+Am tatsächlichen Code (Stand 2026-07-05, **nach** dem `ausschneiden`-Merge) verifiziert —
+`firstChildNS(sectPr, …, 'headerReference')`/`'footerReference'` in `readDocx`,
+`src/formats/docx/reader.ts:509-510` (die im früheren QA-Entwurf zitierten Zeilen 352-353 sind durch den
+`ausschneiden`-Merge gedriftet; maßgeblich ist der Symbolname, vgl. Code-Plan 0.7):
 ```ts
 const headerRef = firstChildNS(sectPr, OOXML_NAMESPACES.w, 'headerReference')
 const footerRef = firstChildNS(sectPr, OOXML_NAMESPACES.w, 'footerReference')
@@ -65,17 +76,19 @@ anderen Fixture-Test laufen und bei Rot die gesamte Abnahme blockieren muss (ana
 
 ### 0.2 Bestätigt: DOCX Header/Footer-Bilder werden über den falschen Relationship-Namensraum aufgelöst/geschrieben (Req Grenzfall 6, Code-Plan 0.2/0.3/1.3)
 
-Am tatsächlichen Code verifiziert:
-- **Reader** (`reader.ts:357-374`): `readBodyChildren(root, headingInfo, kindByNumId, documentRels, zip)`
-  wird für Header **und** Footer mit `documentRels` (den Relationships von `word/document.xml`) aufgerufen
+Am tatsächlichen Code (Stand 2026-07-05) verifiziert:
+- **Reader** (`readDocx`-Header-/Footer-Ladeblock, `reader.ts:514-531`, `readBodyChildren`-Aufrufe Z. **520**
+  bzw. **529**): `readBodyChildren(root, headingInfo, kindByNumId, documentRels, zip)` wird für Header **und**
+  Footer mit `documentRels` (den Relationships von `word/document.xml`, geladen in `reader.ts:501`) aufgerufen
   — nicht mit den tatsächlich zuständigen `word/_rels/header1.xml.rels`/`footer1.xml.rels`. Ein Bild in
   einer Kopfzeile, dessen `r:embed`-ID nur in der Header-eigenen `.rels`-Datei existiert, wird entweder gar
   nicht aufgelöst oder — schlimmer, empirisch mit `tests/fixtures/external/docx/headerPic.docx` reproduzierbar
   — fälschlich auf eine gleichnamige, aber inhaltlich andere ID in `document.xml.rels` gemappt (in diesem
   Fixture zeigt `rId1` dort auf `styles.xml`, nicht auf das Bild).
-- **Writer** (`writer.ts:222-267`): eine einzige `documentRels`-Instanz wird für `bodyXml`, `headerXml`
-  **und** `footerXml` gemeinsam verwendet; es wird zu keinem Zeitpunkt eine `word/_rels/header1.xml.rels`
-  oder `word/_rels/footer1.xml.rels` erzeugt. Ein selbst eingefügtes Bild in der Kopfzeile bekäme eine
+- **Writer** (`writeDocx`, `writer.ts:252-299`): eine einzige `documentRels`-Instanz (`writer.ts:254`) wird
+  für `bodyXml` (Z. 256), `headerXml` (Z. 265) **und** `footerXml` (Z. 270) gemeinsam verwendet; es wird zu
+  keinem Zeitpunkt eine `word/_rels/header1.xml.rels` oder `word/_rels/footer1.xml.rels` erzeugt (nur
+  `document.xml.rels`, Z. 299). Ein selbst eingefügtes Bild in der Kopfzeile bekäme eine
   `r:embed`-ID, die ausschließlich in `document.xml.rels` (falscher Namensraum für diesen Part) steht — nach
   OPC-Spezifikation ungültig, in echtem Word/LibreOffice nicht auflösbar.
 
@@ -85,7 +98,8 @@ eingefügte Bilder. Abschnitt 1.1/2.13 unten führen das als Pflichttest, nicht 
 
 ### 0.3 Bestätigt: ODT-Reader wählt Master-Page rein nach Dokumentreihenfolge, nicht nach Namen (Req Befund 3, Code-Plan 0.4/1.2)
 
-Am tatsächlichen Code verifiziert (`src/formats/odt/reader.ts:257`):
+Am tatsächlichen Code (Stand 2026-07-05) verifiziert (`readOdt`, `src/formats/odt/reader.ts:375`; die im
+früheren Entwurf zitierte Zeile 257 ist gedriftet):
 ```ts
 const masterPage = stylesDoc.getElementsByTagNameNS(ODF_NAMESPACES.style, 'master-page')[0]
 ```
@@ -165,6 +179,92 @@ bewiesen:** dass keine Transaktion einer View die Selektion der anderen beeinflu
 behandelt den Regressionstest aus Abschnitt 2.7 deshalb als **scharfen Pflichttest**, nicht als
 Nice-to-have — bei Rot ist das Feature unabhängig von allen anderen grünen Tests nicht abnahmefähig
 (analog zu `UT-DOCX-RT-BREAK-OWN-TEXT` in `seitenumbruch-qa.md`).
+
+### 0.8 Determinismus-Pflicht: async `selectionchange`-Sync und programmatischer Fokuswechsel abwarten (verbindlich für **alle** E2E-Tests dieser Datei)
+
+**Dies ist die wichtigste, für dieses Feature spezifische Determinismus-Regel** und wird deshalb hier
+vorangestellt, nicht erst in Abschnitt 2 vergraben. Das Kopfzeilen-Feature ist genau der Fall, in dem der
+im Repo bereits mehrfach reparierte **async-selection-sync-Race** am wahrscheinlichsten erneut zuschlägt:
+zwei `EditorView`-Instanzen, ständige Fokuswechsel, Toolbar-Aktionen auf wechselndem `view`.
+
+Verifizierter Ist-Stand im Repo (nicht behauptet, im Code nachgelesen):
+
+- ProseMirror erfährt eine **native, tastaturgetriebene** Cursor-/Selektionsänderung (z. B.
+  `End`, `Ctrl+Home`, Pfeiltasten, Shift-Auswahl) nur über das **asynchrone** `selectionchange`-Event des
+  Browsers. Eine unmittelbar folgende, per Playwright ohne menschliche Reaktionszeit abgefeuerte
+  **Struktur-Taste** (`Enter`, `Delete`, `Backspace`, `Strg+X`) kann diesem Nachziehen **vorauslaufen** und
+  noch auf der **alten** Position wirken. Beleg im Repo: identischer, ausführlich kommentierter Fix in
+  `tests/e2e/selection-regression.spec.ts` (drei Stellen `await page.waitForTimeout(50)` nach `End`, vor
+  `Enter`), `tests/e2e/cut.spec.ts` (u. a. Z. 74/178/297/332/341/377/507/538), `tests/e2e/clipboard.spec.ts`
+  (Z. 31), `tests/e2e/clipboard-roundtrip.spec.ts` (Z. 18). Die jüngsten Commits `db61c89`/`0797d13`
+  belegen genau diese Fehlerklasse als reale, projektbekannte Flakiness-Ursache („give async selection
+  sync time before the next keystroke"), insbesondere auf den **Mobile-/Tablet**-Projekten.
+- Der **programmatische Fokuswechsel** über den Toolbar-Button „Kopfzeile bearbeiten" bzw. `Escape`
+  (`headerView.focus()`/`bodyView.focus()`, Code-Plan 1.5/1.6) ist im Browser **asynchron**: der DOM-Fokus
+  und die daraufhin gesetzte Selektion der Zielview landen **nicht** synchron mit dem `click()`. Sofortiges
+  `page.keyboard.type(...)` **danach** kann noch in der **alten** View landen — ein neuer, feature-eigener
+  Race zusätzlich zum bekannten `selectionchange`-Race.
+
+**Daraus abgeleitete, verbindliche Regeln (gelten für jeden E2E-Test in Abschnitt 2, keine Ausnahme):**
+
+1. **Nach jedem Fokuswechsel (Toolbar-„Kopfzeile bearbeiten", `Escape`, Klick in Body/Kopfzeile) und
+   VOR der ersten folgenden Tastatureingabe** ist der gelandete Fokus **web-first** abzuwarten — also über
+   eine `expect(...).toBeFocused()`/`toHaveAttribute('aria-pressed','true')`-Assertion, die Playwright
+   automatisch bis zum Eintreten pollt, **nicht** über einen festen Timeout. Bevorzugtes Muster:
+   ```ts
+   // Fokus deterministisch abwarten, statt blind zu tippen:
+   await page.getByTitle('Kopfzeile bearbeiten').click()
+   await expect(page.getByTitle('Kopfzeile bearbeiten')).toHaveAttribute('aria-pressed', 'true')
+   const headerEditor = page.locator('[aria-label="Kopfzeile"] .ProseMirror')
+   await expect(headerEditor).toBeFocused()   // erst wenn die Header-View wirklich den DOM-Fokus hat
+   await page.keyboard.type('…')
+   ```
+   (Der `aria-pressed`-Zustand spiegelt laut Code-Plan 1.4 `focusedRegion === 'header'` — er ist damit das
+   exakte, sichtbare Signal „Fokus liegt jetzt in der Kopfzeile".)
+2. **Nach jeder nativen, tastaturgetriebenen Cursor-/Selektionsänderung (`End`, Pfeiltasten,
+   Shift-Auswahl, `Ctrl+A` gefolgt von einer Struktur-Taste) und VOR der nächsten Struktur-Taste
+   (`Enter`/`Delete`/`Backspace`/`Strg+X`)** ist der repo-etablierte Sync-Puffer einzuhalten:
+   ```ts
+   await page.keyboard.press('End')
+   await page.waitForTimeout(50)   // async selectionchange-Sync landen lassen — identisch zu
+                                   // selection-regression.spec.ts / cut.spec.ts
+   await page.keyboard.press('Enter')
+   ```
+   `waitForTimeout` ist hier **nicht** als generelles Anti-Pattern zu werten, sondern das im Repo bereits
+   als korrekt etablierte Mittel für **genau diesen** nicht direkt beobachtbaren Browser-Sync (es gibt kein
+   sauberes DOM-Signal für „`selectionchange` ist nachgezogen"). Reiner Text-Input direkt nach `End` ist
+   unkritisch; kritisch ist ausschließlich die **Struktur-Taste** danach.
+3. **Ein einziger, gemeinsamer Helfer** wird in jeder neuen Spec-Datei definiert und konsequent verwendet,
+   damit die Regel nicht pro Testfall vergessen wird:
+   ```ts
+   /** Puffer für den asynchronen selectionchange-Sync nach einer nativen Cursor-/Auswahländerung,
+    *  bevor eine Struktur-Taste folgt. Siehe selection-regression.spec.ts / cut.spec.ts. */
+   const settleSelection = (page: Page) => page.waitForTimeout(50)
+   /** Deterministisch abwarten, dass der Fokus in der Kopfzeile gelandet ist. */
+   async function expectHeaderFocused(page: Page) {
+     await expect(page.getByTitle('Kopfzeile bearbeiten')).toHaveAttribute('aria-pressed', 'true')
+     await expect(page.locator('[aria-label="Kopfzeile"] .ProseMirror')).toBeFocused()
+   }
+   /** Deterministisch abwarten, dass der Fokus wieder im Haupttext liegt. */
+   async function expectBodyFocused(page: Page) {
+     await expect(page.getByTitle('Kopfzeile bearbeiten')).toHaveAttribute('aria-pressed', 'false')
+   }
+   ```
+4. **Keine positionsabhängigen `.first()`/`.last()`-Locator für die beiden Editoren.** Sobald `header !==
+   null` existieren **zwei** `.ProseMirror`-Elemente; deren DOM-Reihenfolge ist kein stabiler Vertrag.
+   Verbindlich sind **eindeutige, semantische Locator** — `page.locator('[aria-label="Kopfzeile"]
+   .ProseMirror')` für die Kopfzeile und ein ebenso eindeutiger Body-Locator (z. B. der bestehende
+   Seiten-/Body-Container, dessen genaues Attribut nach Implementierung zu verifizieren ist, Abschnitt 2.1
+   letzter Absatz). Die früher in Beispielblöcken verwendeten `.ProseMirror').first()`/`.last()` sind
+   ausdrücklich **ersetzt** (siehe die korrigierten Codeblöcke in 2.7/2.11).
+5. **Keine `expect`-Prüfung ohne Auto-Retry.** Alle Inhalts-/Sichtbarkeitsprüfungen laufen über
+   `await expect(locator).toContainText(...)` / `.toBeVisible()` (web-first, Playwright pollt automatisch),
+   **nie** über `expect(await locator.textContent())` (Momentaufnahme, race-anfällig).
+
+**Konsequenz für die Abnahme:** Jeder E2E-Testfall in Abschnitt 2, der eine Tastatureingabe **nach** einem
+Fokuswechsel oder einer nativen Cursorbewegung absetzt, ohne Regel 1 bzw. 2 einzuhalten, gilt als
+**fehlerhaft konstruiert** (potenzielle Flakiness, insbesondere Mobile/Tablet) und ist vor Übernahme in die
+Suite zu korrigieren — unabhängig davon, ob er zufällig grün lief.
 
 ---
 
@@ -274,6 +374,20 @@ echten UI. Diese Ebene existiert genau deshalb, weil Unit-Tests (Ebene 1) die Ed
 (Toolbar-Button tatsächlich vorhanden und klickbar, Doppelklick-Handler tatsächlich gebunden, zweite
 `EditorView` tatsächlich gemountet und fokussierbar, Datei tatsächlich herunterladbar) nicht abdecken.
 
+**Determinismus (verbindlich, Abschnitt 0.8 gilt für jede Zeile der folgenden Tabellen).** Die
+Testfall-Tabellen unten notieren die Aktionsfolge **verkürzt** (z. B. „Kopfzeile aktivieren → tippen",
+„`Escape` → tippen", „Doppelklick auf Spiegel-Band → tippen"). Jede solche Folge ist **immer** mit den
+Sync-Punkten aus 0.8 zu implementieren:
+- nach **jedem** Fokuswechsel (Toolbar-Button, `Escape`, Klick in Body/Kopfzeile, Doppelklick auf ein
+  Spiegel-Band) **zuerst** `expectHeaderFocused(page)` bzw. `expectBodyFocused(page)`, **dann** tippen —
+  betrifft insbesondere E2E-ACT-01/02/05, E2E-LEAVE-02, E2E-UNDO-01, E2E-MULTIPAGE-03;
+- nach **jeder** nativen Cursorbewegung (`End`/Pfeil/`Ctrl+A`) **vor** einer Struktur-Taste
+  (`Enter`/`Delete`/`Backspace`) ein `await settleSelection(page)` — betrifft insbesondere E2E-APPEND-01
+  (`End` vor Anhängen), E2E-CLEAR-01 (`Ctrl+A` vor `Delete`), E2E-UNDO (Eingabe vor `Ctrl+Z`).
+Ein Testfall, der diese Punkte auslässt, ist auch dann als fehlerhaft konstruiert zurückzuweisen, wenn er
+auf dem Desktop-Projekt zufällig grün lief (Mobile/Tablet sind laut Commit-Historie `db61c89`/`0797d13`
+die eigentlichen Flakiness-Träger).
+
 **Hinweis zu Locator-Namen:** Die unten verwendeten Locator (`getByTitle('Kopfzeile bearbeiten')`,
 `getByTitle('Kopfzeile entfernen')`, CSS-Klasse/Attribut für die Bandabgrenzung) sind aus
 `kopfzeile-bearbeiten-code.md` Abschnitt 3.2/4.2 übernommen (dortiger `title`/`aria-label`-Text). Sie sind
@@ -344,31 +458,51 @@ Muss **sowohl** in der neuen Datei `header-edit.spec.ts` **als auch** direkt im 
 `seitenumbruch-qa.md` Abschnitt 2.6 etablierten doppelten Verankerung, damit die Regressionssuite diesen
 Fall bei künftigen Refactorings nicht aus dem Blick verliert):
 
+Der folgende Codeblock hält die Determinismus-Regeln aus Abschnitt 0.8 durchgängig ein (web-first
+Fokus-Assertion nach jedem Fokuswechsel; `settleSelection`-Puffer nach jedem `End` vor der nächsten
+Eingabe; eindeutige, nicht-positionsabhängige Locator). **Ohne diese Waits ist genau dieser Test der
+wahrscheinlichste Flaky-Kandidat der ganzen Suite** (zwei Views + programmatischer Fokuswechsel, siehe 0.7/0.8):
+
 ```ts
+// Helfer aus Abschnitt 0.8 (settleSelection, expectHeaderFocused, expectBodyFocused) in der Spec definiert.
+const body = page.locator('[data-editor-region="body"] .ProseMirror')   // eindeutiger Body-Locator,
+                                                                        // Attribut nach Impl. verifizieren
+const header = page.locator('[aria-label="Kopfzeile"] .ProseMirror')
+
 test('header focus round trip + reselect + type — both areas keep their own correct content', async ({ page }) => {
-  const body = page.locator('.ProseMirror').first()
   await body.click()
+  await expectBodyFocused(page)
   await page.keyboard.type('Hauptinhalt Absatz eins.')
 
-  // Grenzfall 3: Doppelklick auf den Kopfzeilenbereich, während im Haupttext eine Selektion aktiv ist.
+  // Grenzfall 3: Fokus in den Kopfzeilenbereich wechseln, während im Haupttext eine Selektion (Alles
+  // auswählen) aktiv ist. Nach dem programmatischen Fokuswechsel deterministisch abwarten, bevor getippt
+  // wird — sonst kann die Eingabe noch in der Body-View landen (0.8 Regel 1).
   await page.keyboard.press('ControlOrMeta+a')
+  await settleSelection(page)                       // Ctrl+A ist eine async Selektionsänderung (0.8 Regel 2)
   await page.getByTitle('Kopfzeile bearbeiten').click()
+  await expectHeaderFocused(page)
   await page.keyboard.type('Kopfzeile A')
 
   // Grenzfall 9: mehrfacher Fokuswechsel Kopfzeile -> Haupttext -> Kopfzeile, jeweils gefolgt von Tippen.
   await body.click()
+  await expectBodyFocused(page)
   await page.keyboard.press('End')
+  await settleSelection(page)                       // End -> async selectionchange, danach folgt Eingabe
   await page.keyboard.type(' Zusatz eins.')
 
   await page.getByTitle('Kopfzeile bearbeiten').click()
+  await expectHeaderFocused(page)
   await page.keyboard.press('End')
+  await settleSelection(page)
   await page.keyboard.type(' Zusatz Kopfzeile.')
 
   await body.click()
+  await expectBodyFocused(page)
   await page.keyboard.press('End')
+  await settleSelection(page)
   await page.keyboard.type(' Zusatz zwei.')
 
-  const header = page.locator('[aria-label="Kopfzeile"]')
+  // Web-first Assertions (Auto-Retry), nicht textContent()-Momentaufnahmen (0.8 Regel 5):
   await expect(header).toContainText('Kopfzeile A Zusatz Kopfzeile.')
   await expect(body).toContainText('Hauptinhalt Absatz eins. Zusatz eins. Zusatz zwei.')
   // Haupttext-Selektion von Alles-auswählen darf keinen Text gelöscht/vertauscht haben:
@@ -412,14 +546,18 @@ test('header focus round trip + reselect + type — both areas keep their own co
 
 ```ts
 test('header text and formatting survive a real export + re-upload round trip (DOCX)', async ({ page }) => {
+  const body = page.locator('[data-editor-region="body"] .ProseMirror')   // eindeutig, nicht .last()
   await docxCard(page).getByRole('button', { name: 'Neu erstellen' }).click()
+
   await page.getByTitle('Kopfzeile bearbeiten').click()
+  await expectHeaderFocused(page)                    // 0.8 Regel 1: Fokus in Kopfzeile abwarten
   await page.keyboard.type('Firma Mustermann GmbH')
   await page.keyboard.press('ControlOrMeta+a')
+  await settleSelection(page)                        // 0.8 Regel 2: Select-all vor Toolbar-Aktion
   await page.getByTitle('Fett').click()
 
-  const editor = page.locator('.ProseMirror').last()
-  await editor.click()
+  await body.click()
+  await expectBodyFocused(page)                      // Fokus zurück im Haupttext, bevor getippt wird
   await page.keyboard.type('Hauptinhalt.')
 
   const downloadPromise = page.waitForEvent('download')
@@ -451,7 +589,7 @@ test('header text and formatting survive a real export + re-upload round trip (D
   })
 
   await expect(page.locator('[aria-label="Kopfzeile"]')).toContainText('Firma Mustermann GmbH')
-  await expect(page.locator('.ProseMirror').last()).toContainText('Hauptinhalt.')
+  await expect(body).toContainText('Hauptinhalt.')
 })
 ```
 
@@ -556,6 +694,15 @@ Der Status „vorhanden" (Req-Abschnitt 7) darf aus QA-Sicht erst vergeben werde
       `tabellen_header_DOC_LO4-1-0.odt` (Abschnitt 0.5).
 - [ ] Alle Playwright-Tests aus Abschnitt 2 grün, insbesondere die echten Datei-Rundreise-Tests (2.11–2.13),
       die tatsächlich heruntergeladene/hochgeladene Dateien prüfen, nicht nur DOM-Zustand.
+- [ ] **Determinismus (Abschnitt 0.8) nachweislich eingehalten:** jeder E2E-Testfall setzt nach einem
+      Fokuswechsel eine web-first Fokus-Assertion (`expectHeaderFocused`/`expectBodyFocused`) **vor** der
+      ersten Eingabe und nach jeder nativen Cursorbewegung ein `settleSelection(page)` **vor** der nächsten
+      Struktur-Taste; kein `.first()`/`.last()`-Locator für die zwei Editoren, keine
+      `textContent()`-Momentaufnahme statt `await expect(...)`. Zusätzlich: die neue Suite läuft **auf allen
+      in `playwright.config.ts` konfigurierten Projekten** (Desktop **und** Mobile **und** Tablet, Req
+      Testplan-Hinweis 10) mindestens **dreimal hintereinander stabil grün** (`--repeat-each=3`), da genau
+      diese Fehlerklasse laut Commits `db61c89`/`0797d13` bevorzugt auf Mobile/Tablet und nur sporadisch
+      auftritt.
 - [ ] Baseline-Regression (1.5, 2.15) vollständig grün — insbesondere E2E-BASE-02 (bestehende
       `.ProseMirror`-Locator in alten Tests bleiben eindeutig, auch mit einer zweiten `EditorView` im DOM).
 - [ ] Cross-Format-Anforderung (Req 5.2.3/5.2.4) ist mindestens auf Unit-Ebene (`UT-XFMT-HDR-01/02`) grün;

@@ -44,9 +44,33 @@ Referenzierte Fixtures (siehe `bild-groesse-aendern-code.md` Abschnitt 7,
 Fixture-Inventar — durch tatsächliches Entpacken verifiziert, nicht vermutet):
 `tests/fixtures/external/docx/VariousPictures.docx` (5 `wp:extent`-Werte, u. a.
 exakt 130×92 px und 192×176 px), `tests/fixtures/external/odt/Seasonal_Fruits2_en.odt`
-(5 `draw:frame`/`draw:image`-Paare, `svg:width`/`svg:height` in cm), sowie
-`tests/fixtures/external/docx/WithGIF.docx` (ein quadratisches Bild, ergänzend
-für einen einfachen Seitenverhältnis-Test).
+(5 `draw:frame`/`draw:image`-Paare, `svg:width`/`svg:height` in cm), sowie —
+optional, als ergänzendes Einzelbild-Fixture —
+`tests/fixtures/external/docx/WithGIF.docx`. **Alle drei Dateien sind im Repo
+vorhanden** (per `ls tests/fixtures/external/{docx,odt}/` bestätigt). Die
+konkreten Größenwerte von `VariousPictures.docx`/`Seasonal_Fruits2_en.odt` sind
+in `bild-groesse-aendern-code.md` Abschnitt 7 durch Entpacken verifiziert und
+hier maßgeblich; für `WithGIF.docx` ist die tatsächliche `wp:extent`/das
+Seitenverhältnis **vor** dem Festschreiben einer Assertion noch auszulesen
+(nicht als „quadratisch" unterstellen, bis geprüft).
+
+> **Revisionshinweis — Korrekturen an der ersten Fassung dieses Testplans.**
+> Diese Datei existierte bereits und wurde kritisch gegen den realen Testcode
+> gegengelesen. Dabei trat **genau die Zeilennummern-Verwechslung zu Tage, vor
+> der Anforderung und Umsetzungsplan ausdrücklich warnen** und die in der ersten
+> Fassung reproduziert war:
+> - Der DOCX-Bild-Rundreisetest steht **nicht** bei `roundtrip.test.ts:253`
+>   (dort liegt der **Tabellen-/rowspan**-Block, `rowspan`-Test bei Z. 279),
+>   sondern bei **`describe('DOCX round trip: images')` Z. 307**, Test **Z.
+>   308-315** (`width:100, height:80` in **Z. 309**, geprüft werden bislang nur
+>   `type`/`src` in Z. 312-314).
+> - Der ODT-Bild-Rundreisetest steht **nicht** bei `roundtrip.test.ts:213`
+>   (dort liegt der **Negativ-Test** „externe URL wirft Fehler", Z. 212-214) —
+>   die Verwechslung, vor der die Anforderung wörtlich warnt —, sondern bei
+>   **`describe('ODT round trip: images')` Z. 341**, Test **Z. 342-350** (setzt
+>   `width`/`height` bislang **gar nicht**, Z. 343).
+> Alle Verweise unten sind entsprechend korrigiert. Stabiler Anker bleibt der
+> **`describe`-Blockname** (`'… round trip: images'`), nicht die Zeilennummer.
 
 ---
 
@@ -71,9 +95,12 @@ dieses Plans) müssen **vor** dem Reader-Fix aus `bild-groesse-aendern-code.md`
 Abschnitt 3.10/3.11 nachweislich **rot** sein (Bild kommt mit 300×200 px bzw.
 6×4 cm statt der echten Größe zurück) und **erst danach** grün — sonst ist
 nicht auszuschließen, dass der neue Test versehentlich denselben blinden Fleck
-hat wie der bereits vorhandene, irreführende Test in
-`docx/__tests__/roundtrip.test.ts:253` (siehe Anforderung Abschnitt 6.3,
-letzter Satz).
+hat wie der bereits vorhandene, irreführende Bild-Rundreisetest in
+`docx/__tests__/roundtrip.test.ts` (`describe('DOCX round trip: images')`,
+Z. 308-315: setzt in Z. 309 `width:100, height:80`, prüft davon aber nichts).
+**Nicht** zu verwechseln mit dem Tabellen-/rowspan-Test um Z. 253-300 bzw. dem
+Negativ-Test „externe URL" bei Z. 222 (DOCX) / Z. 212 (ODT) — siehe
+Anforderung Abschnitt 6.3, letzter Satz, und den Revisionshinweis oben.
 
 ---
 
@@ -140,10 +167,13 @@ gezielte Assertions gegen die reale Fixture.
 ### 1.4 Erweiterung: `src/formats/docx/__tests__/roundtrip.test.ts`
 
 Der bestehende, laut Anforderung Abschnitt 6.3/Plan Abschnitt 2 als „False
-Confidence"-Test identifizierte Bild-Test (Zeile 253-259: setzt `width:100,
-height:80` im Eingabe-Objekt, prüft aber nur `type`/`src`) bekommt echte
-Größen-Assertions **ergänzt** (nicht ersetzt, damit die bisherigen Prüfungen
-erhalten bleiben):
+Confidence"-Test identifizierte Bild-Test — `describe('DOCX round trip:
+images')`, Test „preserves an embedded image as a self-contained data URL",
+**Z. 308-315** (setzt in **Z. 309** `width:100, height:80`, prüft in Z. 312-314
+aber nur `type`/`src`) — bekommt echte Größen-Assertions **ergänzt** (nicht
+ersetzt, damit die bisherigen Prüfungen erhalten bleiben). **Achtung:** das ist
+**nicht** der Tabellen-/rowspan-Block bei Z. 253-300 und **nicht** der
+Negativ-Test bei Z. 222 (siehe Revisionshinweis oben).
 
 | # | Testfall | Erwartung | Deckt |
 |---|---|---|---|
@@ -153,8 +183,12 @@ erhalten bleiben):
 
 ### 1.5 Erweiterung: `src/formats/odt/__tests__/roundtrip.test.ts`
 
-Analog — der bestehende Test (Zeile 213-221) setzt `width`/`height` im
-Eingabe-Objekt bislang nicht einmal:
+Analog — der bestehende Bild-Test `describe('ODT round trip: images')`, Test
+„preserves an embedded image as a self-contained data URL", **Z. 342-350**
+(Bilddaten in **Z. 343**), setzt `width`/`height` im Eingabe-Objekt bislang
+nicht einmal. **Nicht** mit dem Negativ-Test bei **Z. 212-214** („externe URL
+wirft Fehler") verwechseln — exakt die von der Anforderung benannte
+Verwechslung (siehe Revisionshinweis oben):
 
 | # | Testfall | Erwartung | Deckt |
 |---|---|---|---|
@@ -245,7 +279,12 @@ async function insertTestImage(page: import('@playwright/test').Page) {
   await page.getByRole('button', { name: /🖼\s*Bild/ }).click()
   const chooser = await fileChooserPromise
   await chooser.setFiles({ name: 'test.png', mimeType: 'image/png', buffer: TEST_PNG_4X3 })
-  return page.locator('.ProseMirror img')
+  const img = page.locator('.ProseMirror img')
+  // Einfügen läuft asynchron (FileReader → probe.decode() → insertImage, Plan 3.5).
+  // Sync-Barriere (Determinismus-Regel §2.0.1/1+2): kein Folge-Schritt gegen ein
+  // noch nicht existierendes <img>.
+  await expect(img).toBeVisible()
+  return img
 }
 
 async function dragHandle(
@@ -253,7 +292,7 @@ async function dragHandle(
   handleSelector: string,
   dx: number,
   dy: number,
-  steps = 5,
+  steps = 6,
 ) {
   const handle = page.locator(handleSelector)
   const box = (await handle.boundingBox())!
@@ -263,6 +302,34 @@ async function dragHandle(
   await page.mouse.down()
   for (let i = 1; i <= steps; i++) {
     await page.mouse.move(startX + (dx * i) / steps, startY + (dy * i) / steps)
+  }
+  await page.mouse.up()
+}
+
+/**
+ * Wie dragHandle, hält die Geste aber nach `pauseAfter` Schritten an (Pointer bleibt
+ * GEDRÜCKT) und ruft `duringDrag()` auf — für den Live-Vorschau-Test (§2.2 #3), der einen
+ * Zwischenzustand VOR pointerup prüfen muss, ohne mit einem atomaren down→up-Helfer zu
+ * kollidieren. `duringDrag` sollte web-first pollen (§2.0.1/5), nicht einmalig lesen.
+ */
+async function dragHandleWithMidCheck(
+  page: import('@playwright/test').Page,
+  handleSelector: string,
+  dx: number,
+  dy: number,
+  duringDrag: () => Promise<void>,
+  steps = 6,
+  pauseAfter = 3,
+) {
+  const handle = page.locator(handleSelector)
+  const box = (await handle.boundingBox())!
+  const startX = box.x + box.width / 2
+  const startY = box.y + box.height / 2
+  await page.mouse.move(startX, startY)
+  await page.mouse.down()
+  for (let i = 1; i <= steps; i++) {
+    await page.mouse.move(startX + (dx * i) / steps, startY + (dy * i) / steps)
+    if (i === pauseAfter) await duringDrag() // Pointer noch gedrückt → Live-Vorschau aktiv
   }
   await page.mouse.up()
 }
@@ -285,6 +352,120 @@ nachzutragen.
 je nach Testfall `docxCard`/`odtCard` „Neu erstellen" klicken (analog zu
 `selection-regression.spec.ts`).
 
+Für **Dokument**-Uploads (Rundreisetests §2.6) wird der Datei-Input der
+jeweiligen Karte direkt bespielt — `docxCard(page).locator('input[type="file"]')
+.setInputFiles({ … })` —, exakt das etablierte Muster aus `docx.spec.ts`
+(Z. 96-101) / `odt.spec.ts`; **kein** `filechooser` nötig. Nur für den
+**Bild**-Upload über den Toolbar-Button „🖼 Bild" wird `filechooser` verwendet
+(`insertTestImage`, Helfer oben in §2.0), weil dieser Button ein natives, ggf.
+`hidden`es `<input type="file">` per Klick öffnet. `insertTestImage` wartet mit
+einer web-first-Assertion (`await expect(img).toBeVisible()`), bis das Bild
+tatsächlich im DOM ist, bevor es den Locator zurückgibt — vgl.
+Determinismus-Regel §2.0.1/1+2. **Vor dem ersten Testlauf verifizieren**, ob der
+`filechooser`-Weg oder direktes `setInputFiles` auf dem (ggf. `hidden`en)
+`input[type=file]`-Locator für den Bild-Input robuster ist, und das Ergebnis hier
+nachtragen.
+
+### 2.0.1 Determinismus — keine Race-Conditions (verbindliche Regeln für ALLE E2E-Tests)
+
+Dieser Testplan ist auf Determinismus ausgelegt; die folgenden Regeln sind
+**Pflicht** und nicht optional. Sie fassen die in diesem Repo bereits gelernten
+Flaky-Ursachen zusammen (bestehender Kommentar in `selection-regression.spec.ts`
+Z. 26-34; Commits „Fix flaky Mobile-project cut.spec.ts failures: same
+async-selection-sync race …" und „give async selection sync time before the
+next keystroke").
+
+1. **Async `selectionchange` abwarten.** ProseMirror erfährt einen nativen,
+   tastatur-/klickgetriebenen Cursor-/Selektionswechsel (`End`, Pfeiltasten,
+   Klick zum Neupositionieren) nur über das **asynchrone** `selectionchange`-
+   Event des Browsers. Eine unmittelbar folgende, positionsabhängige
+   Tastatureingabe kann diesem Nachlauf davonrennen. Nach jedem solchen
+   Cursor-Move und **vor** dem nächsten abhängigen Tastendruck: **exakt das
+   etablierte Idiom** `await page.waitForTimeout(50)` (identisch zu
+   `selection-regression.spec.ts`). Nirgends sonst wird `waitForTimeout` als
+   pauschales Schlafmittel benutzt.
+2. **Bild-Selektion als Sync-Barriere behandeln, nicht „blind" weiterklicken.**
+   Ein Klick auf das Bild erzeugt zunächst eine `NodeSelection`, die durch den
+   `reconcileSelectionOnClick`-Guard (Plan 3.9) **erhalten** und per `forceRender`
+   ins Panel gespiegelt wird — beides asynchron zum Klick. Vor jeder
+   Feld-Eingabe/Ziehgeste zuerst die Sichtbarkeit des Panels **web-first**
+   abwarten: `await expect(page.getByLabel('Bildbreite in Zentimetern'))
+   .toBeVisible()`. **Niemals** `img.click()` direkt mit `.fill()`/`dragHandle`
+   verketten.
+3. **Nach einer Ziehgeste (pointerup) Selektions-Sync Zeit geben.** Das finale
+   `pointerup` schreibt die echte Transaktion **und** durchläuft denselben
+   Mouseup-Reconcile-Pfad wie ein normaler Klick (Plan Fund 5) — dieselbe
+   Rennklasse, die die Mobile-Flakes in `cut.spec.ts`/`selection-regression`
+   verursacht hat. Bevor danach in Fließtext geklickt und getippt wird (§2.9)
+   oder Undo ausgelöst wird: entweder einen stabilen Nachzustand web-first
+   assertieren (Panelwert steht) **oder** das 50-ms-Idiom aus Regel 1 anwenden.
+4. **Fokus-Handling: die Größenfelder liegen AUSSERHALB des ProseMirror-DOM.**
+   Nach Bestätigung per Enter/Blur liegt der DOM-Fokus **im Eingabefeld**, nicht
+   im Editor. Jede anschließende Tastenaktion, die den **Editor** treffen muss
+   (Undo `ControlOrMeta+z`, Bild per `Delete`/`Backspace` löschen), muss den
+   Fokus zuvor in den Editor zurückholen (Bild/NodeView erneut anklicken) —
+   sonst trifft der Tastendruck die native Undo-Historie des Feldes bzw.
+   editiert den Feldtext. Wo möglich, wird `NodeSelection`-Persistenz
+   (Anforderung 2.2.4) **fokusunabhängig** über „Panel bleibt sichtbar mit den
+   Bildwerten" verifiziert statt über einen fokusabhängigen Tastendruck.
+5. **Web-first, auto-wiederholende Assertions statt Einmal-Lesungen.**
+   `await expect(img).toHaveCSS('width', '378px')`, `toHaveValue(…)`,
+   `toBeDisabled()`, `toBeVisible()` warten intern, bis der asynchrone Commit +
+   `forceRender` gelandet ist. Ein einmaliges `getAttribute`/`inputValue`/
+   `boundingBox()` sampelt genau einen Frame und flakt. Für gerundete
+   Pixel-Vergleiche (±1 px Sub-Pixel-Toleranz, Grenzfall 4.11):
+   `await expect.poll(async () => (await img.boundingBox())!.width)
+   .toBeGreaterThanOrEqual(…)` bzw. eine Toleranz-Assertion, nie ein
+   Roh-Gleichheitsvergleich auf einem Einzel-Read.
+6. **Ziehgesten mit explizitem `steps`.** `dragHandle`/`dragHandleWithMidCheck`
+   nutzen eine feste Schrittzahl → die Anzahl der `pointermove`-Events (und
+   damit die Live-Vorschau-Kadenz und die Undo-Schritt-Zählung aus Grenzfall
+   4.7) ist reproduzierbar. Keine `page.mouse.move()`-Einzelsprünge ohne
+   Zwischenschritte.
+7. **Deterministische Testdaten, keine Zufälligkeit, kein Netz.** Fixes
+   Base64-Test-PNG (kein zufällig erzeugtes Bild), feste Pixel-Deltas, feste
+   Fixtures. Netzwerkisolation ist im Repo bereits erzwungen
+   (`network-isolation.spec.ts`); kein Test lädt externe Ressourcen.
+
+### 2.0.2 Playwright-Projekt-Matrix (Chrome / Mobile-Touch / Tablet-WebKit)
+
+`playwright.config.ts` definiert fünf Projekte: **Desktop Chrome**, **Mobile
+(Pixel 7 — `isMobile`, Touch)**, **Tablet (iPad Mini — WebKit, Touch)** sowie
+zwei nur auf `clipboard*.spec.ts` gescopte Desktop-Safari/-Firefox-Projekte.
+`image-resize.spec.ts` (ohne eigenes `testMatch`) läuft damit standardmäßig auf
+**Desktop Chrome, Mobile und Tablet** — das muss der Plan bewusst adressieren:
+
+- **Ziehpunkt-/Pointer-Präzisionstests** (§2.2 vollständig, plus die Ziehgesten
+  in §2.4 #3, §2.6 #3/#7/#11, §2.9): Der `ImageNodeView` nutzt **Pointer-Events
+  + `setPointerCapture`** (Plan 3.7). `page.mouse.down/move/up` erzeugt auf
+  **Chromium** zuverlässig Pointer-Events; auf **WebKit** (Tablet/iPad Mini) ist
+  `setPointerCapture` + synthetisches Pointer-Verhalten deutlich unzuverlässiger,
+  und auf einem **Touch**-Gerät sind die 10-px-Griffe (`touch-action:none`)
+  fummelig/nicht deterministisch anzusteuern. **Entscheidung: Pointer-Drag-Tests
+  auf Desktop Chrome scopen** — pro Test/`describe`:
+  `test.skip(({ browserName, isMobile }) => browserName !== 'chromium' || isMobile,
+  'Ziehpunkt-Präzisionsgesten nur auf Desktop-Chrome deterministisch; die
+  Größenfelder decken Touch/WebKit als vollwertige Alternative ab (Anforderung
+  Element 7)')`. Das folgt dem im Repo etablierten Scoping-Präzedenzfall
+  (Clipboard-Specs via `testMatch`, Mobile-spezifische Behandlung in
+  `cut.spec.ts`/`selection-regression`). **Keine Abdeckungslücke:** Anforderung
+  Element 7 verlangt ausdrücklich, dass die Eingabefelder eine vollwertige,
+  pointer-unabhängige Alternative sind — und die Feld-/Tastatur-Tests laufen auf
+  **allen** Projekten.
+- **Panel-, Feld-, Undo-, Rundreise- und Reader-Regressionstests** laufen auf
+  allen drei Default-Projekten. Zwei Mobile/Tablet-Besonderheiten: (a) die zweite
+  Toolbar-Leiste (`ImagePropertiesPanel`) kann auf dem ~412-px-Pixel-7-Viewport
+  umbrechen/überlaufen — deshalb **immer** über `getByLabel`/Rollen selektieren,
+  nie über Pixelkoordinaten; (b) die bekannte, Mobile-spezifische
+  Selektions-Sync-Flakiness macht die Regeln aus §2.0.1 auf Mobile
+  **verpflichtend**, nicht optional. Erweist sich ein Panel-/Rundreisetest trotz
+  dieser Waits als **ausschließlich** Mobile-flaky, wird er — wie im Repo bereits
+  präzedenzlos geschehen („CI-only, Mobile-project-only cut round-trip
+  limitation", Commit 29cbc80) — **explizit dokumentiert und gescoped**, niemals
+  still per Retry maskiert.
+- Die Clipboard-gescopten Safari-/Firefox-Projekte greifen `image-resize.spec.ts`
+  mangels `testMatch` **nicht** auf — kein Handlungsbedarf.
+
 ### 2.1 Panel-Sichtbarkeit und Grundinteraktion (Testfälle 1-3, Element 1-3)
 
 | # | Testfall | Schritte (echte Bedienung) | Assertion |
@@ -295,7 +476,7 @@ je nach Testfall `docxCard`/`odtCard` „Neu erstellen" klicken (analog zu
 | 4 | Breitenfeld ändern + Enter ändert bei aktivem Lock auch die Höhe proportional (Testfall 2) | Bild einfügen/selektieren, `page.getByLabel('Bildbreite in Zentimetern').fill('10')` → `Enter` | `img`-Element hat danach `style.width` entsprechend 10 cm (px), `style.height` proportional zum ursprünglichen Seitenverhältnis mitgeändert |
 | 5 | Lock deaktivieren, nur Breite ändern → Höhe bleibt unverändert (Testfall 3, bewusst verzerrt) | Checkbox „Seitenverhältnis beibehalten" abwählen, Breite ändern, Enter | `style.height` identisch zum Wert vor der Änderung, `style.width` geändert — Bild sichtbar gestaucht/gestreckt |
 | 6 | Enter **und** Blur bestätigen gleichermaßen (Anforderung 2.2.1) | Höhe ändern, **ohne** Enter das Feld per `Tab`/Klick woanders verlassen | Änderung ist trotzdem übernommen (kein „Übernehmen"-Button nötig) |
-| 7 | Fokus/Selektion bleiben nach Anwenden erhalten (Anforderung 2.2.4) | Größe ändern, direkt danach `Entf`/`Backspace` drücken, **ohne** erneut zu klicken | Bild wird gelöscht — belegt, dass die `NodeSelection` nach der Größenänderung noch aktiv war |
+| 7 | Fokus/Selektion bleiben nach Anwenden erhalten (Anforderung 2.2.4) | Größe per Feld ändern (Enter), **ohne** erneuten Klick prüfen, dass das Panel weiterhin die Bildwerte zeigt; **danach** (fokusabhängig) den Editor per Klick auf das Bild refokussieren und `Delete` drücken | **Primär (fokusunabhängig, §2.0.1/4):** `page.getByLabel('Bildbreite in Zentimetern')` bleibt sichtbar → `NodeSelection` lebt noch. **Sekundär:** nach Editor-Refokus löscht `Delete` das Bild. Kein blindes `Delete` direkt nach Enter — da liegt der Fokus im Eingabefeld, nicht im Editor |
 
 ### 2.2 Ziehpunkte (Testfälle 4-5, Grenzfall 4.3, Element 4-5)
 
@@ -303,7 +484,7 @@ je nach Testfall `docxCard`/`odtCard` „Neu erstellen" klicken (analog zu
 |---|---|---|---|
 | 1 | Eckgriff ändert Breite **und** Höhe proportional, unabhängig vom Lock-Zustand | Lock **deaktivieren** (!), Bild selektieren, `dragHandle(page, '.image-resize-handle-se', 40, 30)` | beide Dimensionen haben sich geändert, **Seitenverhältnis bleibt erhalten** trotz deaktiviertem Lock (Anforderung 2.3.1 — Eckgriffe ignorieren die Checkbox) |
 | 2 | Seitengriff ändert nur eine Dimension | `dragHandle(page, '.image-resize-handle-e', 40, 0)` | Breite geändert, Höhe **exakt unverändert** — insbesondere: kein durch `height: auto`/CSS verzerrtes Höhenverhalten (Anforderung Abschnitt 3, Punkt 7 / Grenzfall 4.9, Plan Abschnitt 2 „Fund 1") |
-| 3 | Live-Vorschau: Panel-Felder aktualisieren sich synchron während des Ziehens, nicht erst nach `mouseup` | Während laufender `dragHandle`-Sequenz (Zwischenschritt, vor `mouse.up()`) den aktuellen Feldwert lesen | Feldwert entspricht der aktuellen Zwischengröße, nicht dem Wert vor Beginn des Ziehens |
+| 3 | Live-Vorschau: Panel-Felder aktualisieren sich synchron während des Ziehens, nicht erst nach `mouseup` | `dragHandleWithMidCheck(...)` mit `duringDrag = async () => expect.poll(() => page.getByLabel('Bildbreite in Zentimetern').inputValue()).not.toBe(startWert)` — Pointer bleibt während der Prüfung gedrückt (NICHT der atomare `dragHandle`, der keine Zwischenprüfung erlaubt) | Feldwert hat sich schon **vor** `mouse.up()` gegenüber dem Startwert geändert (Live-Wert via `imageResizeKey`-Plugin-State, Plan 3.6), nicht erst nach dem Loslassen. `expect.poll` statt Einmal-Lesung (§2.0.1/5) |
 | 4 | Ziehen über den gegenüberliegenden Rand hinaus kollabiert nicht (Grenzfall 4.3) | Eckgriff um ein Vielfaches der ursprünglichen Bildgröße in Richtung des gegenüberliegenden Rands ziehen | Bild bleibt bei einer positiven Mindestgröße (≥ 1 px), kein negativer/invertierter Wert, Geste „friert" nicht ein (weitere `mousemove` wirken noch) |
 | 5 | Extremwerte werden während des Ziehens laufend geclamped, nicht erst am Ende | Sehr weit über die Obergrenze hinausziehen (z. B. 3000 px Differenz) | Bild wächst bis zur konfigurierten Obergrenze und bleibt dort, keine Editor-/Seiten-Sprengung |
 
@@ -326,6 +507,17 @@ je nach Testfall `docxCard`/`odtCard` „Neu erstellen" klicken (analog zu
 | 2 | Redo stellt die geänderte Größe wieder her | Fortsetzung: `ControlOrMeta+y`/`ControlOrMeta+Shift+z` | Bild zeigt wieder die per Feld gesetzte Größe |
 | 3 | Eine **gesamte Ziehgeste** mit mehreren Zwischenschritten ist genau ein Undo-Schritt (Grenzfall 4.7, kritisch) | `dragHandle` mit `steps: 10` (10 `mousemove`-Ereignisse) → **ein einziges** `ControlOrMeta+z` | Bild zeigt exakt die Größe **vor Beginn** der gesamten Ziehgeste, nicht die Größe nach dem vorletzten Zwischenschritt — belegt, dass Zwischenschritte keine eigenen Undo-Einträge erzeugen |
 | 4 | Undo in gemischter Sequenz (Bild einfügen → Größe ändern → Text davor tippen) funktioniert in umgekehrter Reihenfolge | Bild einfügen, Größe ändern, vor das Bild klicken und Text tippen, dann zwei Mal `ControlOrMeta+z` | erstes Undo entfernt den getippten Text, zweites Undo macht die Größenänderung rückgängig — Reihenfolge exakt umgekehrt zur Aktion (Anforderung 2.7) |
+
+**Fokus- und Timing-Hinweis (Determinismus §2.0.1/3+4), zwingend für alle Tests
+dieses Abschnitts:** `ControlOrMeta+z`/`ControlOrMeta+y` wirken nur, wenn der
+**Editor** den Fokus hat. Wurde die Größe zuvor per **Feld** geändert, liegt der
+Fokus im Eingabefeld — vor dem Undo also das Bild/den Editor erneut anklicken,
+sonst trifft das Undo die native Undo-Historie des Eingabefelds statt
+ProseMirror. Wurde die Größe per **Ziehpunkt** geändert (Test #3), hat der
+`ImageNodeView` nach `pointerup` bereits `view.focus()` gerufen (Plan 3.7) — hier
+zusätzlich vor dem Undo die Selektions-Sync-Zeit aus §2.0.1/3 einhalten. Assertion
+jeweils web-first über `toHaveCSS`/`expect.poll` (§2.0.1/5), nie über eine
+Einmal-Lesung der Bildgröße.
 
 ### 2.5 Reset auf Originalgröße (Testfall 9-10, Grenzfall 4.4, Element 6)
 
@@ -381,15 +573,24 @@ Fett/Kursiv/Schriftgröße in diesem Repo), neuer Test im bestehenden
 `describe`-Block:
 
 ```ts
-test('image NodeSelection survives a resize drag, then click-to-reposition + typing loses nothing (2.8, Grenzfall 4.12)', async ({ page }) => {
+test('image NodeSelection survives a resize drag, then click-to-reposition + typing loses nothing (2.8, Grenzfall 4.12)', async ({ page, browserName, isMobile }) => {
+  // Ziehpunkt-Präzisionsgeste → nur Desktop-Chrome deterministisch (§2.0.2).
+  test.skip(browserName !== 'chromium' || isMobile, 'Resize-Drag nur auf Desktop-Chrome deterministisch')
   const editor = page.locator('.ProseMirror')
   await editor.click()
   await page.keyboard.type('Vorher. ')
-  await insertTestImage(page)
-  await page.locator('.ProseMirror img').click()
+  const img = await insertTestImage(page)
+  await img.click()
+  // Sync-Barriere (§2.0.1/2): warten, bis die Bild-NodeSelection (dank reconcile-Guard
+  // Plan 3.9) steht und das Panel gerendert ist — nicht blind weiterziehen.
+  await expect(page.getByLabel('Bildbreite in Zentimetern')).toBeVisible()
   await dragHandle(page, '.image-resize-handle-se', 20, 15)
   await editor.locator('p').first().click()
   await page.keyboard.press('End')
+  // Async selectionchange nach Klick+End abwarten — exakt das Idiom aus
+  // selection-regression.spec.ts:26-34 (§2.0.1/1+3); sonst tippt "Nachher."
+  // ggf. an die alte Cursorposition und der Test wird flaky.
+  await page.waitForTimeout(50)
   await page.keyboard.type(' Nachher.')
   await expect(editor).toContainText('Vorher.')
   await expect(editor).toContainText('Nachher.')
@@ -499,6 +700,25 @@ dem Editor auslöst) und der bestehenden Mouseup-Reconciliation-Logik.
       `selection-regression.spec.ts` ruft `readDocx`/`writeDocx`/`readOdt`/
       `writeOdt`/`setImageSize`/`insertImage`/`resetImageToNaturalSize`
       direkt auf — stichprobenartig per Review bestätigt.
+- [ ] Die erweiterten Rundreise-Assertions sitzen nachweislich im richtigen
+      `describe`-Block — `docx/…/roundtrip.test.ts` `describe('DOCX round trip:
+      images')` (Z. ~307-315) und `odt/…/roundtrip.test.ts` `describe('ODT round
+      trip: images')` (Z. ~341-350) —, **nicht** versehentlich im Tabellen-/
+      rowspan- oder Negativ-Test (DOCX Z. 222/253-300, ODT Z. 212). Per Review am
+      tatsächlichen Testcode bestätigt (siehe Revisionshinweis am Dateianfang).
+- [ ] Determinismus-Regeln aus §2.0.1 sind in jedem E2E-Test eingehalten:
+      Selektions-Sync nach Cursor-Move/Klick abgewartet (50-ms-Idiom bzw.
+      web-first-Barriere), keine `click→fill`/`click→drag`-Verkettung ohne
+      Panel-Sichtbarkeits-Gate, Undo/Delete nur mit Editor-Fokus, Assertions
+      web-first (`toHaveCSS`/`toHaveValue`/`expect.poll`) statt Einmal-Lesung —
+      per Review bestätigt; die Suite läuft ohne `retries`-Maskierung
+      reproduzierbar grün (mind. 3× lokal wiederholt, inkl. `--repeat-each`).
+- [ ] Projekt-Matrix (§2.0.2) berücksichtigt: Ziehpunkt-/Pointer-Tests sind auf
+      Desktop Chrome gescoped (`test.skip` bei `browserName !== 'chromium' ||
+      isMobile`), Panel-/Feld-/Rundreisetests laufen auf Desktop Chrome, Mobile
+      **und** Tablet grün; jede verbleibende, ausschließlich Mobile-/WebKit-
+      spezifische Einschränkung ist explizit dokumentiert und gescoped (Präzedenz
+      Commit 29cbc80), nicht per Retry stillgeschwiegen.
 - [ ] Für jeden in `bild-groesse-aendern-code.md` Abschnitt 2 dokumentierten
       Zusatzfund (CSS-Spezifität/Inline-Style-Fix, `draggable`-Konflikt mit
       Ziehpunkten, unveränderte Writer-Fallbacks, korrekter

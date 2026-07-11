@@ -123,22 +123,49 @@ Analog für ODT, über `buildOdt(automaticStylesXml, spanMarkup, ...)` und
 | 2 | Doppelte Cross-Format-Rundreise (konstruiertes Dokument: DOCX-JSON → `writeDocx` → `readDocx` → `writeOdt` → `readOdt` → `writeDocx` → `readDocx`) | Farbe nach zweifachem Formatwechsel exakt erhalten (case-insensitiver Vergleich), kein kumulativer Verlust |
 | 3 | Cursor-an-Schreibmarke-Verhalten nach Fix 3.3 (reiner Zustands-Test, kein DOM) | `applyMarkColor('textColor', '#ff0000')` auf einem State mit leerer Selektion dispatcht eine Transaktion mit `storedMarks`, die die Mark enthält (nicht `return false`); `clearMarkColor` analog mit `removeStoredMark` |
 
-### 1.5 Validierung gegen unabhängigen Parser (Rundreise-Testfall 7 der Anforderung)
+### 1.5 Validierung gegen unabhängigen Parser (Rundreise-Testfall 7 / Abnahmekriterium 2)
 
-Da dieses Repo keine Python-Toolchain besitzt (siehe `schriftfarbe-code.md`
-Abschnitt 9), zweistufiger Ansatz:
+**Korrektur eines früheren Entwurfs (verifiziert am 2026-07-05):** Dieser Abschnitt behauptete
+zuvor, „dieses Repo besitzt keine Python-/unabhängige-Parser-Toolchain" und verschob die
+Fremdparser-Prüfung fast vollständig auf einen manuellen Schritt. Das ist **falsch** und
+wiederholte exakt den Fehler, den `schriftfarbe-code.md` Abschnitt 0.1 Punkt 3 / Abschnitt 9
+bereits korrigiert hat. Tatsächlich sind **beide** vom eigenen Reader unabhängigen Kanäle im
+Repo **vorhanden und verdrahtet** (verifiziert: Dateien existieren, Dev-Deps in `package.json`):
 
-1. **Automatisiert, Teil der E2E-Suite:** Prüfung des exportierten
-   XML-Strings per Regex/`DOMParser`, **ohne** `readDocx`/`readOdt` zu
-   benutzen — umgesetzt in Abschnitt 2.5 dieses Plans (die real
-   heruntergeladene Datei liegt dort vor, das Unit-Level allein kann „echten"
-   Export/Download nicht beweisen).
-2. **Manuell, einmalig vor Statuswechsel auf „verifiziert":** eine
-   exportierte Test-DOCX/-ODT mit farbigem Text außerhalb dieses Repos mit
-   `python-docx` bzw. LibreOffice/einem ODF-Validator öffnen; Ergebnis in
-   `schriftfarbe-req.md`/`-code.md` oder einer Folgedatei vermerken. Kein
-   Bestandteil der automatisierten CI-Suite, aber Pflicht-Checkliste-Punkt
-   vor Abnahme (siehe Abschnitt 4 dieses Plans).
+- **ODT:** `src/formats/odt/__tests__/external-validation.test.ts` validiert `writeOdt`-Output
+  mit **`xmllint-wasm`** (libxml2/WASM) gegen das **offizielle OASIS-ODF-1.3-RelaxNG-Schema**
+  `tests/fixtures/external/odf-schema/OpenDocument-v1.3-schema.rng` (verifiziert vorhanden) —
+  ein Parser ohne jede Codebeziehung zu `readOdt`.
+- **DOCX:** `src/formats/docx/__tests__/external-validation.test.ts` öffnet `writeDocx`-Output
+  mit **`mammoth`** (unabhängiger DOCX→HTML-Konverter).
+
+Beide sind zu **erweitern**, nicht neu einzuführen. Der Nachweis ist damit automatisiert und
+CI-fest, nicht manuell:
+
+1. **ODT (starker Nachweis) — `odt/__tests__/external-validation.test.ts` erweitern.** Einen
+   Fall ergänzen: ein Dokument mit `textColor`-Mark (`#ff0000`) exportieren, das erzeugte
+   `content.xml` gegen das ODF-1.3-Schema validieren (`expect(result.valid).toBe(true)`).
+   Aktuell enthält diese Datei verifiziert **keinen** Farb-Fall — genau diese Lücke schließt
+   der neue Test. Das ist die von Rundreise-Testfall 7 geforderte „unabhängige
+   ODF-Bibliothek/`odfvalidator`" und **stärker** als eine bloße Regex-Selbstprüfung, weil das
+   Schema die Wohlgeformtheit **und** die Strukturgültigkeit (`fo:color` als zulässiges
+   Attribut eines `style:text-properties`) prüft.
+2. **DOCX (Öffnen + Struktur) — `docx/__tests__/external-validation.test.ts` erweitern.**
+   **Ehrliche, verifizierte Einschränkung (aus `schriftfarbe-code.md` Abschnitt 9):** `mammoth`
+   liest run-`w:highlight`, **nicht** run-`w:color` (Vordergrundfarbe) — es gibt in mammoth
+   keinen `w:color`-Reader, die Schriftfarbe wird also **nicht** als solche zurückgemeldet.
+   Deshalb zweiteilig: (a) `mammoth`-Öffnen eines Farbdokuments **ohne Fehler** (belegt, dass
+   ein fremder Parser die Datei lädt — deckt exakt das `escapeXml`-Risiko aus
+   `schriftfarbe-code.md` 3.1 ab); (b) direkte, **`readDocx`-freie** `DOMParser`/Regex-Assertion
+   auf `<w:color w:val="…">` im exportierten `document.xml` (umgesetzt in §2.5 #8 an der real
+   heruntergeladenen Datei). Eine vollständige, unabhängige **DOCX-Farb-Erkennung** würde
+   python-docx oder ein OOXML-XSD erfordern, das **nicht** im Repo liegt — das ist die bewusst
+   dokumentierte Grenze (Abnahmekriterium 2 ist für DOCX über a+b erfüllt; die stärkere
+   Schema-Erkennung steht real nur für ODT zur Verfügung).
+3. **Optional, nicht CI-Pflicht:** Zusätzlich einmalig eine exportierte Farb-DOCX/-ODT außerhalb
+   des Repos mit `python-docx` bzw. LibreOffice öffnen und das Ergebnis in einer Folgedatei
+   vermerken — ergänzender, **nicht** ersetzender Nachweis zu 1./2. (die den Abnahmegate bereits
+   automatisiert erfüllen).
 
 ---
 
@@ -159,12 +186,17 @@ den in Abschnitt 2.4 verlangten Uploads echter Fremddateien aus
 Datenträger gelesen und per `setInputFiles({ buffer })` hochgeladen.
 
 **Native Farbwahl in Playwright:** `<input type="color">` lässt sich nicht
-über einen echten OS-Dialog automatisieren. Playwright kann den Wert aber
-direkt per `locator.fill('#ff0000')` setzen — das löst dasselbe `input`/
-`change`-Event aus, das ein Nutzer durch Bestätigen des nativen Dialogs
-auslösen würde, und ist für die Formatierungslogik ausreichend. Das
-tatsächliche Öffnen/Bedienen des nativen Dialogs selbst ist **nicht**
-automatisierbar und bleibt manueller Prüfschritt (Abschnitt 2.8/Abschnitt 4).
+über einen echten OS-Dialog automatisieren. Der Wert muss stattdessen
+programmatisch gesetzt werden — **aber nicht per `locator.fill()`**: Reacts
+controlled-input value-Tracker fängt ein reines Value-Setzen ab und feuert
+`onChange`→`applyMarkColor` dann nicht (nachweislich der Grund, warum
+`clipboard.spec.ts:34–47` den Helfer `pickColor` überhaupt eingeführt hat).
+Verbindlich ist deshalb der `pickColor`/`setTextColor`-Helfer aus §2.0
+(nativer Prototype-Setter + explizites `input`/`change`-Event) — er löst exakt
+denselben Pfad aus wie das Bestätigen des nativen Dialogs und ist für die
+Formatierungslogik vollständig. Das tatsächliche Öffnen/Bedienen des nativen
+Dialogs selbst ist **nicht** automatisierbar und bleibt manueller Prüfschritt
+(Abschnitt 2.9/Abschnitt 2.12). Siehe §2.0.1 Regel 1.
 
 ### 2.0 Neue Datei: `tests/e2e/schriftfarbe.spec.ts`
 
@@ -179,17 +211,123 @@ function odtCard(page) {
 }
 const colorInput = (page) => page.locator('input[aria-label="Textfarbe"]')
 const removeButton = (page) => page.getByTitle('Textfarbe entfernen')
+
+// Selektion setzen: 1:1 aus tests/e2e/clipboard.spec.ts:39 übernehmen (NICHT
+// locator.fill()! — siehe §2.0.1 Punkt 1). Der native value-Setter + input/
+// change-Dispatch ist der einzige Weg, der Reacts controlled-input value-Tracker
+// überzeugt und damit applyMarkColor tatsächlich auslöst.
+async function pickColor(page, label, hex) {
+  const input = page.getByLabel(label)
+  await input.evaluate((el, value) => {
+    const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set
+    setter.call(el, value)
+    el.dispatchEvent(new Event('input', { bubbles: true }))
+    el.dispatchEvent(new Event('change', { bubbles: true }))
+  }, hex)
+}
+const setTextColor = (page, hex) => pickColor(page, 'Textfarbe', hex)
+const setHighlight = (page, hex) => pickColor(page, 'Hervorhebungsfarbe', hex)
+
+// Gibt der asynchronen Selektions-Synchronisation (reconcileSelectionOnClick,
+// WordEditor.tsx) Zeit, bevor die nächste abhängige Taste kommt — identisch zum
+// bereits im Repo etablierten `settle()`/`waitForTimeout(50)`-Muster
+// (clipboard.spec.ts:30, selection-regression.spec.ts:34). Siehe §2.0.1 Punkt 2.
+const settle = (page) => page.waitForTimeout(50)
 ```
 
 `beforeEach`: `page.goto('/')` → Privacy-Banner „Verstanden" wegklicken →
-je nach Testfall `odtCard`/`docxCard` „Neu erstellen" klicken.
+je nach Testfall `odtCard`/`docxCard` „Neu erstellen" klicken. **Zusätzlich in
+jedem Test** einen `pageerror`-Wächter registrieren (siehe §2.0.1 Punkt 5):
+`const errors = []; page.on('pageerror', (e) => errors.push(e))`, am Testende
+`expect(errors).toEqual([])`.
+
+Überall, wo die folgenden Tabellen `setTextColor(page, hex)` schreiben, ist
+**genau dieser** Helfer (= `pickColor`) gemeint, **nie** `locator.fill()`.
+
+### 2.0.1 Determinismus-Regeln (verbindlich für jeden Test dieser Ebene)
+
+Diese Regeln sind kein Stilhinweis, sondern Abnahmebedingung: Ein Test, der eine
+davon verletzt, gilt als nicht abgenommen, auch wenn er „meistens grün" ist. Sie
+adressieren die zwei realen Flakiness-Quellen dieses Projekts (native
+Controlled-Inputs und die asynchrone Selektions-Synchronisation), gegen die in
+diesem Repo bereits mehrfach nachgebessert wurde (Commits „Fix flaky
+Mobile-project selection-regression tests: give async selection sync time before
+the next keystroke" und „…cut.spec.ts…: same async-selection-sync race").
+
+1. **Farbe immer über `pickColor`/`setTextColor`, nie über `locator.fill()`.**
+   Begründung (verifiziert an `clipboard.spec.ts:34–47`): Ein einfaches Setzen von
+   `input[type=color].value` — was `fill()` effektiv tut — wird von Reacts eigenem
+   value-Tracker abgefangen; React „sieht" keine Änderung, `onChange`→`applyMarkColor`
+   feuert nicht, und der Test grünt oder rötet je nach Timing zufällig. Der native
+   Prototype-Setter + explizites `input`/`change`-Event ist der einzige zuverlässige
+   Weg. `schriftfarbe-req.md` Abschnitt 2.1 verlangt die Übernahme dieses Helfers
+   ausdrücklich; er ist deshalb hier für den gesamten Plan die einzige zugelassene
+   Farbwahl-Primitive. (Der frühere Entwurf dieses Plans nutzte durchgängig `.fill()`
+   — das ist korrigiert.)
+2. **Nach jedem nativen Caret-Move vor der nächsten strukturverändernden Taste
+   `await settle(page)`.** ProseMirror erfährt einen tastatur-/klickgetriebenen
+   Caret-Move (`End`, `Home`, `ArrowLeft/Right`, Klick-Neupositionierung, auch der
+   implizite Move nach `pickColor`+`view.focus()`) nur über das **asynchrone**
+   `selectionchange`-Event des Browsers. Eine sofort folgende `Enter`/`Backspace`/
+   Toolbar-Aktion kann diesem Nachziehen vorauslaufen und auf der **alten** Position
+   wirken. Deshalb: zwischen einem solchen Move und der davon abhängigen nächsten
+   Aktion **immer** `await settle(page)` (min. 50 ms, wie im Repo etabliert). Ein
+   echter Nutzer erzeugt diese Race nie, automatisierte `press()`-Folgen schon.
+   Das betrifft **jeden** „select-all → Toolbar-Aktion → Klick/End → Enter → tippen"-
+   Ablauf in §2.1, §2.2, §2.4, §2.7 und §2.10.
+3. **Ausschließlich web-first (auto-retriende) Assertions.** `expect(locator).toHaveCSS(...)`,
+   `toContainText(...)`, `toHaveCount(...)`, `toBeFocused()` warten selbst auf den
+   Zielzustand. **Kein** manuelles Auslesen per `evaluate`/`textContent` mit
+   anschließendem `expect(wert)…`, das keinen Retry hat; **kein** `waitForTimeout` als
+   Ersatz für eine Assertion (nur als Selektions-Sync-Puffer nach Regel 2 erlaubt).
+4. **Farbe nie über den `style`-Attribut-**String** matchen, immer über den berechneten
+   Wert.** Browser normalisieren `style="color: #ff0000"` beim Rendern zu
+   `rgb(255, 0, 0)`; ein Selektor `span[style*="color: #ff0000"]` ist dadurch
+   browserabhängig und flaky. Zugelassen: Element (per `hasText`/Kontext eindeutig)
+   selektieren und mit `await expect(el).toHaveCSS('color', 'rgb(255, 0, 0)')` prüfen.
+   **Präzedenz-Korrektur (verifiziert am 2026-07-05):** Anders als ein früherer Entwurf
+   dieses Plans behauptete, benutzt `docx.spec.ts:303` **kein** `toHaveCSS('color', …)`,
+   sondern `expect(page.locator('.ProseMirror span[style*="color"]', { hasText: 'Farbig' }))`
+   `.toHaveCount(1)` — es prüft nur die **Existenz** eines Farb-Spans, nicht seinen berechneten
+   Wert. Ein `toHaveCSS('color', …)` existiert bislang **nirgends** in `tests/e2e/`; das einzige
+   `toHaveCSS`-Vorbild im Repo ist `toHaveCSS('text-align', 'center')`
+   (`roundtrip-fidelity.spec.ts:58/129/179/243`). Der hier verlangte berechnete-Farbwert-Check
+   ist damit ein **neues**, aber von Playwright voll unterstütztes und zum `text-align`-Muster
+   analoges Pattern — nicht eine Übernahme eines vorhandenen Farb-Checks. Beide Prüfarten sind
+   zulässig und ergänzen sich: `toHaveCount(1)` auf `span[style*="color"]` (Struktur, wie
+   `docx.spec.ts:303`) **und** `toHaveCSS('color', 'rgb(…)')` (tatsächlich gerenderte Farbe).
+   **Zwei Fallstricke, die deterministisch aufzulösen sind:**
+   - Der Teilstring `color` matcht auch `background-color` (Hervorhebung). Bei **kombinierten**
+     Marks (Schriftfarbe + Hervorhebung) rendert die App verschachtelte Spans (`strong span span`,
+     verifiziert an `clipboard.spec.ts:165`): ein Span trägt `color:`, der andere
+     `background-color:`. `span[style*="color"]` + `hasText` trifft dann **beide** →
+     Strict-Mode-Verstoß bei `toHaveCSS`. Lösung: den **berechneten** `color` auf dem
+     text-tragenden Blattknoten (bzw. einem eindeutigen Vorfahren wie `strong`) prüfen —
+     `color` **vererbt** in der CSS-Kaskade nach unten, d. h. jedes Element **innerhalb** des
+     Farb-Spans meldet `rgb(255, 0, 0)`, unabhängig davon, welcher der geschachtelten Spans
+     getroffen wird. Das macht die berechnete-Farbe-Assertion robust gegen die Span-Schachtelung
+     und umgeht zugleich die Strict-Mode-Mehrdeutigkeit.
+   - Für reine Schriftfarbe (kein Highlight) ist `editor.locator('span[style*="color"]',
+     { hasText: '<Text>' })` eindeutig; erst bei zusätzlichem Highlight per Kontext
+     disambiguieren.
+5. **`pageerror`-Wächter in jedem Test** (siehe `beforeEach` oben). „Kein Absturz"
+   ist in mehreren Grenzfällen (4.3, 4.5, 4.6, 4.10) eine explizite Assertion und
+   darf nicht implizit bleiben.
+6. **Download deterministisch abfangen:** `const downloadPromise = page.waitForEvent('download')`
+   **vor** dem Klick auf „Exportieren" anlegen, dann `const download = await downloadPromise`,
+   `await download.path()` und die Datei per `fs.readFile` + `JSZip.loadAsync` lesen —
+   Muster wie `docx.spec.ts:79`. Nie den Klick vor dem Anlegen des Promise.
+7. **Ein Event pro Absicht.** Nach `setTextColor(...)` erst per web-first Assertion den
+   entstandenen DOM-/Farbzustand bestätigen, bevor eine davon abhängige Folgeaktion
+   (erneutes Selektieren, zweite Farbe, Export) ausgelöst wird — nicht zwei
+   voneinander abhängige Zustandsänderungen im selben Microtask aufeinanderstapeln.
 
 ### 2.1 Grundverhalten (Anforderung Testfall 1/2, Abschnitt 3.1)
 
 | # | Testfall | Schritte | Assertion |
 |---|---|---|---|
-| 1 | Setzen auf Selektion | Text tippen → `ControlOrMeta+a` → `colorInput(page).fill('#ff0000')` | `editor.locator('span[style*="color"]')` enthält den Text; `locator.evaluate(el => getComputedStyle(el).color)` liefert `rgb(255, 0, 0)` |
-| 2 | Entfernen | Fortsetzung von #1: `removeButton(page).click()` | Farb-`span` verschwindet, Text bleibt inhaltlich unverändert, `getComputedStyle` liefert die geerbte Standardfarbe |
+| 1 | Setzen auf Selektion | Text tippen → `ControlOrMeta+a` → `setTextColor(page, '#ff0000')` | `await expect(editor.locator('span[style*="color"]', { hasText: '<Text>' })).toHaveCSS('color', 'rgb(255, 0, 0)')` (web-first, Regel 3/4) |
+| 2 | Entfernen | Fortsetzung von #1: `removeButton(page).click()` | `await expect(editor.locator('span[style*="color"]')).toHaveCount(0)`; Textinhalt per `toContainText` unverändert (auto-retriend, keine manuelle `getComputedStyle`-Leseprüfung) |
 | 3 | Selektion bleibt nach Farbwahl unverändert | Text markieren, Farbe setzen, sofort `keyboard.type('X')` ohne erneute Selektion | `X` ersetzt die vormals selektierte Selektion nicht unerwartet an falscher Stelle — Selektionsgrenzen sind nach der Aktion erhalten (Anforderung 3.1, zweiter Punkt) |
 | 4 | Erneutes Setzen einer anderen Farbe ersetzt (kein additiver Effekt) | Farbe A setzen, dieselbe Selektion erneut markieren, Farbe B setzen | genau **eine** `textColor`-Mark mit Farbe B im DOM/Export, keine verschachtelten/doppelten `span[style*="color"]` |
 
@@ -197,7 +335,7 @@ je nach Testfall `odtCard`/`docxCard` „Neu erstellen" klicken.
 
 | # | Testfall | Schritte | Assertion |
 |---|---|---|---|
-| 1 | Farbe an leerer Schreibmarke wirkt jetzt auf neu getippten Text | Text tippen, `Home` (keine Selektion), `colorInput(page).fill('#ff0000')`, dann `keyboard.type('Neu')` | „Neu" erscheint in `span[style*="color: #ff0000"]`, vorher getippter Text bleibt unverändert in Standardfarbe |
+| 1 | Farbe an leerer Schreibmarke wirkt jetzt auf neu getippten Text | Text tippen, `Home` (keine Selektion), **`await settle(page)`** (Regel 2 — der `Home`-Move muss vor dem Tippen synchronisiert sein), `setTextColor(page, '#ff0000')`, dann `keyboard.type('Neu')` | „Neu" liegt in `span[style*="color"]` (per `hasText: 'Neu'`), `await expect(el).toHaveCSS('color', 'rgb(255, 0, 0)')` (Regel 4 — nicht per Hex-Attribut-Substring); vorher getippter Text bleibt in Standardfarbe |
 | 2 | Test-Kommentar verweist explizit auf die getroffene Entscheidung | — | Testname/Kommentar nennt „schriftfarbe-code.md Abschnitt 3.3 — Entscheidung: nachrüsten", damit der geänderte Erwartungswert gegenüber der ursprünglichen Anforderung nachvollziehbar bleibt |
 | 3 | „⌫" an leerer Schreibmarke wirkt konsistent | Farbe an Schreibmarke setzen (wie #1, aber noch nichts getippt), `removeButton(page).click()`, dann tippen | neu getippter Text erscheint **ohne** Farbe |
 
@@ -212,7 +350,7 @@ je nach Testfall `odtCard`/`docxCard` „Neu erstellen" klicken.
 | # | Testfall | Schritte | Assertion |
 |---|---|---|---|
 | 1 | Gemischte Selektion (teils farbig, teils nicht) | „AB" tippen, nur „A" rot färben, dann beide Zeichen selektieren, Farbe Blau setzen | gesamte Selektion „AB" ist danach einheitlich blau, keine JS-Exception (`page.on('pageerror', ...)`-Assertion über den ganzen Test) |
-| 2 | Fett + Unterstrichen + Schriftfarbe + Hervorhebungsfarbe gemeinsam | Text markieren, `getByTitle('Fett')`, `getByTitle('Unterstrichen')` klicken, `colorInput(page).fill(...)`, `input[aria-label="Hervorhebungsfarbe"].fill(...)` | Text liegt in `strong`/`u` **und** hat beide Inline-Farb-Styles gleichzeitig; jedes Merkmal einzeln wieder entfernbar (je ein Test pro Merkmal), Rest bleibt beim Entfernen unangetastet |
+| 2 | Fett + Unterstrichen + Schriftfarbe + Hervorhebungsfarbe gemeinsam | Text markieren, `getByTitle('Fett')`, `getByTitle('Unterstrichen')` klicken, `setTextColor(page, ...)`, `setHighlight(page, ...)` | Text liegt in `strong`/`u` **und** hat beide Inline-Farb-Styles gleichzeitig; jedes Merkmal einzeln wieder entfernbar (je ein Test pro Merkmal), Rest bleibt beim Entfernen unangetastet. **Assertion-Hinweis (Regel 4):** Die App rendert die Kombi als verschachtelte Spans (`strong span span`, verifiziert `clipboard.spec.ts:165`); `span[style*="color"]` trifft dabei sowohl den `color:`- als auch den `background-color:`-Span → Strict-Mode-Verstoß. Deshalb Schriftfarbe über den **berechneten** `color` am text-tragenden Blattknoten (`toHaveCSS('color','rgb(255, 0, 0)')`, vererbt sich nach unten) und Hervorhebung über den **berechneten** `background-color` am jeweils tragenden Span prüfen; Struktur (`strong`/`u`) separat per `toHaveCount(1)` |
 | 3 | Setzen der einen Farbe verliert nicht die andere | Schriftfarbe **und** Hervorhebungsfarbe setzen, danach nur Schriftfarbe erneut ändern | Hervorhebungsfarbe bleibt nach der zweiten Aktion unverändert bestehen (Anforderung 3.7) |
 | 4 | `formatierung-loeschen` — nicht anwendbar | — | **kein Test**, explizit als „nicht anwendbar, Zielfunktion `formatierung-loeschen` Status `fehlt`" im Testfile vermerkt (Anforderung 3.6) |
 | 5 | Absatzformat-Wechsel lässt Zeichenfarbe unangetastet | Farbigen Text markieren, Absatzformat auf „Überschrift 1" wechseln und zurück auf „Standard" | Zeichenfarbe bleibt während und nach beiden Wechseln erhalten (Anforderung 3.9 Punkt 2) |
@@ -227,13 +365,13 @@ aussieht".
 
 | # | Szenario | Ablauf | Assertion an heruntergeladener Datei |
 |---|---|---|---|
-| 1 | DOCX-Eigenrundreise | Neu erstellen → tippen → markieren → `colorInput(page).fill('#ff0000')` → Export → Re-Import (neue Seite/`setInputFiles` mit heruntergeladener Datei) | `word/document.xml` enthält `<w:color w:val="[Ff]{2}0000"/>` exakt am erwarteten Lauf; nach Re-Import zeigt der Editor die Farbe erneut |
+| 1 | DOCX-Eigenrundreise | Neu erstellen → tippen → markieren → `setTextColor(page, '#ff0000')` → Export → Re-Import (neue Seite/`setInputFiles` mit heruntergeladener Datei) | `word/document.xml` enthält `<w:color w:val="[Ff]{2}0000"/>` exakt am erwarteten Lauf; nach Re-Import zeigt der Editor die Farbe erneut |
 | 2 | ODT-Eigenrundreise | wie 1, ODT-Karte | `content.xml` enthält `fo:color="#ff0000"` (case-insensitiv verglichen) |
 | 3 | Cross-Format DOCX → ODT | DOCX mit Farbe hochladen (per JSZip gebaut) → als ODT exportieren → Re-Import | exportiertes `content.xml` enthält `fo:color`, Editor zeigt Farbe nach Re-Import |
 | 4 | Cross-Format ODT → DOCX | umgekehrt | `word/document.xml` enthält `<w:color w:val="…"/>` |
 | 5 | Doppelte Cross-Format-Rundreise | DOCX → Editor → ODT (Export+Re-Import) → DOCX (Export+Re-Import) → Editor | Farbe nach zweifachem Formatwechsel weiterhin vorhanden, case-insensitiv identisch zum Ursprungswert |
 | 6 | Echte Fremddatei DOCX | Upload `tests/fixtures/external/docx/Tika-792.docx` (echtes `w:val="FF0000"`) | Editor zeigt Text in Rot; **Pflicht laut Abnahmekriterium 2** |
-| 7 | Echte Fremddatei ODT | Upload `tests/fixtures/external/odt/coloredParagraph.odt` | Editor zeigt farbigen Text; **Pflicht laut Abnahmekriterium 2** |
+| 7 | Echte Fremddatei ODT | Upload `tests/fixtures/external/odt/character-styles.odt` (verifiziert: Span mit `fo:color="#ff0000"` in `content.xml`) | Editor zeigt den betreffenden Span in Rot (`toHaveCSS('color','rgb(255, 0, 0)')`); **Pflicht laut Abnahmekriterium 2**. **Nicht** `coloredParagraph.odt` verwenden — diese Datei enthält verifiziert **kein** `fo:color` (Span verweist auf einen farblosen Textstil) und ist als Farb-Fixture untauglich (`schriftfarbe-code.md` Abschnitt 0.1 Punkt 2). |
 | 8 | Unabhängige XML-Validierung DOCX | Export von Szenario 6 (**ohne** vorherige Änderung) erneut exportieren, `word/document.xml` per Regex/`DOMParser`, **ohne `readDocx` zu benutzen**, prüfen | `/<w:color\s+w:val="[Ff]{2}0000"\s*\/>/` matcht; **Pflicht laut Abnahmekriterium 2** |
 | 9 | Unabhängige XML-Validierung ODT | analog für Szenario 7, `content.xml` | `fo:color="#[Ff]{2}0000"` per Regex bestätigt; **Pflicht laut Abnahmekriterium 2** |
 | 10 | Kombinierte Rundreise (Anforderung Rundreise-Testfall 8) | Text fett+unterstrichen+farbig, zweiter Lauf farbig+hervorgehoben, über Rundreise 1–5 hinweg | alle Merkmale je Lauf nach jeder Rundreise-Variante korrekt erhalten |
@@ -252,7 +390,7 @@ aussieht".
 
 | # | Testfall | Schritte | Assertion |
 |---|---|---|---|
-| 1 | Sequenz Tippen → Farbe A → Farbe B → Entfernen → Tippen | `keyboard.type('Text')` → `ControlOrMeta+a` → `colorInput(page).fill('#ff0000')` → erneut markieren → `colorInput(page).fill('#0000ff')` → erneut markieren → `removeButton(page).click()` → `keyboard.type('Ende')` | jeder Schritt liefert das erwartete Zwischenergebnis (Farbe A sichtbar → Farbe B sichtbar → keine Farbe → „Ende" ohne Farbe) |
+| 1 | Sequenz Tippen → Farbe A → Farbe B → Entfernen → Tippen | `keyboard.type('Text')` → `ControlOrMeta+a` → `setTextColor(page, '#ff0000')` → erneut markieren → `setTextColor(page, '#0000ff')` → erneut markieren → `removeButton(page).click()` → `keyboard.type('Ende')` | jeder Schritt liefert das erwartete Zwischenergebnis (Farbe A sichtbar → Farbe B sichtbar → keine Farbe → „Ende" ohne Farbe) |
 | 2 | Einzelschritte per Strg+Z zurücknehmbar | Fortsetzung von #1: mehrfach `ControlOrMeta+z`, nach jedem Tastendruck Editor-Zustand prüfen | Zustand kehrt schrittweise zu „nur Farbe B", „nur Farbe A", „keine Farbe", „kein Text" zurück, in dieser Reihenfolge |
 | 3 | Strg+Y/Strg+Umschalt+Z stellt wieder her | Fortsetzung: `ControlOrMeta+y` mehrfach | Zustände werden in umgekehrter Reihenfolge wiederhergestellt |
 | 4 | Anzahl der durch `fill()` ausgelösten Undo-Schritte dokumentiert | Kommentar im Test, kein separates Assertion-Ziel | verweist auf Fix `schriftfarbe-code.md` Abschnitt 3.4 (`change`- statt `input`-Bindung): `fill()` in Playwright löst ohnehin nur ein Event aus, das eigentliche „viele Zwischenschritte beim echten Ziehen"-Risiko ist **nicht** durch Playwright automatisiert nachweisbar, siehe Abschnitt 2.8 (manuell) |
@@ -268,7 +406,7 @@ aussieht".
 | 5 | 4.5 | Selektion Text + angrenzendes Bild | Bild einfügen, Selektion von Text bis einschließlich Bild-Block aufspannen, Farbe setzen | kein Absturz; Text im Bereich erhält Farbe, Bild selbst bleibt unverändert |
 | 6 | 4.6 | siehe Abschnitt 2.4 #1 | — | — |
 | 7 | 4.7 | Erneutes Anwenden derselben Farbe | Farbe setzen, dieselbe Farbe erneut auf derselben Selektion setzen | im Export genau **ein** `<w:color>`/ein Textstil, keine verdoppelte/verschachtelte Mark |
-| 8 | 4.8 | Schriftfarbe = Hintergrundfarbe (Weiß auf Weiß) | `colorInput(page).fill('#ffffff')` | kein Absturz, Export enthält `#ffffff` unverändert (Datenintegrität unabhängig von Lesbarkeit) |
+| 8 | 4.8 | Schriftfarbe = Hintergrundfarbe (Weiß auf Weiß) | `setTextColor(page, '#ffffff')` | kein Absturz, Export enthält `#ffffff` unverändert (Datenintegrität unabhängig von Lesbarkeit) |
 | 9 | 4.9 | siehe Abschnitt 2.5 #11 | — | — |
 | 10 | 4.10 | Ungültiger Farbwert aus Fremddatei | Upload einer per JSZip gebauten ODT mit `fo:color="notacolor"` | Text erscheint in geerbter Farbe (Browser ignoriert ungültigen CSS-Wert), kein JS-Fehler |
 | 11 | 4.11 | siehe Abschnitt 2.6 #1/#2 | — | — |
@@ -296,26 +434,45 @@ aussieht".
 **Erweiterung der bestehenden Datei** `tests/e2e/selection-regression.spec.ts`
 (nicht neue, separate Datei — Abnahmekriterium 3 verlangt „dauerhaft
 verankert"). Übernimmt den Aufbau des bestehenden Fett-Tests exakt (siehe
-`schriftfarbe-code.md` Abschnitt 8.2), nur mit `colorInput(page).fill('#ff0000')`
+`schriftfarbe-code.md` Abschnitt 8.2), nur mit `setTextColor(page, '#ff0000')`
 statt `getByTitle('Fett').click()`:
 
 ```ts
 test('same regression with "Schriftfarbe" instead of "Fett" (Grenzfall 4.18 / Testfall 6)', async ({ page }) => {
+  const errors = []
+  page.on('pageerror', (e) => errors.push(e))
   const editor = page.locator('.ProseMirror')
   await editor.click()
   await page.keyboard.type('Hallo, das ist ein Test.')
+
   await page.keyboard.press('ControlOrMeta+a')
-  await page.locator('input[aria-label="Textfarbe"]').fill('#ff0000')
+  await setTextColor(page, '#ff0000')          // pickColor, NICHT fill() (Regel 1)
+  // Farbe wirklich angekommen? Erst bestätigen, dann weiter (Regel 7).
+  await expect(
+    editor.locator('span[style*="color"]', { hasText: 'Hallo, das ist ein Test.' }),
+  ).toHaveCSS('color', 'rgb(255, 0, 0)')
+
   await editor.click()
   await page.keyboard.press('End')
+  // Pflicht-Puffer (Regel 2): der native "End"-Caret-Move wird nur asynchron
+  // über selectionchange nachgezogen; ein sofortiges "Enter" kann davor
+  // rennen und den Absatz an der falschen Stelle brechen. Identisch zu
+  // selection-regression.spec.ts:34.
+  await settle(page)
   await page.keyboard.press('Enter')
   await page.keyboard.type('Zweiter Absatz.')
+
   await expect(editor).toContainText('Hallo, das ist ein Test.')
   await expect(editor).toContainText('Zweiter Absatz.')
   await expect(page.locator('.ProseMirror p')).toHaveCount(2)
   // Kernpunkt von Grenzfall 4.18: nicht nur "Absätze überleben", sondern
-  // "Absätze behalten ihre jeweils korrekte Formatierung".
-  await expect(editor.locator('p', { hasText: 'Hallo, das ist ein Test.' })).toHaveCSS('color', 'rgb(255, 0, 0)')
+  // "Absätze behalten ihre jeweils korrekte Formatierung". Die textColor-Mark
+  // liegt auf dem <span> IM ersten Absatz, nicht auf dem <p> selbst — daher
+  // gezielt den Span prüfen (nicht das <p>, dessen computed color schwarz bliebe).
+  await expect(
+    editor.locator('p', { hasText: 'Hallo, das ist ein Test.' }).locator('span[style*="color"]'),
+  ).toHaveCSS('color', 'rgb(255, 0, 0)')
+  expect(errors).toEqual([])
 })
 ```
 
@@ -351,7 +508,12 @@ Explizit festgehalten, damit sie nicht stillschweigend übergangen werden
    Abschnitt 3.4 höchstens ein Undo-Schritt pro abgeschlossener Farbwahl
    entsteht, und dass der Dialog dabei nicht vorzeitig durch wiederholten
    `view.focus()`-Aufruf schließt.
-4. **Manuelle unabhängige Parser-Validierung** (Abschnitt 1.5 Punkt 2).
+4. **Optionale zusätzliche unabhängige Parser-Validierung** (Abschnitt 1.5
+   Punkt 3) — python-docx/LibreOffice. **Kein** Abnahmegate: Der
+   Pflicht-Nachweis für Rundreise-Testfall 7 läuft bereits automatisiert über
+   die erweiterten `external-validation.test.ts` (ODF-RNG-Schema für ODT,
+   mammoth-Öffnen für DOCX) und die Regex/DOM-Prüfung in §2.5 #8/#9. Dieser
+   manuelle Schritt ist nur eine ergänzende Absicherung.
 5. Ergebnis von 1–4 fließt in die endgültige Statusänderung „vorhanden" →
    „verifiziert" in `specs/FEATURE-BACKLOG.md` ein, sobald durchgeführt.
 
@@ -372,7 +534,7 @@ Explizit festgehalten, damit sie nicht stillschweigend übergangen werden
 | Grenzfälle 4.1–4.19 | Unit + E2E, je dediziert | `schriftfarbe.spec.ts` §2.8, Querverweise siehe Tabelle dort |
 | Rundreise-Testfälle 1–9 (Abschnitt 6) | Unit + E2E | `roundtrip.test.ts`/`textColor.test.ts` (Abschnitt 1) + `schriftfarbe.spec.ts` §2.5 |
 | Rundreise-Testfall 6 (echte Fremddatei) | E2E, Pflicht | `schriftfarbe.spec.ts` §2.5 #6/#7 |
-| Rundreise-Testfall 7 (unabhängiger Parser) | E2E (automatisiert Regex/DOM) + manuell | `schriftfarbe.spec.ts` §2.5 #8/#9, Abschnitt 1.5/2.12 #4 |
+| Rundreise-Testfall 7 (unabhängiger Parser) | Unit (Schema/Fremdparser) + E2E (Regex/DOM an heruntergeladener Datei) | **`odt/__tests__/external-validation.test.ts` + `docx/__tests__/external-validation.test.ts` (je Farb-Fall ergänzt, Abschnitt 1.5)** + `schriftfarbe.spec.ts` §2.5 #8/#9; python-docx nur optional (§1.5 Punkt 3/§2.12 #4) |
 | Testfälle 1–12 (Abschnitt 7) | E2E | `schriftfarbe.spec.ts` §2.1–2.9 |
 | Testfall 6/Grenzfall 4.18 (Selection-Sync-Regression) | E2E, Pflicht dauerhaft | `selection-regression.spec.ts` (erweitert), §2.10 |
 | Testfall 11 (⌫-Rendering) | manuell | Abschnitt 2.12 #1 |
@@ -390,8 +552,11 @@ Explizit festgehalten, damit sie nicht stillschweigend übergangen werden
       `change`-Event-Bindung) sind umgesetzt.
 - [ ] `npm test` grün, inkl. `docx/__tests__/textColor.test.ts`,
       `docx/__tests__/writer-escaping.test.ts`,
-      `odt/__tests__/textColor.test.ts` und der Erweiterungen der beiden
-      `roundtrip.test.ts`-Dateien.
+      `odt/__tests__/textColor.test.ts`, der Erweiterungen der beiden
+      `roundtrip.test.ts`-Dateien **und** der um je einen `textColor`-Fall
+      erweiterten `docx/__tests__/external-validation.test.ts` (mammoth öffnet
+      fehlerfrei) und `odt/__tests__/external-validation.test.ts` (exportiertes
+      `content.xml` validiert gegen das OASIS-ODF-1.3-RNG) — Abschnitt 1.5.
 - [ ] `npm run test:e2e` grün, inkl. `schriftfarbe.spec.ts` und der
       Erweiterung von `selection-regression.spec.ts`.
 - [ ] Jeder Grenzfall aus Anforderung Abschnitt 4 (4.1–4.19) hat mindestens
@@ -405,8 +570,11 @@ Explizit festgehalten, damit sie nicht stillschweigend übergangen werden
 - [ ] Regressionstest zu Grenzfall 4.18 dauerhaft in
       `selection-regression.spec.ts` verankert (Abnahmekriterium 3).
 - [ ] Manuelle Prüfschritte aus Abschnitt 2.12 (⌫-Rendering ≥2 Systeme,
-      natives Dialogverhalten, Undo-Schrittanzahl beim echten Ziehen,
-      unabhängige Parser-Validierung) durchgeführt und Ergebnis vermerkt.
+      natives Dialogverhalten, Undo-Schrittanzahl beim echten Ziehen)
+      durchgeführt und Ergebnis vermerkt. Die unabhängige Parser-Validierung
+      (Rundreise-Testfall 7) ist bereits über die erweiterten
+      `external-validation.test.ts` automatisiert abgedeckt; der python-docx-Schritt
+      (§2.12 #4) ist nur optionale Zusatzabsicherung, kein Blocker.
 - [ ] Entscheidung zum Verhalten bei leerer Selektion
       (`schriftfarbe-code.md` Abschnitt 3.3: „nachrüsten") ist über
       `schriftfarbe.spec.ts` §2.2 verifiziert (Abnahmekriterium 4).

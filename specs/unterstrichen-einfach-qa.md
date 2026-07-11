@@ -4,272 +4,373 @@ Gegenstück zu `specs/unterstrichen-einfach-req.md` (verbindliche Anforderung) u
 `specs/unterstrichen-einfach-code.md` (Dev-Umsetzungsplan mit Code-Audit). Dieser Plan
 beschreibt, **wie** die in der Anforderung Abschnitt 6/8 geforderte Verifikation konkret
 als automatisierte Tests umgesetzt wird — Datei für Datei, Testfall für Testfall,
-zurückgeführt auf tatsächlich im Repo vorhandene Selektoren, Fixtures und Funktionsnamen
-(gegengeprüft am Stand dieses Repos, nicht nur an den beiden Spec-Dateien).
+zurückgeführt auf tatsächlich im Repo vorhandene Selektoren, Fixtures, Funktionsnamen und
+**bereits etablierte, committete Test-Konventionen** (gegengeprüft am Stand dieses Repos,
+nicht nur an den beiden Spec-Dateien).
 
 **Nicht Ziel dieses Dokuments:** Bugs zu fixen. Ziel ist, Tests so zu schreiben, dass sie
-den in `unterstrichen-einfach-code.md` Abschnitt 3 dokumentierten Ist-Zustand — inklusive
-der beiden dort neu gefundenen, **noch nicht behobenen** Bugs — ehrlich sichtbar machen,
-statt ihn durch zu lasche Assertions oder übersprungene Tests zu verschleiern (das ist
-exakt die Kritik aus Anforderungsabschnitt 7 an bisherige Praxis).
+den in `unterstrichen-einfach-code.md` Abschnitt 3 dokumentierten Ist-Zustand ehrlich
+sichtbar machen, statt ihn durch zu lasche Assertions oder übersprungene Tests zu
+verschleiern (das ist exakt die Kritik aus Anforderungsabschnitt 7).
+
+**Zweiter, gleichrangiger Fokus (Auftrag QA):** Alle E2E-Tests müssen **deterministisch**
+sein. Der häufigste Flakiness-Grund in diesem Repo ist eine Race-Condition zwischen
+Playwrights Null-Verzögerungs-Tastatur und ProseMirrors **asynchronem**
+`selectionchange`-Sync. Sie ist bereits mehrfach real reproduziert und in mehreren
+committeten Tests dokumentiert und behoben worden (siehe Commits `0797d13`, `db61c89`,
+`9f8fa03` sowie die Kommentare in `tests/e2e/selection-regression.spec.ts` und
+`tests/e2e/cut.spec.ts`). Abschnitt 3 dieses Plans macht die daraus abgeleiteten Regeln
+**verbindlich** — jeder Testfall unten wendet sie an. Ein Testfall, der eine Selektion per
+`Shift+Pfeil` aufbaut oder den Cursor per Klick/Taste neu setzt und **unmittelbar** darauf
+eine selektionsabhängige Aktion auslöst, ohne die Sync-Regel zu befolgen, gilt in diesem
+Plan als fehlerhaft.
+
+**Kritische Überarbeitung gegenüber dem Vorentwurf dieses QA-Dokuments.** Der Vorentwurf
+war inhaltlich brauchbar, aber in vier Punkten technisch falsch bzw. nicht deterministisch
+und wurde deshalb korrigiert (Details jeweils an Ort und Stelle vermerkt):
+
+1. **Determinismus fehlte in den E2E-Snippets.** Mehrere Snippets bauten Selektionen per
+   `Shift+Pfeil` ohne Per-Tasten-Delay und ohne den `waitForTimeout(50)`-Sync-Puffer auf,
+   und der `U-GF-8`-Snippet ließ den **im committeten Original zwingenden**
+   `waitForTimeout(50)` zwischen `End` und `Enter` weg — er hätte damit exakt die schon
+   behobene Flakiness aus `selection-regression.spec.ts` wieder eingeschleppt. Korrigiert.
+2. **Cross-Format-Rundreisen `U-RT-3/4/5` unterstellten einen UI-Export-Pfad, den die App
+   nicht hat.** `src/app/DocumentWorkspace.tsx` besitzt **genau einen** „Exportieren"-Button,
+   der immer `module.exportFile(...)` für das Format aufruft, in dem das Dokument geöffnet
+   wurde — **kein** Format-Umschalter (verifiziert; dieselbe Feststellung steht bereits
+   committet in `cut.spec.ts` bei „Rundreise 4/5"). Cross-Format ist per UI **nicht**
+   auslösbar. Deshalb werden die Cross-Format-Rundreisen (Req Abschnitt 5.3/5.4/5.5)
+   ehrlich auf die **Unit-Ebene** (`readDocx`→`writeOdt`→`readOdt` usw.) verlagert; E2E
+   deckt nur die per UI tatsächlich möglichen **Gleichformat**-Rundreisen ab. Siehe 4.6/5.3.
+3. **Der Re-Import-Snippet in `U-RT-1` war kaputt** (toter `downloadPromise2`, `page.reload()`
+   statt des etablierten Rückweges). Ersetzt durch das committete Muster aus
+   `docx.spec.ts`/`cut.spec.ts`: Download-Bytes aus `download.path()` lesen, über den
+   „← Formate"-Button (`getByRole('button', { name: /formate/i })`) zurück zur
+   Formatauswahl, dann echter Re-Upload über den Karten-`input[type="file"]`.
+4. **Der Export-Helper scopte den „Exportieren"-Button auf eine Karte.** Der Button liegt
+   in der Workspace-Kopfzeile, **nicht** in der Karte (die Karten sind nach dem Öffnen gar
+   nicht mehr im DOM). Der Helper nutzt jetzt korrekt `page.getByRole('button', { name:
+   'Exportieren' })`.
+5. **Die Primärnachweise für Defekt A und B fehlten als konkrete Testfälle.** Der Vorentwurf
+   nannte Defekt A (Button per Tastatur) und Defekt B (`aria-pressed` folgt `storedMarks`)
+   nur im Abnahme-Mapping, schrieb aber **keinen** ausführbaren Test dafür: `U-TF-3` prüft
+   nur Strg+U (Keymap-Pfad, **anderer** Codepfad als der Button), und `U-TF-5` prüft nur den
+   Cursor-in-unterstrichenem-Text-Fall (den der heutige `$from.marks()`-Code bereits
+   erfüllt), **nicht** den `storedMarks`-Fall. Ergänzt: `U-TF-4a` (Button-Fokus + Enter/Space)
+   und `U-TF-8` (nach Strg+U an leerer Schreibmarke sofort `aria-pressed="true"`, vor dem
+   Tippen). Beide sind heute erwartet rot und in Abschnitt 10 als „Fix im selben PR"
+   geführt. Zusätzlich Zitat korrigiert: die Keymap-Bindings liegen in `WordEditor.tsx:93-100`
+   (`Mod-u` bei `:100`), nicht `:85-92` (das ist der Kommentarblock).
 
 **Gegengeprüft am aktuellen Code (Stand dieses QA-Plans):** `src/formats/odt/reader.ts`
 liest `<style:text-properties>` in `parseAutomaticStyles` weiterhin nur für
-`family === 'text'` (Zeile 47–61), `family === 'paragraph'` wertet nur
-`paragraph-properties`/`fo:text-align` aus (Zeile 62–66); `decodeInline`/`walk` ruft für
-jedes direkte `<text:p>`-Kind weiterhin `walk(child, [])` auf (Zeile 118) und kennt nur
-`text:span`/`text:line-break`/`text:s`/`text:tab` (Zeile 104–115) — `<text:a>` fällt
-weiterhin durch. `src/formats/docx/reader.ts`, `marksFromRunProperties` (Zeile 99–105)
-konsultiert weiterhin nur das `<w:rPr>` des Laufs selbst, keinen Formatvorlagen-Default
-aus `styles.xml`. Die in `unterstrichen-einfach-code.md` Abschnitt 3.1–3.5 vorgeschlagenen
-Fixes sind **zum Zeitpunkt dieses Testplans noch nicht implementiert.** Der Testplan ist
-so geschrieben, dass er unabhängig vom Fix-Zeitpunkt korrekt bleibt (Abschnitt 7 dieses
-Dokuments benennt genau, welche Tests deshalb aktuell absichtlich ROT sind).
+`family === 'text'`; `family === 'paragraph'` wertet nur `fo:text-align` aus. Der
+DOCX-Reader (`marksFromRunProperties`) konsultiert weiterhin nur das `<w:rPr>` des Laufs
+selbst, keinen Formatvorlagen-Default. Die in `unterstrichen-einfach-code.md`
+Abschnitt 3.1/3.2 vorgeschlagenen Fixes sind zum Zeitpunkt dieses Testplans **noch nicht
+implementiert.** Abschnitt 10 dieses Dokuments benennt genau, welche Tests deshalb den Bug
+adressieren und wie sie CI-grün und trotzdem ehrlich gehalten werden.
 
 ---
 
-## 1. Testumgebung & Rahmenbedingungen
+## 1. Testumgebung & Rahmenbedingungen (verifiziert)
 
 | Aspekt | Wert |
 |---|---|
-| Unit-Test-Runner | Vitest (`jsdom`-Environment), Befehl `npm test` (= `vitest run`) bzw. `npm run test:watch` |
+| Unit-Test-Runner | Vitest (`jsdom`-Environment), Befehl `npm test` (= `vitest run`) |
 | E2E-Runner | Playwright, Befehl `npm run test:e2e` (= `playwright test`), Config `playwright.config.ts` |
-| E2E Base-URL | `http://localhost:4173/salamanido/` (Preview-Build, `webServer` startet `npm run build && npm run preview -- --port 4173` automatisch) |
-| E2E-Projekte | „Desktop Chrome", „Mobile" (Pixel 7), „Tablet" (iPad Mini) — alle drei Projekte laufen für jede `.spec.ts`-Datei; Unterstrichen-Tests laufen dadurch automatisch auch auf Touch-Viewports mit |
-| Bestehende Testdateien (Referenz für Konventionen) | `tests/e2e/docx.spec.ts`, `tests/e2e/odt.spec.ts`, `tests/e2e/selection-regression.spec.ts`, `src/formats/{docx,odt}/__tests__/roundtrip.test.ts`, `src/formats/{docx,odt}/__tests__/external-fixtures.test.ts` |
-| Fixture-Verzeichnisse | `tests/fixtures/external/docx/`, `tests/fixtures/external/odt/` (reale, nicht selbst erzeugte Dateien aus Apache-POI-/ODF-Toolkit-Testkorpora) |
-| Reale UI-Selektoren (verifiziert im Code) | Privacy-Banner: `page.getByRole('button', { name: /verstanden/i })`; Karten: `div.rounded-lg` mit Heading „Word-Dokument (.docx)" bzw. „OpenDocument Text (.odt)"; „Neu erstellen"/„Exportieren"-Buttons je Karte; Editor: `.ProseMirror`; Toolbar-Button: `page.getByTitle('Unterstrichen')` (analog `'Fett'`, `'Kursiv'`, `'Durchgestrichen'`); Datei-Upload: `<card>.locator('input[type="file"]')`; Bild-Upload: Label „🖼 Bild" mit `input[type="file"][accept="image/*"]`; Tabelle einfügen: `getByRole('button', { name: 'Tabelle einfügen' })`; Textfarbe/Hervorhebung: `input[aria-label="Textfarbe"]` / `input[aria-label="Hervorhebungsfarbe"]` |
+| E2E Base-URL | `http://localhost:4173/salamanido/` (Preview-Build; `webServer` in der Config startet Build + Preview automatisch) |
+| E2E-Projekte | „Desktop Chrome" (Chromium), „Mobile" (Pixel 7, **Chromium** mit Touch-Emulation), „Tablet" (iPad Mini, **WebKit**) — jede `.spec.ts` läuft auf allen dreien |
+| Referenz-Testdateien (Konventionen) | `tests/e2e/docx.spec.ts`, `tests/e2e/odt.spec.ts`, `tests/e2e/cut.spec.ts`, `tests/e2e/selection-regression.spec.ts`, `tests/e2e/fixtures/builders.ts`, `src/formats/{docx,odt}/__tests__/roundtrip.test.ts`, `.../external-fixtures.test.ts`, `.../external-validation.test.ts` |
+| Fixture-Verzeichnisse | `tests/fixtures/external/docx/`, `tests/fixtures/external/odt/` (reale Fremddateien; alle unten genannten Fixtures **im Repo vorhanden verifiziert**) |
+| Shared Builder-Helfer (E2E) | `tests/e2e/fixtures/builders.ts`: `buildSampleDocx()`, `buildSampleOdt()`, `DOCX_MIME`, `ODT_MIME` — **wiederverwenden statt duplizieren** |
+
+### 1.1 Verifizierte UI-Fakten (aus tatsächlicher Codelektüre, nicht angenommen)
+
+- **Landing/Karten:** Nach `page.goto('/')` erst Privacy-Banner bestätigen
+  (`page.getByRole('button', { name: /verstanden/i }).click()`). Zwei Karten (`div.rounded-lg`)
+  mit Heading „Word-Dokument (.docx)" bzw. „OpenDocument Text (.odt)"; je Karte ein Button
+  „Neu erstellen" und ein `input[type="file"]`.
+- **Toolbar-Button „U":** `page.getByTitle('Unterstrichen')`; `title` **und** `aria-label`
+  = „Unterstrichen"; `aria-pressed` reaktiv aus `markType.isInSet($from.marks())`
+  (`Toolbar.tsx:69,75`); Auslösung per `onMouseDown`+`preventDefault` → `toggleMark` →
+  `view.focus()` (Selektion/Fokus bleiben erhalten). Analog `getByTitle('Fett')`,
+  `'Kursiv'`, `'Durchgestrichen'`, `'Aufzählung'`, `'Tabelle einfügen'`.
+- **Tastenkürzel (verifiziert in `WordEditor.tsx:93-100`; die Zeilen `86-92` darüber sind der
+  Zwischenablage-Kommentarblock, **nicht** die Bindings):** `Mod-z` = Undo (`:93`),
+  `Mod-y` UND `Mod-Shift-z` = Redo (`:94`/`:95`, **beide** gebunden — Tests dürfen jede der
+  beiden Varianten verwenden), `Mod-b` = Fett (`:98`), `Mod-i` = Kursiv (`:99`),
+  **`Mod-u` = Unterstrichen (`:100`)** — deckt sich mit der ausdrücklichen Korrektur in
+  `req` Abschnitt 0.1 / `code.md` (die Vorfassungen nannten fälschlich `:92`). In Playwright
+  stets `ControlOrMeta+…` schreiben (deckt Windows/Linux und macOS ab).
+- **Toolbar-Re-Render (verifiziert `WordEditor.tsx:125-132`):** `dispatchTransaction` ruft
+  `forceRender` auf **jeder** Transaktion, auch bei **selektions-only**-Änderungen (kein
+  `docChanged`). Deshalb aktualisiert sich `aria-pressed` auch nach reinen Caret-Bewegungen
+  (Pfeiltasten, Klick) — aber **asynchron**, weil native Caret-Moves ProseMirror erst über
+  `selectionchange` erreichen. Konsequenz für die Tests: `aria-pressed`-Prüfungen nach einem
+  Caret-Move **immer** web-first (`await expect(button).toHaveAttribute(...)`, R4), nie als
+  Einmal-Auslesung. Das ist die Code-Grundlage für die Determinismus von `U-TF-5`/`U-TF-6`/
+  `U-TF-8`.
+- **Farb-Selektor-Schärfe (verifiziert `schema.ts:182-194`):** `textColor.toDOM` →
+  `['span', { style: 'color: …' }, 0]`, `highlight.toDOM` →
+  `['span', { style: 'background-color: …' }, 0]`. `span[style*="color"]` matcht daher
+  **beide** (auch `background-color` enthält den Substring). In `U-TF-7`/`U-RT-8` wird **keine**
+  Hervorhebungsfarbe gesetzt → kein Fehlmatch; sobald ein Test Text- **und**
+  Hervorhebungsfarbe kombiniert, auf `span[style*="color:"]` + separaten
+  `span[style*="background-color"]`-Check verschärfen.
+- **Textfarbe:** `<input type="color" aria-label="Textfarbe">` (`Toolbar.tsx:194`), löst
+  `onChange` → `applyMarkColor('textColor', value)` aus. In Playwright per
+  `page.getByLabel('Textfarbe').fill('#ff0000')` bedienbar (`fill` auf `type=color`
+  dispatcht das change-Event). Analog „Hervorhebungsfarbe".
+- **Export:** **Ein** Button in der Workspace-Kopfzeile:
+  `page.getByRole('button', { name: 'Exportieren' })` (`DocumentWorkspace.tsx:124-142`).
+  **Kein** Cross-Format-Umschalter (siehe Intro Punkt 2). Download über
+  `page.waitForEvent('download')`, Bytes über `await download.path()` + `fs.readFile`.
+- **Zurück zur Formatauswahl (für Re-Import):**
+  `page.getByRole('button', { name: /formate/i }).click()` („← Formate",
+  `DocumentWorkspace.tsx:108-114`), danach Karten-`input[type="file"]` erneut befüllen.
+- **Bild-Upload:** `page.locator('label:has-text("Bild")').locator('input[type=file]')`
+  (Toolbar-Geschwister, **nicht** im `.ProseMirror` verschachtelt).
+- **Schema (verifiziert `schema.ts:157-198`):** Mark-Reihenfolge `strong, em, underline,
+  strike, textColor, highlight`. ProseMirror verschachtelt Marks in dieser Schema-Rang-
+  Reihenfolge → kombiniert fett+unterstrichen rendert als `<strong><u>…</u></strong>`
+  (Selektor `.ProseMirror strong u` matcht). `underline.parseDOM` matcht **exakt**
+  `text-decoration=underline` → zusammengesetzter Paste-Wert `underline line-through` wird
+  **nicht** getroffen (Grundlage von Grenzfall 16).
 
 ---
 
 ## 2. Teststrategie-Überblick
 
-Zwei unabhängige, sich ergänzende Ebenen, wie in Anforderungsabschnitt 7 gefordert —
-**keine ersetzt die andere**:
+Zwei unabhängige, sich ergänzende Ebenen — **keine ersetzt die andere**:
 
 | Ebene | Beweist | Beweist NICHT |
 |---|---|---|
-| **A. Unit-Tests (Vitest)**, Abschnitt 4 dieses Plans | Reader/Writer-Funktionen sind für gegebenes XML/JSON korrekt (inkl. Verhalten gegen echte Fremddatei-Bytes aus dem Fixture-Korpus) | dass der Toolbar-Button klickbar ist, dass Strg+U im echten Editor funktioniert, dass der Button-Zustand sich mit dem Cursor mitbewegt, dass ein über die UI erzeugtes Dokument dieselbe Struktur wie handgebautes JSON erzeugt |
-| **B. E2E-Tests (Playwright, echter Browser)**, Abschnitt 5 dieses Plans | Klick/Tastatur wirken im echten DOM, Datei-Upload über echtes `<input type="file">`, Export über echten Browser-Download-Event, heruntergeladene Datei wird nachträglich entpackt und ihr XML-Inhalt geprüft | Detailverhalten einzelner Reader-Codepfade bei exotischen XML-Varianten (dafür sind die Unit-Tests da — im Browser ließe sich das nur mit unzumutbarem Aufwand nachbauen) |
-
-Beide Ebenen zusammen decken Anforderungsabschnitt 6 (Testfälle), Abschnitt 5
-(Rundreise) und Abschnitt 4 (Grenzfälle) ab. Die Zuordnung im Detail steht in Abschnitt 6
-dieses Plans.
+| **A. Unit-Tests (Vitest)**, Abschnitt 4 | Reader/Writer sind für gegebenes XML/JSON korrekt (inkl. echter Fremddatei-Bytes und **Cross-Format**, das per UI gar nicht auslösbar ist) | dass der Button klickbar ist, Strg+U im echten Editor wirkt, der Button-Zustand dem Cursor folgt, ein über die UI erzeugtes Dokument dieselbe Struktur wie handgebautes JSON hat |
+| **B. E2E-Tests (Playwright)**, Abschnitt 5 | Klick/Tastatur im echten DOM, echter Datei-Upload über `<input type="file">`, echter Export über den Browser-`download`-Event, heruntergeladene Datei entpackt und ihr XML geprüft | Detailverhalten exotischer XML-Varianten (dafür Ebene A); **Cross-Format** (UI kann es nicht) |
 
 ---
 
-## 3. Testfall-Nomenklatur
+## 3. Determinismus-Regeln (verbindlich für alle E2E-Tests)
 
-Jeder Testfall wird mit einer stabilen ID benannt, die in Commit-Messages, PR-Beschreibungen
-und im Testnamen selbst wiederverwendet wird, damit Abnahme (Anforderungsabschnitt 8)
-eindeutig nachvollziehbar bleibt:
+Diese Regeln sind aus real reproduzierten Races abgeleitet und in bereits committeten
+Tests belegt. **Jeder** E2E-Testfall unten wendet sie an; Reviewer prüfen ihre Einhaltung.
 
-- `U-TF-<n>` — Testfall n aus Anforderungsabschnitt 6.
-- `U-GF-<n>` — Grenzfall n aus Anforderungsabschnitt 4.
-- `U-RT-<n>` — Rundreise-Testfall n aus Anforderungsabschnitt 5.
-- `U-BUG-<n>` — während dieser Verifikation gefundener, in `unterstrichen-einfach-code.md`
-  Abschnitt 3 dokumentierter Fehler (Nummerierung folgt der dortigen Abschnittsnummer,
-  z. B. `U-BUG-3.1`).
+### R1 — `Shift+Pfeil`-Selektionen: Per-Tasten-Delay + Sync-Puffer
+
+Aufbau einer Selektion mit `Shift+ArrowLeft/Right/Up/Down` ist nativ (Browser), ProseMirror
+erfährt davon nur über das **asynchrone** `selectionchange`-Event. Eine Kette von
+Null-Delay-Keydowns, unmittelbar gefolgt von einer selektionsabhängigen Aktion (Button-Klick,
+`Strg+X`, weiterer Tastendruck), kann die Sync überholen und auf einer **falschen** Selektion
+operieren (in `cut.spec.ts` verifiziert: `window.getSelection()` meldete korrekt, die real
+betroffene Zeichenzahl schwankte dennoch zwischen 1 und 11).
+
+**Regel:** (a) jeder `Shift+Arrow`-Druck mit `{ delay: 20 }`; (b) nach `keyboard.up('Shift')`
+und **vor** der nächsten Aktion `await page.waitForTimeout(50)`.
+
+```ts
+await page.keyboard.down('Shift')
+for (let i = 0; i < n; i++) await page.keyboard.press('ArrowRight', { delay: 20 })
+await page.keyboard.up('Shift')
+await page.waitForTimeout(50) // Sync-Puffer, siehe cut.spec.ts / selection-regression.spec.ts
+await page.getByTitle('Unterstrichen').click()   // erst JETZT selektionsabhängige Aktion
+```
+
+Ausnahme: `ControlOrMeta+a` (Select-All) ist über `baseKeymap` an `selectAll` gebunden und
+dispatcht die `AllSelection` **synchron** — danach ist **kein** Puffer nötig (so auch in
+`docx.spec.ts`/`cut.spec.ts`).
+
+### R2 — Cursor neu setzen und danach tippen: Sync-Puffer
+
+Nach einem Klick zum Neupositionieren oder einem nativen Caret-Move (`End`, `Home`, `Arrow`
+ohne Shift) und einem **unmittelbar** folgenden Tastendruck denselben `waitForTimeout(50)`
+einfügen. Das ist der Kern des Selection-Sync-Bugs aus Grenzfall 8 (`selection-regression.spec.ts`):
+`End` → `waitForTimeout(50)` → `Enter`. **Dieser Puffer darf in `U-GF-8` nicht fehlen.**
+
+### R3 — Getrennte Undo-Schritte: History-Group-Delay
+
+`prosemirror-history` fasst zeitlich nahe Transaktionen (Default `newGroupDelay` ≈ 500 ms)
+zu **einem** Undo-Schritt zusammen. Wenn ein Test verlangt, dass eine Aktion ein **eigener**
+Undo-Schritt ist (z. B. „Tippen", dann „Unterstrichen an" als getrennt rückgängig machbar),
+vor der abzugrenzenden Aktion `await page.waitForTimeout(600)` einfügen (so committet in
+`cut.spec.ts` Testfall 9).
+
+### R4 — Nur web-first-Assertions für Endzustände
+
+Endzustände immer über auto-retryende Assertions prüfen (`await expect(locator).toHaveText/
+toContainText/toHaveCount/toHaveAttribute(...)`), **nie** einen Wert nach einem manuellen
+`waitForTimeout` einmalig auslesen und vergleichen. `waitForTimeout` wird ausschließlich als
+Sync-Puffer **vor einer Aktion** (R1–R3) verwendet, nie als Ersatz für eine Assertion.
+
+### R5 — Projekt-Matrix-Fallen (WebKit-Clipboard, Mobile-CI)
+
+- **Clipboard-Tests** (Paste mit `navigator.clipboard`, `grantPermissions`) sind nur unter
+  Chromium zuverlässig: `test.skip(browserName !== 'chromium', '…')` (so in `cut.spec.ts`
+  Testfall 12). Betrifft hier den Paste-Test 5.4.
+- **Konsolen-/JS-Fehler-Assertion** über den etablierten Helfer `watchForConsoleErrors(page)`
+  aus `cut.spec.ts` (sammelt `pageerror` + `console.error`, assert am Ende `toEqual([])`) —
+  für alle „kein Crash"-Grenzfälle statt ad-hoc `page.on('pageerror', …)`.
+- **Mobile-CI-Sonderfall:** Eine per `Shift+Pfeil` bis ans **Dokumentende** aufgebaute
+  Selektion, unmittelbar gefolgt von einer Aktion, ist in GitHub-Actions-Headless auf dem
+  „Mobile"-Projekt einmal als vollständiger No-Op beobachtet worden (lokal nie reproduzierbar,
+  siehe `cut.spec.ts` „Rundreise 1/2"). Die Unterstrichen-Rundreisen 5.3 vermeiden das
+  bewusst, indem sie **`ControlOrMeta+a`** (synchron, R1-Ausnahme) statt einer
+  End-erreichenden `Shift+Pfeil`-Kette verwenden. Testfälle, die dennoch eine solche Kette
+  brauchen (`U-TF-6` gemischte Selektion), erhalten denselben dokumentierten
+  `test.skip(testInfo.project.name === 'Mobile', …)`-Vorbehalt **nur falls** sich die
+  CI-Instabilität dort zeigt — zuerst ohne Skip einchecken, Skip erst bei belegter CI-Flake.
 
 ---
 
 ## 4. Teil A — Unit-Tests Reader/Writer-Rundreise (Vitest)
 
-### 4.1 Bestehender Test — Ist-Stand, keine Änderung nötig
+### 4.1 Bestehender Test — bleibt, ersetzt aber nichts
 
-`src/formats/docx/__tests__/roundtrip.test.ts` und
-`src/formats/odt/__tests__/roundtrip.test.ts`, jeweils Testfall
-`'preserves bold, italic, underline, and strikethrough independently'` (Zeile 57–78):
-konstruiert ProseMirror-JSON mit `marks: [{ type: 'underline' }]`, schreibt via
-`writeDocx`/`writeOdt`, liest via `readDocx`/`readOdt` zurück, prüft
-`marks` `toEqual([{ type: 'underline' }])`. Bleibt Teil der Suite (deckt den einfachsten
-Eigenrundreise-Fall ab), ersetzt aber laut Anforderungsabschnitt 7 **nicht** die unten
-stehenden Fremddatei- und Formatvorlagen-Tests.
+`src/formats/{docx,odt}/__tests__/roundtrip.test.ts`, Testfall
+`'preserves bold, italic, underline, and strikethrough independently'` (verifiziert:
+DOCX Zeile 65/73/83, ODT analog): konstruiert ProseMirror-JSON mit `underline`, schreibt/liest
+über `writeDocx`/`readDocx` bzw. `writeOdt`/`readOdt`, prüft `marks` `toEqual([{ type:
+'underline' }])`. Deckt den einfachsten Eigenrundreise-Fall ab; ersetzt laut
+Anforderungsabschnitt 7 **nicht** die Fremddatei-, Formatvorlagen- und Cross-Format-Tests.
 
 ### 4.2 Neu: `src/formats/docx/__tests__/underline.test.ts`
 
-**Test-Helper:** analog `tests/e2e/docx.spec.ts::buildSampleDocx` — minimaler, selbst
-gebauter DOCX-Zip (JSZip), unabhängig vom eigenen Writer, mit steuerbarem
-`document.xml`- **und** `styles.xml`-Inhalt (letzteres neu, für 4.2.2 benötigt).
-
-```ts
-import JSZip from 'jszip'
-import { readDocx } from '../reader'
-
-const W_NS = 'xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"'
-
-async function buildDocx(bodyXml: string, stylesXmlExtra = ''): Promise<Blob> {
-  const zip = new JSZip()
-  zip.file('[Content_Types].xml', /* wie buildSampleDocx in tests/e2e/docx.spec.ts */ CONTENT_TYPES_XML)
-  zip.folder('_rels')!.file('.rels', RELS_XML)
-  zip.folder('docProps')!.file('core.xml', CORE_XML)
-  zip.folder('word')!.file(
-    'document.xml',
-    `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:document ${W_NS}><w:body>${bodyXml}</w:body></w:document>`,
-  )
-  zip.folder('word')!.file(
-    'styles.xml',
-    `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:styles ${W_NS}>${stylesXmlExtra}</w:styles>`,
-  )
-  return new Blob([await zip.generateAsync({ type: 'nodebuffer' })])
-}
-
-function firstRunMarks(result: Awaited<ReturnType<typeof readDocx>>): string[] {
-  const run = (result.body as any).content[0].content[0]
-  return (run.marks ?? []).map((m: any) => m.type)
-}
-```
-
-**Testfälle:**
+Handgebauter DOCX-Zip (JSZip) mit steuerbarem `document.xml` **und** `styles.xml`, analog
+`buildSampleDocx` (`tests/e2e/fixtures/builders.ts`) bzw. den bestehenden Reader-Tests —
+unabhängig vom eigenen Writer.
 
 | # | Testname | Eingabe | Erwartung |
 |---|---|---|---|
-| 4.2.1 | `w:val="single"` → underline erkannt | `<w:r><w:rPr><w:u w:val="single"/></w:rPr><w:t>Text</w:t></w:r>` | `marks` enthält `underline` |
-| 4.2.2 | `w:val="none"` → kein underline | dito mit `w:val="none"` | `marks` enthält **kein** `underline` |
-| 4.2.3 (`U-GF-9`) | `w:val` ∈ {`double`, `wave`, `dotted`, `dash`} — Fremdwerte, im Korpus nicht vorhanden, daher **handgebaut** | je ein Testfall pro Wert (`it.each`) | Reader vereinfacht aktuell auf „einfach" (Mark `underline` gesetzt) — Test fixiert dieses **dokumentierte** Fallback-Verhalten explizit, kein stiller Bug (siehe Anforderung Abschnitt 4, Grenzfall 9) |
-| 4.2.4 (`U-GF-14`) | `w:val="NONE"`, `w:val="SINGLE"` (Großschreibung) | `it.each` | **Aktuell (unfixed) erwartetes Ergebnis:** `NONE` wird NICHT als `none` erkannt (Code vergleicht exakten Kleinbuchstaben-String, Zeile 105) → Mark wird fälschlich gesetzt. Test dokumentiert das als `U-BUG-3.4` (siehe Abschnitt 7) — **nicht** einfach das aktuell falsche Verhalten als „grün" fixieren, sondern mit Kommentar `// aktuell: Großschreibung wird nicht normalisiert, siehe unterstrichen-einfach-code.md Abschnitt 3.4` versehen, damit der Test beim Fix bewusst angepasst werden muss |
-| 4.2.5 (`U-BUG-3.2`, aus `unterstrichen-einfach-code.md` Abschnitt 3.2) | Absatz referenziert Formatvorlage `TitleTest` (`<w:pStyle w:val="TitleTest"/>`), `styles.xml` enthält `<w:style w:type="paragraph" w:styleId="TitleTest"><w:rPr><w:u w:val="single"/></w:rPr></w:style>`, Lauf selbst hat **kein** eigenes `<w:u>` | `readDocx` | **Aktuell (unfixed) erwartetes Ergebnis: Mark `underline` fehlt** (Bug, siehe Abschnitt 7). Test ist bewusst so geschrieben, dass er nach Umsetzung des in `unterstrichen-einfach-code.md` Abschnitt 3.2/4.2 vorgeschlagenen Fixes von ROT auf GRÜN kippt — Assertion lautet auf das **korrekte** Soll-Verhalten (`expect(...).toContain('underline')`), der Test bleibt also bewusst rot bis zum Fix, nicht grün-geschönt |
-| 4.2.6 | Wie 4.2.5, aber Lauf hat zusätzlich eigenes `<w:u w:val="none"/>` | `readDocx` | Eigenes Element muss Formatvorlagen-Default überschreiben → **kein** `underline` (auch nach Fix; heute bereits „richtig grün", weil der Lauf sein eigenes `<w:u>` hat und der fehlende Default-Fallback hier folgenlos ist) |
-| 4.2.7 | Kombination Fett+Farbe+Unterstrichen auf demselben Lauf (`<w:b/><w:color w:val="FF0000"/><w:u w:val="single"/>`) | `readDocx` | alle drei Marks gleichzeitig vorhanden, unabhängig voneinander |
+| 4.2.1 | `w:val="single"` → underline | `<w:r><w:rPr><w:u w:val="single"/></w:rPr><w:t>Text</w:t></w:r>` | `marks` enthält `underline` |
+| 4.2.2 | `w:val="none"` → kein underline | dito `w:val="none"` | **kein** `underline` |
+| 4.2.3 (`U-GF-9`) | Fremdwerte `w:val` ∈ {`double`,`wave`,`dotted`,`dash`} (im Korpus nicht vorhanden → handgebaut), `it.each` | je ein Wert | Reader vereinfacht **bewusst** auf „einfach" → `underline` gesetzt. Test fixiert dieses **dokumentierte Fallback** (Req Grenzfall 9), kein stiller Bug |
+| 4.2.4 (`U-GF-14`) | Groß-/Kleinschreibung `w:val="NONE"` / `"SINGLE"`, `it.each` | | **Ist-Verhalten heute** (Code vergleicht exakt kleingeschrieben, `reader.ts:105-106`): `"NONE"` wird **nicht** als none erkannt → Mark fälschlich gesetzt. Siehe Härtung 3.3 in code.md. Handhabung CI-grün: Abschnitt 10 (`it.fails`-Markierung mit Kommentar), **nicht** das falsche Verhalten als „richtig" fixieren |
+| 4.2.5 (`U-BUG-3.2`) | Absatz `<w:pStyle w:val="TitleTest"/>`, `styles.xml` mit `<w:style w:type="paragraph" w:styleId="TitleTest"><w:rPr><w:u w:val="single"/></w:rPr></w:style>`, Lauf **ohne** eigenes `<w:u>` | `readDocx` | **Soll:** `underline` vorhanden. **Heute (unfixed):** fehlt (Reader liest keinen Formatvorlagen-Default). Assertion auf das **korrekte Soll**; CI-Handhabung siehe Abschnitt 10 |
+| 4.2.6 | wie 4.2.5, Lauf hat zusätzlich `<w:u w:val="none"/>` | `readDocx` | Lauf-eigenes Element überschreibt Default → **kein** `underline` (heute schon grün, weil der Lauf sein eigenes `<w:u>` hat) |
+| 4.2.7 | Fett+Farbe+Unterstrichen am selben Lauf (`<w:b/><w:color w:val="FF0000"/><w:u w:val="single"/>`) | `readDocx` | alle drei Marks gleichzeitig, unabhängig |
 
 ### 4.3 Neu: `src/formats/odt/__tests__/underline.test.ts`
 
-**Test-Helper — Fremddatei-Loader** (analog `external-fixtures.test.ts`):
+Fremddatei-Loader analog `external-fixtures.test.ts` (`readOdt(new Blob([readFileSync(...)]))`),
+plus Hilfsfunktionen `underlinedTexts(node)`/`allTexts(node)` (rekursiv über `content`).
+
+| # | Fixture | Erwartung |
+|---|---|---|
+| 4.3.1 | `character-styles.odt` | „Lorem ipsum" (family=text-Span, `solid`+italic) trägt `underline` — **heute grün**, sauberer Span-Fall; empfohlener Fremddatei-Kandidat für die ODT-Rundreise |
+| 4.3.2 | `UNDERLINE.odt` | enthält `solid` **und** `none` → mindestens ein Knoten mit, mindestens einer ohne `underline` |
+| 4.3.3 (`U-GF-10`/`U-GF-14`) | `InvalidUnderlineAttribute.odt` (`"ImSoInvalid"`) | Fallback „vorhanden und `!== 'none'`" → Mark **gesetzt** (dokumentiertes Soll, **heute grün** — per code.md Abschnitt 1.1 verifiziert) |
+| 4.3.4 (`U-BUG-3.1`, kritisch) | `Tabelle1.odt` | Fünf Absätze „Gomez bewege sich zu wenig" ohne `<text:span>`, Absatzstil trägt Unterstreichung (P83 **`solid`** = in-scope, P86 `wave`, P92 `dotted`+bold). **Soll:** ≥1 Mark je Absatz. **Heute (unfixed):** `marks` leer. Assertion auf Soll; CI-Handhabung Abschnitt 10 |
+| 4.3.5 | handgebauter Minimalfall: `<text:p text:style-name="Ppara">Direkter Text</text:p>`, `Ppara` = `family="paragraph"` mit eigener `<style:text-properties style:text-underline-style="solid"/>` | wie 4.3.4, aber gezielt mit dem **in-scope**-Wert `solid` — beweist den relevanten Fall unabhängig von `Tabelle1.odt`s Fremdwerten |
+| 4.3.6 (`U-BUG-3.3`, Korrektur ggü. Vorentwurf) | `hyperlinkSpaces.odt` | **Text überlebt** den Import (12 Läufe inkl. „Kapitel", per code.md Abschnitt 1.1/3.5 verifiziert — der Vorentwurf-Befund „`<text:a>` verschluckt Text" ist **falsch**). Verloren geht nur die Unterstreichung, wegen unaufgelöster `parent-style-name`-Vererbung — **out of scope** (`hyperlink-einfuegen-req.md`). Test dokumentiert genau das; **kein** Rundreise-Kandidat |
+| 4.3.7 | Negativ-/Doku-Testfall | Kommentar im File: `hyperlinkSpaces.odt`, `hyperlink.odt`, `Hyperlink-AOO401.odt`, `hyperlink_destination.odt`, `hyperlinkSpacesNoUnderline.odt` **nicht** als Underline-Rundreise-Beleg verwenden (Grund: 4.3.6, `parent-style-name`, nicht Textverlust) |
+
+### 4.4 Erweiterung `src/formats/odt/__tests__/roundtrip.test.ts`
+
+- **`U-GF-11` (Stilnamen-Dedup):** gleiche Markkombination (`strong`+`underline`) in
+  **unterschiedlicher** Array-Reihenfolge in zwei Textknoten → Export erzeugt **genau eine**
+  `<style:style style:name="T…">`-Definition. (Härtung 3.4; im UI-Datenfluss aktuell nicht
+  auslösbar, deshalb reine Registry-Härtung — Priorität niedrig, siehe Abschnitt 10.)
+- **`U-GF-12` (nur Underline):** Dokument mit **genau einer** Formatkombination — nur
+  `underline` — exportieren; prüfen, dass `isEmpty` (`styleRegistry.ts:12-14`) diese
+  Kombination **nicht** als leer verwirft und `buildTextStyleXml` korrekt
+  `style:text-underline-style="solid" style:text-underline-width="auto"
+  style:text-underline-color="font-color"` schreibt, ohne parallele leere Stildefinition.
+- **`U-GF-13` (Performance):** ein Textlauf ~500 000 Zeichen mit `underline` durch
+  `writeOdt`/`readOdt` (und analog DOCX) mit großzügigem Zeitbudget (`performance.now()`,
+  z. B. < 2000 ms) — Regressionsschutz gegen versehentlich quadratische Komplexität, kein
+  strenger Benchmark. Niedrige Priorität.
+
+### 4.5 Erweiterung `src/formats/docx/__tests__/external-validation.test.ts`
+
+Fehlendes DOCX-Schema-Validierungs-Pendant zu `odt/__tests__/external-validation.test.ts:64`
+(Req 5.7 / DoD 2): ein DOCX mit `underline`-Run über `writeDocx` exportieren und gegen das
+OOXML-Schema mit dem **bereits als Dev-Dependency vorhandenen** `xmllint-wasm` validieren
+(gleiche Mechanik wie der bestehende ODT-Validierungstest).
+
+### 4.6 Neu: Cross-Format-Rundreisen als Unit-Tests (`U-RT-3/4/5`)
+
+**Begründung (korrigiert):** Cross-Format-Export ist per UI **nicht** auslösbar (Intro
+Punkt 2 / `DocumentWorkspace.tsx`). Req Abschnitt 5.3/5.4/5.5 verlangt trotzdem den Nachweis,
+dass Unterstreichung einen Formatwechsel übersteht. Das ist auf Reader/Writer-Ebene
+**deterministisch und vollständig** prüfbar und gehört daher hierher, nicht in E2E.
+
+Neu: `src/formats/__tests__/cross-format-underline.test.ts` (oder je ein Block in den
+beiden `underline.test.ts`):
 
 ```ts
-import { readFileSync } from 'node:fs'
-import { join } from 'node:path'
-import { readOdt } from '../reader'
+// U-RT-3  DOCX -> ODT -> zurück
+const a = await readDocx(fixture('docx/52449.docx'))     // reale Word-Datei, 9 underline-Runs
+const odt = await writeOdt(a)
+const b = await readOdt(odt)
+expect(underlinedTexts(b.body)).toEqual(underlinedTexts(a.body)) // gleiche Stellen, kein Verlust
 
-const FIXTURES_DIR = join(__dirname, '../../../../tests/fixtures/external/odt')
+// U-RT-4  ODT -> DOCX -> zurück
+const c = await readOdt(fixture('odt/character-styles.odt')) // "Lorem ipsum" underline (Span, in-scope)
+const docx = await writeDocx(c)
+const d = await readDocx(docx)
+expect(underlinedTexts(d.body)).toContain('Lorem ipsum')
 
-async function loadFixture(name: string) {
-  return readOdt(new Blob([readFileSync(join(FIXTURES_DIR, name))]))
-}
-
-function underlinedTexts(node: any): string[] {
-  const out: string[] = []
-  ;(function visit(n: any) {
-    if (n.type === 'text' && (n.marks ?? []).some((m: any) => m.type === 'underline')) out.push(n.text)
-    n.content?.forEach(visit)
-  })(node)
-  return out
-}
-
-function allTexts(node: any): string[] {
-  const out: string[] = []
-  ;(function visit(n: any) {
-    if (n.type === 'text') out.push(n.text)
-    n.content?.forEach(visit)
-  })(node)
-  return out
-}
+// U-RT-5  doppelte Runde DOCX -> ODT -> DOCX (kein kumulativer Verlust)
+const e = await readDocx(await writeDocx(await readOdt(await writeOdt(a))))
+expect(underlinedTexts(e.body)).toEqual(underlinedTexts(a.body))
 ```
 
-**Testfälle gegen reale, bereits im Repo liegende Fremddateien:**
-
-| # | Fixture | Testname | Erwartung |
-|---|---|---|---|
-| 4.3.1 | `character-styles.odt` | `<text:span style-name="T3">Lorem ipsum</text:span>` (family=text, `text-underline-style="solid"`) wird als underline erkannt | `underlinedTexts(...)` enthält `'Lorem ipsum'` — **heute bereits grün**, sauberer `<text:span>`-Fall, nicht von `U-BUG-3.1`/`3.3` betroffen; empfohlener „echte Fremddatei"-Kandidat für `U-RT-6`/`U-RT-7` (Anforderung Abschnitt 5, DoD Punkt 2) |
-| 4.3.2 | `UNDERLINE.odt` | enthält sowohl `solid` als auch `none`, beide über `<text:span>` | mindestens ein Textknoten mit, mindestens einer ohne `underline`-Mark |
-| 4.3.3 (`U-GF-10`/`U-GF-14`) | `InvalidUnderlineAttribute.odt` | nicht-standardkonformer Wert `"ImSoInvalid"` | Reader fällt auf „vorhanden und `!== 'none'`" zurück → Mark **wird** gesetzt (dokumentiertes, gewolltes Fallback-Verhalten, kein Bug — analog DOCX `U-GF-9`) |
-| 4.3.4 (`U-BUG-3.1`, kritisch) | `Tabelle1.odt` | Fünf Vorkommen des Absatzes `"Gomez bewege sich zu wenig"`, direkt (ohne `<text:span>`) Kind von `<text:p text:style-name="P86"/"P92">`, deren automatischer Stil `family="paragraph"` selbst `style:text-underline-style="wave"`/`"dotted"` trägt | **Aktuell (unfixed) erwartetes Ergebnis: alle fünf Textknoten haben `marks` leer/undefined** — Test dokumentiert dies als bestätigten, offenen Bug (`expect(gomez.every(r => !r.marks?.length)).toBe(true)` mit Kommentar, der auf `unterstrichen-einfach-code.md` Abschnitt 3.1 verweist). **Sobald der Fix umgesetzt ist, muss dieser Test umgedreht werden** auf `expect(gomez.every(r => r.marks?.length)).toBe(true)` — nicht vorher schon „grün lügen" |
-| 4.3.5 | Handgebauter Minimalfall: `<text:p text:style-name="Ppara">Direkter Text ohne Span</text:p>`, `Ppara` ist `family="paragraph"` mit `style:text-underline-style="solid"` auf **eigener** `<style:text-properties>` | analoges Muster zu 4.3.4, aber gezielt mit dem in dieser Anforderung **relevanten** Wert `solid` (nicht `wave`/`dotted`), damit der In-Scope-Fall nicht nur zufällig über `Tabelle1.odt`s Fremdwerte bewiesen wird | Gleiches Bug-Verhalten wie 4.3.4 heute; nach Fix: Mark `underline` vorhanden |
-| 4.3.6 (`U-BUG-3.3`, dokumentiert, **nicht** Teil dieses Tickets zu fixen) | `hyperlinkSpaces.odt` | Gesamter Absatzinhalt liegt in `<text:a>` | **Aktuell erwartetes Ergebnis: der komplette Textinhalt fehlt** (nicht nur die Formatierung) — Test dokumentiert diesen Bug explizit als „bekannt, gehört zu `hyperlink-einfuegen-req.md`", **nicht** als Underline-Regression fehlinterpretierbar. Deshalb **kein** Rundreise-Test für Underline gegen diese Datei (siehe 4.3.7) |
-| 4.3.7 | Negativ-Testfall / Dokumentation | `hyperlinkSpaces.odt`, `hyperlinkSpacesNoUnderline.odt`, `hyperlink.odt`, `Hyperlink-AOO401.odt`, `hyperlink_destination.odt` explizit **nicht** in `U-RT-6`/`U-RT-7` verwenden | Kommentar im Testfile, der auf `U-BUG-3.3` verweist, damit niemand versehentlich eines dieser Fixtures als „Beweis, Underline funktioniert mit Fremddateien" heranzieht |
-
-**Erweiterung `src/formats/odt/__tests__/roundtrip.test.ts` (`U-GF-11`):**
-
-```ts
-it('does not create duplicate automatic text styles for the same mark set in different array order', async () => {
-  const original = doc([
-    {
-      type: 'paragraph',
-      attrs: { align: 'left' },
-      content: [
-        { type: 'text', text: 'A', marks: [{ type: 'strong' }, { type: 'underline' }] },
-        { type: 'text', text: 'B', marks: [{ type: 'underline' }, { type: 'strong' }] },
-      ],
-    },
-  ])
-  const blob = await writeOdt(original)
-  const zip = await JSZip.loadAsync(blob)
-  const contentXml = await zip.file('content.xml')!.async('text')
-  const styleDefCount = (contentXml.match(/<style:style style:name="T\d+"/g) ?? []).length
-  expect(styleDefCount).toBe(1)
-})
-```
-
-Hinweis: Im aktuellen App-Datenfluss ist dieser Fall laut Code-Audit nicht über die UI
-auslösbar (ProseMirror hält Mark-Arrays konsistent in Schema-Rang-Reihenfolge) — der Test
-ist reine Härtung (`styleNameFor` in `odt/styleRegistry.ts` nutzt `JSON.stringify(props)`
-als Dedup-Key, Zeile 30) und **kann aktuell rot sein**, ohne dass ein über die UI
-reproduzierbarer Anwenderfehler existiert; Priorität entsprechend niedriger einstufen als
-4.3.4/4.2.5 (siehe Abschnitt 7).
-
-### 4.4 Grenzfall 12 (leerer Style-Registry-Eintrag, nur Underline)
-
-Neuer Testfall in `src/formats/odt/__tests__/roundtrip.test.ts` (Ergänzung, kein neues
-File): Dokument mit **genau einer** Formatkombination — nur `underline`, keine weitere
-Mark — exportieren, prüfen, dass genau eine Stildefinition erzeugt wird und dass
-`buildTextStyleXml` (`odt/styleRegistry.ts` Zeile 50–54) korrekt
-`style:text-underline-style="solid" style:text-underline-width="auto"
-style:text-underline-color="font-color"` schreibt, **ohne** dass durch die
-`isEmpty`-Prüfung (Zeile 13) eine leere Stildefinition parallel entsteht oder der Stil
-fälschlich als „leer" übersprungen wird.
-
-### 4.5 Grenzfall 13 (Performance, lange Läufe)
-
-Neuer Testfall (Vitest, mit `performance.now()`-Zeitmessung, großzügigem Toleranzbudget
-z. B. < 2000 ms): ProseMirror-JSON mit einem einzigen Textlauf von ca. 500.000 Zeichen,
-Mark `underline`, durch `writeDocx`/`writeOdt` → `readDocx`/`readOdt` schicken. Kein
-strenger Benchmark, sondern Regressionsschutz gegen eine versehentlich eingeführte
-quadratische Komplexität (z. B. String-Concat in einer Schleife). Ergänzt in
-`roundtrip.test.ts` beider Formate, nicht in einer eigenen Datei (geringe Priorität,
-siehe Abschnitt 7).
+Zusätzlich **`U-RT-8` (Kombi-Rundreise)** auf Unit-Ebene: konstruiertes JSON mit einem Lauf,
+der gleichzeitig `strong`+`underline`+`textColor` trägt, durch DOCX- und ODT-Rundreise
+schicken; prüfen, dass alle drei Marks **auf demselben Lauf** bleiben (nicht auf getrennte
+Runs aufgespalten). Ergänzt die UI-Kombi-Rundreise 5.3 (`U-RT-8` E2E) auf Datenebene.
 
 ---
 
 ## 5. Teil B — E2E-Tests (Playwright, echte Browser-Bedienung)
 
-Dies ist die zentrale, laut Anforderungsabschnitt 7 bislang fehlende Testebene. Alle
-Tests in diesem Abschnitt bedienen den echten Browser: Mausklicks auf reale Buttons,
-`page.keyboard.type`/`press` in den echten `contenteditable`-Editor, Datei-Uploads über
-echte `<input type="file">`-Elemente, Exporte über den echten `download`-Browser-Event
-mit anschließendem Entpacken (`JSZip`) und String-/Regex-Prüfung der resultierenden
-`document.xml`/`content.xml` — **nicht** interne Funktionsaufrufe von `readDocx`/`writeOdt`
-o. ä. Das entspricht exakt dem in Anforderungsabschnitt 7 geforderten Nachweis.
+Zentrale, laut Anforderungsabschnitt 7 bislang fehlende Ebene: echte Mausklicks,
+`keyboard.type/press` in den echten `contenteditable`, echte Datei-Uploads, Export über den
+echten `download`-Event mit nachträglichem Entpacken + Regex-Prüfung — **nie** interne
+`readDocx`/`writeOdt`-Aufrufe.
 
-### 5.1 Neue Datei: `tests/e2e/underline.spec.ts`
-
-Struktur, Helper (`odtCard`, `docxCard`) und Locator-Stil wörtlich übernommen aus
-`tests/e2e/odt.spec.ts`/`docx.spec.ts`/`selection-regression.spec.ts`, damit die Datei
-sich nahtlos in die bestehende Suite einfügt.
+### 5.1 Neue Datei: `tests/e2e/underline.spec.ts` — Helfer
 
 ```ts
-import { test, expect } from '@playwright/test'
+import { test, expect, type Page } from '@playwright/test'
 import JSZip from 'jszip'
+import { DOCX_MIME, ODT_MIME } from './fixtures/builders'
 
-function odtCard(page: import('@playwright/test').Page) {
-  return page.locator('div.rounded-lg', { has: page.getByRole('heading', { name: 'OpenDocument Text (.odt)' }) })
-}
-function docxCard(page: import('@playwright/test').Page) {
+function docxCard(page: Page) {
   return page.locator('div.rounded-lg', { has: page.getByRole('heading', { name: 'Word-Dokument (.docx)' }) })
 }
+function odtCard(page: Page) {
+  return page.locator('div.rounded-lg', { has: page.getByRole('heading', { name: 'OpenDocument Text (.odt)' }) })
+}
 
-async function downloadAndUnzip(page: import('@playwright/test').Page, exportButtonScope = page) {
+// Etablierter Konsolen-/JS-Fehler-Wächter (identisch cut.spec.ts).
+function watchForConsoleErrors(page: Page) {
+  const errors: string[] = []
+  page.on('pageerror', (err) => errors.push(String(err)))
+  page.on('console', (msg) => { if (msg.type() === 'error') errors.push(msg.text()) })
+  return () => expect(errors, `Unerwartete Konsolen-/JS-Fehler: ${errors.join('\n')}`).toEqual([])
+}
+
+// Export über den EINEN, page-weiten "Exportieren"-Button (NICHT auf eine Karte scopen —
+// die Karten sind nach dem Öffnen nicht mehr im DOM). Bytes aus download.path() lesen.
+async function exportAndUnzip(page: Page): Promise<JSZip> {
   const downloadPromise = page.waitForEvent('download')
-  await exportButtonScope.getByRole('button', { name: 'Exportieren' }).click()
+  await page.getByRole('button', { name: 'Exportieren' }).click()
   const download = await downloadPromise
   const path = await download.path()
   expect(path).toBeTruthy()
   const fs = await import('node:fs/promises')
-  const buffer = await fs.readFile(path!)
-  return JSZip.loadAsync(buffer)
+  return JSZip.loadAsync(await fs.readFile(path!))
+}
+
+// Rückweg zur Formatauswahl + echter Re-Upload (committetes Muster docx.spec.ts:331).
+async function reimport(page: Page, card: (p: Page) => ReturnType<typeof docxCard>, name: string, mimeType: string, buffer: Buffer) {
+  await page.getByRole('button', { name: /formate/i }).click()
+  await card(page).locator('input[type="file"]').setInputFiles({ name, mimeType, buffer })
 }
 ```
 
-#### 5.1.1 `describe('Unterstrichen (einfach) — Toolbar & Tastatur')` — `U-TF-1` … `U-TF-9`
+### 5.1.1 `describe('Unterstrichen (einfach) — Toolbar & Tastatur')` — `U-TF-1 … U-TF-9`
 
 ```ts
 test.describe('Unterstrichen (einfach) — Toolbar & Tastatur', () => {
@@ -279,24 +380,22 @@ test.describe('Unterstrichen (einfach) — Toolbar & Tastatur', () => {
     await odtCard(page).getByRole('button', { name: 'Neu erstellen' }).click()
   })
 
-  test('U-TF-1/2: Toolbar-Klick togglet Unterstreichung an und aus, Button-Zustand korrekt', async ({ page }) => {
+  test('U-TF-1/2: Toolbar-Klick togglet an und aus, aria-pressed korrekt', async ({ page }) => {
     const editor = page.locator('.ProseMirror')
     await editor.click()
     await page.keyboard.type('Testtext')
-    await page.keyboard.press('ControlOrMeta+a')
-
+    await page.keyboard.press('ControlOrMeta+a')          // R1-Ausnahme: synchron, kein Puffer
     const button = page.getByTitle('Unterstrichen')
     await expect(button).toHaveAttribute('aria-pressed', 'false')
     await button.click()
     await expect(button).toHaveAttribute('aria-pressed', 'true')
     await expect(editor.locator('u')).toContainText('Testtext')
-
     await button.click()
     await expect(button).toHaveAttribute('aria-pressed', 'false')
     await expect(editor.locator('u')).toHaveCount(0)
   })
 
-  test('U-TF-3: Strg+U liefert identisches Ergebnis wie Toolbar-Klick', async ({ page }) => {
+  test('U-TF-3: Strg+U liefert identisches Ergebnis wie der Klick', async ({ page }) => {
     const editor = page.locator('.ProseMirror')
     await editor.click()
     await page.keyboard.type('Tastaturtest')
@@ -321,43 +420,112 @@ test.describe('Unterstrichen (einfach) — Toolbar & Tastatur', () => {
     await expect(editor.locator('u')).not.toContainText('Nachher')
   })
 
-  test('U-TF-5: Button zeigt aktiven Zustand beim reinen Cursor-Verschieben (Pfeiltasten, kein Klick)', async ({ page }) => {
+  // U-TF-4a (Defekt A / code.md 3.8, Req Testfall 4) — PRIMÄRNACHWEIS für Defekt A:
+  // Der Toolbar-Button muss auch per TASTATUR auslösbar sein. Der heutige Code bindet nur
+  // `onMouseDown` (Toolbar.tsx:76-79); Enter/Leertaste auf einem nativen <button> feuern
+  // aber nur `click`, KEIN `mousedown` -> Toggle läuft bei Tastaturbedienung nie.
+  // -> HEUTE ERWARTET ROT, grün erst nach dem 3.8-Fix (onMouseDown behält nur
+  // preventDefault, Toggle wandert nach onClick). CI-Handhabung siehe Abschnitt 10.
+  // Strg+U (U-TF-3) deckt diesen Defekt NICHT ab — das läuft über die Keymap, einen
+  // anderen Codepfad; hier wird der Button selbst tastaturbedient.
+  test('U-TF-4a: Toolbar-Button per Tastatur auslösbar (Enter und Leertaste) — Defekt A', async ({ page }) => {
     const editor = page.locator('.ProseMirror')
+    const button = page.getByTitle('Unterstrichen')
     await editor.click()
-    await page.keyboard.type('abc')
-    await page.keyboard.press('Shift+ArrowLeft')
-    await page.keyboard.press('Shift+ArrowLeft')
-    await page.keyboard.press('Shift+ArrowLeft')
-    await page.getByTitle('Unterstrichen').click() // "abc" jetzt unterstrichen
-    await page.keyboard.press('Home')
-    await expect(page.getByTitle('Unterstrichen')).toHaveAttribute('aria-pressed', 'true')
-    await page.keyboard.type('X') // außerhalb der Unterstreichung, danach in normalem Text
-    await page.keyboard.press('End')
-    await expect(page.getByTitle('Unterstrichen')).toHaveAttribute('aria-pressed', 'false')
+    await page.keyboard.type('Tastaturbutton')
+    await page.keyboard.press('ControlOrMeta+a')       // synchron (R1-Ausnahme)
+    await button.focus()                               // entspricht Tab-Fokus, ohne Tab-Stops zu zählen
+    await expect(button).toBeFocused()
+    await page.keyboard.press('Enter')                 // Aktivierung per Enter -> Toggle an
+    await expect(editor.locator('u')).toContainText('Tastaturbutton')
+    await button.focus()                               // view.focus() gab Fokus an den Editor zurück
+    await page.keyboard.press('Space')                 // Aktivierung per Leertaste -> Toggle aus
+    await expect(editor.locator('u')).toHaveCount(0)
   })
 
-  test('U-TF-6/U-GF-4: gemischte Selektion und reine Leerzeichen-Selektion', async ({ page }) => {
+  // U-TF-8 (Defekt B / code.md 3.9, Req Testfall 5) — PRIMÄRNACHWEIS für Defekt B (storedMarks):
+  // Nach Strg+U an einer LEEREN Schreibmarke muss der Button SOFORT aktiv sein, BEVOR ein
+  // Zeichen getippt ist (toggleMark setzt state.storedMarks=[underline]). Der heutige Code
+  // liest nur `$from.marks()` (Toolbar.tsx:69) und ignoriert storedMarks -> Button bleibt
+  // fälschlich `false`. -> HEUTE ERWARTET ROT, grün nach dem 3.9-Fix (isMarkActive prüft
+  // state.storedMarks im Empty-Fall). CI-Handhabung siehe Abschnitt 10. aria-pressed ist
+  // web-first (R4); der Toggle setzt storedMarks synchron via Keymap, die Toolbar re-rendert
+  // über forceRender (WordEditor.tsx:131) auf jeder Transaktion.
+  test('U-TF-8: aria-pressed folgt storedMarks sofort nach Strg+U an leerer Schreibmarke (vor dem Tippen) — Defekt B', async ({ page }) => {
     const editor = page.locator('.ProseMirror')
+    const button = page.getByTitle('Unterstrichen')
+    await editor.click()
+    await page.keyboard.type('Vorher')                 // Cursor am Ende, KEINE Selektion
+    await page.keyboard.press('ControlOrMeta+u')        // setzt nur storedMarks, ändert das Dokument nicht
+    await expect(button).toHaveAttribute('aria-pressed', 'true')   // KERN: aktiv OHNE Dokumentänderung
+    await expect(editor.locator('u')).toHaveCount(0)    // storedMark != <u> im Dokument
+    await page.keyboard.type('Neu')                     // jetzt tippen -> unterstrichen
+    await expect(editor.locator('u')).toContainText('Neu')
+    await expect(button).toHaveAttribute('aria-pressed', 'true')   // bleibt aktiv im unterstrichenen Text
+  })
+
+  // U-TF-5: Aktiv-Zustand folgt dem Cursor OHNE neue Aktion. Deterministisch dank
+  // getrennter, klar unterstrichener vs. normaler Region und R2-Puffer nach jedem
+  // Caret-Move; die aria-pressed-Assertion retryt web-first (R4).
+  test('U-TF-5: Button-Aktiv-Zustand folgt der Cursorposition (Pfeiltasten, kein Klick)', async ({ page }) => {
+    const editor = page.locator('.ProseMirror')
+    const button = page.getByTitle('Unterstrichen')
+    await editor.click()
+    await page.keyboard.type('normal')
+    await page.keyboard.press('Enter')
+    await page.keyboard.type('unter')
+    // "unter" (Zeile 2) selektieren und unterstreichen — Selektion per Home+Shift+End (R1)
+    await page.keyboard.press('Home')
+    await page.keyboard.down('Shift')
+    await page.keyboard.press('End', { delay: 20 })
+    await page.keyboard.up('Shift')
+    await page.waitForTimeout(50)                 // R1-Puffer vor der Aktion
+    await button.click()
+    await expect(editor.locator('u')).toContainText('unter')
+    // Cursor mitten in "unter" -> aktiv
+    await page.keyboard.press('ArrowLeft')        // Selektion nach links kollabieren
+    await page.keyboard.press('ArrowRight')       // in den unterstrichenen Bereich
+    await expect(button).toHaveAttribute('aria-pressed', 'true')
+    // Cursor in "normal" (Zeile 1) -> inaktiv
+    await page.keyboard.press('ControlOrMeta+Home')
+    await expect(button).toHaveAttribute('aria-pressed', 'false')
+  })
+
+  // U-TF-6 / U-GF-4: gemischte Selektion (3.4) + reine-Leerzeichen-Selektion, kein Crash.
+  test('U-TF-6/U-GF-4: gemischte Selektion und Leerzeichen-Selektion', async ({ page }) => {
+    const assertNoErrors = watchForConsoleErrors(page)
+    const editor = page.locator('.ProseMirror')
+    const button = page.getByTitle('Unterstrichen')
     await editor.click()
     await page.keyboard.type('eins zwei')
-    // "eins " unterstreichen, "zwei" nicht
+    // nur "eins " unterstreichen (5 Zeichen) — R1
     await page.keyboard.press('Home')
-    for (let i = 0; i < 5; i++) await page.keyboard.press('Shift+ArrowRight')
-    await page.getByTitle('Unterstrichen').click()
-    // gesamte Selektion (gemischt) markieren und togglen
+    await page.keyboard.down('Shift')
+    for (let i = 0; i < 5; i++) await page.keyboard.press('ArrowRight', { delay: 20 })
+    await page.keyboard.up('Shift')
+    await page.waitForTimeout(50)
+    await button.click()
+    await expect(editor.locator('u')).toContainText('eins')
+    // gesamte (gemischte) Selektion togglen — Req 3.4: nicht vollständig unterstrichen ->
+    // erster Klick unterstreicht ALLES; ControlOrMeta+a ist synchron (R1-Ausnahme).
     await page.keyboard.press('ControlOrMeta+a')
-    await page.getByTitle('Unterstrichen').click() // Anforderung 3.4: nicht-vollständig unterstrichen -> wird komplett unterstrichen
+    await button.click()
     await expect(editor.locator('u')).toContainText('eins zwei')
-    await page.getByTitle('Unterstrichen').click() // jetzt vollständig -> wird entfernt
+    await button.click()                          // jetzt vollständig -> entfernt
     await expect(editor.locator('u')).toHaveCount(0)
-
     // reine Leerzeichen-Selektion darf nicht crashen
+    await page.keyboard.press('ControlOrMeta+a')
+    await page.keyboard.press('Delete')
     await page.keyboard.type('a   b')
     await page.keyboard.press('Home')
-    for (let i = 0; i < 4; i++) await page.keyboard.press('ArrowRight')
-    for (let i = 0; i < 3; i++) await page.keyboard.press('Shift+ArrowRight')
-    await page.getByTitle('Unterstrichen').click()
-    await expect(page.locator('.ProseMirror')).toBeVisible() // kein Absturz/kein JS-Fehler
+    for (let i = 0; i < 1; i++) await page.keyboard.press('ArrowRight', { delay: 20 })
+    await page.keyboard.down('Shift')
+    for (let i = 0; i < 3; i++) await page.keyboard.press('ArrowRight', { delay: 20 })
+    await page.keyboard.up('Shift')
+    await page.waitForTimeout(50)
+    await button.click()
+    await expect(editor).toBeVisible()
+    assertNoErrors()
   })
 
   test('U-TF-7: Fett + Unterstrichen + Schriftfarbe gleichzeitig, unabhängig entfernbar', async ({ page }) => {
@@ -367,68 +535,81 @@ test.describe('Unterstrichen (einfach) — Toolbar & Tastatur', () => {
     await page.keyboard.press('ControlOrMeta+a')
     await page.getByTitle('Fett').click()
     await page.getByTitle('Unterstrichen').click()
-    await page.locator('input[aria-label="Textfarbe"]').fill('#ff0000')
-    await expect(editor.locator('strong u, u strong')).toContainText('Kombiniert')
-    // Unterstrichen einzeln wieder entfernen, Fett + Farbe bleiben
+    await page.getByLabel('Textfarbe').fill('#ff0000')
+    await expect(editor.locator('strong u')).toContainText('Kombiniert')  // Schema-Nest-Reihenfolge
+    await expect(editor.locator('span[style*="color"]')).toContainText('Kombiniert')
+    // Unterstrichen einzeln entfernen -> Fett + Farbe bleiben
     await page.getByTitle('Unterstrichen').click()
     await expect(editor.locator('u')).toHaveCount(0)
     await expect(editor.locator('strong')).toContainText('Kombiniert')
+    await expect(editor.locator('span[style*="color"]')).toContainText('Kombiniert')
   })
 
+  // U-TF-9: Undo/Redo als GETRENNTE Schritte -> R3-Group-Delays zwischen den Phasen,
+  // damit history sie nicht zu einem Schritt verschmilzt. Web-first-Assertions (R4).
   test('U-TF-9: Undo/Redo über Tippen -> an -> aus -> Tippen', async ({ page }) => {
     const editor = page.locator('.ProseMirror')
     await editor.click()
     await page.keyboard.type('A')
-    await page.keyboard.press('ControlOrMeta+u')
-    await page.keyboard.type('B')
-    await page.keyboard.press('ControlOrMeta+u')
-    await page.keyboard.type('C')
-    // Zustand: "A" normal, "B" unterstrichen, "C" normal
+    await page.waitForTimeout(600)                 // "A" als eigener Undo-Schritt (R3)
+    await page.keyboard.press('ControlOrMeta+u')   // storedMark an
+    await page.keyboard.type('B')                  // "B" unterstrichen
+    await page.waitForTimeout(600)
+    await page.keyboard.press('ControlOrMeta+u')   // storedMark aus
+    await page.keyboard.type('C')                  // "C" normal
     await expect(editor.locator('u')).toContainText('B')
-
-    await page.keyboard.press('ControlOrMeta+z') // "C" rückgängig
+    await expect(editor).toContainText('ABC')
+    await page.keyboard.press('ControlOrMeta+z')   // "C" weg
     await expect(editor).toContainText('AB')
-    await page.keyboard.press('ControlOrMeta+z') // Unterstrichen-Aus rückgängig -> "B" wieder unterstrichen zusammen mit potentiell weiterem
-    await page.keyboard.press('ControlOrMeta+z') // "B" rückgängig
+    await expect(editor).not.toContainText('ABC')
+    await page.keyboard.press('ControlOrMeta+z')   // "B" weg
     await expect(editor).toContainText('A')
-    await page.keyboard.press('ControlOrMeta+Shift+z') // redo
+    await expect(editor).not.toContainText('AB')
+    await page.keyboard.press('ControlOrMeta+Shift+z') // Redo -> "B" zurück, weiter unterstrichen
     await expect(editor).toContainText('AB')
+    await expect(editor.locator('u')).toContainText('B')
   })
 })
 ```
 
-#### 5.1.2 `describe('Unterstrichen (einfach) — Grenzfälle')` — `U-GF-1` … `U-GF-15`
+**Hinweis zur Undo-Granularität (Req 3.2, offener Klärungspunkt):** Ob reines Umschalten des
+`storedMark` **ohne** nachfolgende Eingabe einen eigenen Undo-Schritt/Dokumentsprung erzeugt,
+ist beim Schreiben von `U-TF-9` empirisch festzuhalten und das Ergebnis in
+`unterstrichen-einfach-req.md` Abschnitt 3.2 nachzutragen (DoD Punkt 6). Der Test oben tippt
+nach jedem Toggle bewusst Text, um Reproduzierbarkeit unabhängig von dieser Klärung zu
+sichern.
 
-Ein dedizierter Test je Grenzfall (Anforderungsabschnitt 6, Testfall 11: „kein
-Sammeltest, der Einzelergebnisse verschleiert"):
+### 5.1.2 `describe('Unterstrichen (einfach) — Grenzfälle')` — `U-GF-1 … U-GF-15`
 
-| ID | Kurzbeschreibung | Testidee (Playwright) |
+Ein dedizierter Test je Grenzfall (Req Abschnitt 6, Testfall 13: „kein Sammeltest").
+
+| ID | Kurz | Testidee (Playwright, mit Determinismus-Regel) |
 |---|---|---|
-| `U-GF-1` | Toggle direkt vor/nach `hard_break` wirft keinen Fehler | `Shift+Enter` tippen, Cursor davor/danach setzen, `Strg+U`, dann tippen; `page.on('pageerror', …)` im Test registrieren und assert keine Fehler aufgezeichnet wurden |
-| `U-GF-2` | Selektion über Absatzgrenze hinweg | Zwei Absätze tippen, `Shift+ArrowDown`-Sequenz über den Umbruch hinweg selektieren, `Strg+U`, beide Absätze prüfen (`editor.locator('u')` deckt beide ab) |
-| `U-GF-3` | Selektion über Tabellen-Zellgrenze | Tabelle einfügen (`getByRole('button', {name:'Tabelle einfügen'})`), Text in zwei Zellen tippen, Selektion über Zellgrenze (Shift+Klick in Nachbarzelle oder `Ctrl+A` innerhalb Tabellen-Fokus je nach tatsächlichem Editor-Verhalten — im Test empirisch ermitteln, welche Tastenkombination eine `CellSelection` erzeugt), `Strg+U`, kein Crash, beide Zellen unterstrichen, keine Vermischung mit unselektierten Nachbarzellen |
-| `U-GF-4` | Reine Leerzeichen-Selektion | siehe `U-TF-6` oben (kombiniert) |
-| `U-GF-5` (korrigiert laut `unterstrichen-einfach-code.md` Abschnitt 3.6: `image` ist Block-, kein Inline-Node) | Selektion von Text bis in einen direkt benachbarten Bild-Block hinein | Bild einfügen (Label „🖼 Bild", `input[type=file][accept="image/*"]`, `setInputFiles` mit einer kleinen Test-PNG-Datei), Text davor tippen, Selektion von Textanfang bis inkl. Bild-Block (`Shift+ArrowDown`/`Shift+End` über die Blockgrenze), `Strg+U`, kein Crash, Text unterstrichen, Bild unverändert im DOM vorhanden |
-| `U-GF-6` | Zwei schnelle `Strg+U` hintereinander → deterministisch „aus" | Text markieren, `await Promise.all([page.keyboard.press('ControlOrMeta+u'), page.keyboard.press('ControlOrMeta+u')])` bzw. zwei Presses ohne await dazwischen; Endzustand prüfen: **kein** `<u>` mehr vorhanden |
-| `U-GF-7` | Undo/Redo nach Sequenz Fett→Unterstrichen→Unterstrichen-aus | Analog `U-TF-9`, aber mit `Fett` als erstem Schritt in der Kette; jeder Einzelschritt per Undo geprüft, nicht nur der Endzustand |
-| `U-GF-8` | Selection-Sync-Bug mit „Unterstrichen" statt „Fett" | **Kein neuer Test in `underline.spec.ts`** — wird stattdessen dauerhaft in `tests/e2e/selection-regression.spec.ts` verankert, siehe Abschnitt 5.2 unten (DoD Punkt 3: „dauerhaft in der Suite", nicht in einer separaten, leicht vergessbaren Datei) |
-| `U-GF-9` | Import `w:val` ∈ {`double`,`wave`,...} | **Unit-Test**, nicht E2E — siehe Abschnitt 4.2.3 (im Browser wäre der Upload einer handgebauten XML-Datei nur ein Duplikat des Unit-Tests ohne Mehrwert) |
-| `U-GF-10` | Import `style:text-underline-style` Fremdwert | **Unit-Test**, siehe Abschnitt 4.3.3 |
-| `U-GF-11` | Cross-Format-Stilnamenskollision | **Unit-Test**, siehe Abschnitt 4.3 Erweiterung `roundtrip.test.ts` |
-| `U-GF-12` | Datei ohne jede Formatierung außer Unterstrichen | **Unit-Test**, siehe Abschnitt 4.4; zusätzlich E2E-Rauchtest: neues Dokument, nur Unterstrichen setzen, exportieren, `content.xml` enthält `text-underline-style="solid"` und keine zusätzliche leere `<style:style>`-Definition |
-| `U-GF-13` | Performance bei sehr langen Läufen | **Unit-Test**, siehe Abschnitt 4.5. Optionaler E2E-Rauchtest: sehr langen String per `page.keyboard.insertText` (schneller als `type`) einfügen, `Strg+U`, Zeitbudget im Test prüfen — niedrige Priorität, siehe Abschnitt 7 |
-| `U-GF-14` | Groß-/Kleinschreibung Fremddateien | **Unit-Test**, siehe Abschnitt 4.2.4/4.3.3 |
-| `U-GF-15` | Fokus-Erhalt nach Toolbar-Klick | siehe Code-Block unten |
+| `U-GF-1` | Toggle an `hard_break`-Grenze | `watchForConsoleErrors`; `Shift+Enter`, Cursor davor/danach, `Strg+U`, dann tippen; assert kein JS-Fehler, neuer Text unterstrichen |
+| `U-GF-2` | Selektion über Absatzgrenze | zwei Absätze; `Home` in Absatz 2, `Shift+ArrowUp` ×2 mit `{delay:20}`, `up('Shift')`, **`waitForTimeout(50)` (R1)**, `Strg+U`; `editor.locator('u')` deckt beide Absätze |
+| `U-GF-3` | Selektion über Zellgrenze | Tabelle einfügen; Text in zwei Zellen; `CellSelection` per Maus-Drag zwischen den Zellen (Muster `cut.spec.ts` Testfall 7: `boundingBox` + `mouse.down/move({steps:5})/up`) statt Tastatur — deterministischer als das Erraten einer Tastenkombi; `Strg+X`→hier `Strg+U`; beide Zellen unterstrichen, keine Nachbarzelle betroffen, kein Crash |
+| `U-GF-4` | reine Leerzeichen-Selektion | in `U-TF-6` enthalten |
+| `U-GF-5` (korrigiert, code.md 3.6: `image` ist Block-Node) | Selektion Text→benachbarter Bild-Block | `watchForConsoleErrors`; Text tippen, Bild einfügen (`label:has-text("Bild")` → `input[type=file]`, Mini-PNG als Buffer, gleiche Base64-Konstante wie `cut.spec.ts`), Selektion Textanfang→über die Blockgrenze (`Shift+ArrowDown`/`Shift+End` mit `{delay:20}` + **`waitForTimeout(50)`**), `Strg+U`; kein Crash, Text unterstrichen, `img`-Count unverändert 1 |
+| `U-GF-6` | zwei schnelle `Strg+U` → deterministisch „aus" | **zwei sequenzielle** `press('ControlOrMeta+u')` (NICHT `Promise.all` — parallele Keydowns sind selbst nicht deterministisch). Jeder Druck ist ein diskretes `toggleMark`-Kommando → nach zweien wieder „aus": `expect(editor.locator('u')).toHaveCount(0)` |
+| `U-GF-7` | Undo/Redo nach „fett→unterstrichen→unterstrichen-aus" | wie `U-TF-9`, erster Schritt `Fett`; R3-Delays zwischen den Phasen; jeder Einzelschritt per Undo geprüft |
+| `U-GF-8` | Selection-Sync mit „Unterstrichen" | **Nicht** hier, sondern dauerhaft in `selection-regression.spec.ts` (5.2) — DoD Punkt 4 |
+| `U-GF-9` | DOCX `w:val`-Fremdwerte | **Unit** 4.2.3 (Browser-Upload einer handgebauten XML wäre nur ein Duplikat) |
+| `U-GF-10` | ODT `text-underline-style`-Fremdwert | **Unit** 4.3.3 |
+| `U-GF-11` | Stilnamen-Dedup | **Unit** 4.4 |
+| `U-GF-12` | nur-Underline-Datei | **Unit** 4.4; zusätzlich E2E-Rauchtest: neues ODT, nur Unterstrichen, exportieren, `content.xml` enthält `text-underline-style="solid"`, keine zusätzliche leere `<style:style>` |
+| `U-GF-13` | Performance lange Läufe | **Unit** 4.4; optionaler E2E-Rauchtest mit `page.keyboard.insertText(langerString)` (schneller/deterministischer als `type`) + `Strg+U`; niedrige Priorität |
+| `U-GF-14` | Groß-/Kleinschreibung | **Unit** 4.2.4 / 4.3.3 |
+| `U-GF-15` | Fokus-Erhalt nach Toolbar-Klick | Code-Block unten |
 
 ```ts
-test('U-GF-15: Fokus bleibt nach Toolbar-Klick im Editor erhalten', async ({ page }) => {
+test('U-GF-15: Fokus + Selektion bleiben nach Toolbar-Klick erhalten', async ({ page }) => {
   const editor = page.locator('.ProseMirror')
   await editor.click()
   await page.keyboard.type('Fokustest')
   await page.keyboard.press('ControlOrMeta+a')
   await page.getByTitle('Unterstrichen').click()
   await expect(editor).toBeFocused()
-  // Selektion muss ebenfalls erhalten sein: direkt weitertippen ersetzt "Fokustest", nicht anhängen
+  // Selektion erhalten: direktes Tippen ERSETZT "Fokustest" (kein Anhängen, kein Cursor-Sprung)
   await page.keyboard.type('Ersetzt')
   await expect(editor).toContainText('Ersetzt')
   await expect(editor).not.toContainText('Fokustest')
@@ -437,8 +618,10 @@ test('U-GF-15: Fokus bleibt nach Toolbar-Klick im Editor erhalten', async ({ pag
 
 ### 5.2 Erweiterung: `tests/e2e/selection-regression.spec.ts` (`U-GF-8`)
 
-Neuer Test **im bestehenden `describe`-Block**, nicht in einer neuen Datei — exakt
-analog zum vorhandenen Bold-Test in dieser Datei, nur mit „Unterstrichen" statt „Fett":
+Neuer Test **im bestehenden `describe`-Block** (DoD Punkt 4: dauerhaft verankert, nicht in
+separater Datei), exakt analog zum committeten Bold-Test — inklusive des **zwingenden**
+`waitForTimeout(50)` zwischen `End` und `Enter` (R2). Der Vorentwurf ließ genau diesen Puffer
+weg und hätte die bereits behobene Flakiness reaktiviert.
 
 ```ts
 test('same regression with "Unterstrichen" instead of "Fett" (Grenzfall 8 / U-GF-8)', async ({ page }) => {
@@ -449,23 +632,23 @@ test('same regression with "Unterstrichen" instead of "Fett" (Grenzfall 8 / U-GF
   await page.getByTitle('Unterstrichen').click()
   await editor.click()
   await page.keyboard.press('End')
+  await page.waitForTimeout(50)                 // R2 — identisch zum Bold-Test in dieser Datei
   await page.keyboard.press('Enter')
   await page.keyboard.type('Zweiter Absatz.')
   await expect(editor).toContainText('Hallo, das ist ein Test.')
   await expect(editor).toContainText('Zweiter Absatz.')
   await expect(page.locator('.ProseMirror p')).toHaveCount(2)
-  // zusätzlich zum reinen Bold-Regressionstest: beide Absätze behalten ihre jeweils
-  // korrekte Unterstreichungs-Formatierung (erster Absatz unterstrichen, zweiter nicht)
+  // beide Absätze behalten ihre korrekte Unterstreichung
   await expect(page.locator('.ProseMirror p').nth(0).locator('u')).toContainText('Hallo, das ist ein Test.')
   await expect(page.locator('.ProseMirror p').nth(1).locator('u')).toHaveCount(0)
 })
 ```
 
-### 5.3 Rundreisen (`U-RT-1` … `U-RT-8`) — echte Datei-Uploads/Exporte
+### 5.3 Rundreisen (`U-RT-1`, `U-RT-2`, `U-RT-6/7`, `U-RT-8`) — echte Uploads/Exporte
 
-Alle Tests in diesem Abschnitt nutzen **echten** Datei-Upload
-(`input.setInputFiles(...)`) und **echten** Datei-Export (`page.waitForEvent('download')`
-+ nachträgliches Entpacken mit `JSZip`) — keine internen Reader/Writer-Aufrufe.
+**Nur Gleichformat-Rundreisen** (die einzige per UI mögliche Variante). Cross-Format
+(`U-RT-3/4/5`) läuft als Unit-Test (4.6). Echter Upload (`setInputFiles`), echter Export
+(`waitForEvent('download')` + `JSZip`), keine internen Reader/Writer-Aufrufe.
 
 ```ts
 test.describe('Unterstrichen (einfach) — Rundreisen', () => {
@@ -479,24 +662,15 @@ test.describe('Unterstrichen (einfach) — Rundreisen', () => {
     const editor = page.locator('.ProseMirror')
     await editor.click()
     await page.keyboard.type('Unterstrichener Text')
-    await page.keyboard.press('ControlOrMeta+a')
+    await page.keyboard.press('ControlOrMeta+a')                 // synchron (R1-Ausnahme)
     await page.getByTitle('Unterstrichen').click()
 
-    const zip = await downloadAndUnzip(page)
+    const zip = await exportAndUnzip(page)
     const documentXml = await zip.file('word/document.xml')!.async('text')
-    expect(documentXml).toMatch(/<w:u\s+w:val="single"\s*\/>/)
-
-    // Re-Import der soeben exportierten Datei
-    const fs = await import('node:fs/promises')
-    const downloadPromise2 = page.waitForEvent('download')
-    // (Export bereits oben ausgelöst — für den Re-Import wird der bereits erzeugte
-    // Buffer erneut als Upload verwendet, kein zweiter Export nötig)
-    void downloadPromise2
+    expect(documentXml).toMatch(/<w:u\s+w:val="single"\s*\/>/)   // verschärft ggü. Substring '<w:u '
     const buffer = await zip.generateAsync({ type: 'nodebuffer' })
-    await page.reload()
-    await page.getByRole('button', { name: /verstanden/i }).click()
-    const input = docxCard(page).locator('input[type="file"]')
-    await input.setInputFiles({ name: 'reimport.docx', mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', buffer })
+
+    await reimport(page, docxCard, 'reimport.docx', DOCX_MIME, buffer)
     await expect(page.locator('.ProseMirror u')).toContainText('Unterstrichener Text')
   })
 
@@ -508,60 +682,33 @@ test.describe('Unterstrichen (einfach) — Rundreisen', () => {
     await page.keyboard.press('ControlOrMeta+a')
     await page.getByTitle('Unterstrichen').click()
 
-    const zip = await downloadAndUnzip(page)
+    const zip = await exportAndUnzip(page)
     const contentXml = await zip.file('content.xml')!.async('text')
     expect(contentXml).toContain('style:text-underline-style="solid"')
-
     const buffer = await zip.generateAsync({ type: 'nodebuffer' })
-    await page.reload()
-    await page.getByRole('button', { name: /verstanden/i }).click()
-    const input = odtCard(page).locator('input[type="file"]')
-    await input.setInputFiles({ name: 'reimport.odt', mimeType: 'application/vnd.oasis.opendocument.text', buffer })
+
+    await reimport(page, odtCard, 'reimport.odt', ODT_MIME, buffer)
     await expect(page.locator('.ProseMirror u')).toContainText('Unterstrichener Text')
   })
 
-  test('U-RT-3: Cross-Format DOCX -> ODT (reale Fremddatei 52449.docx)', async ({ page }) => {
+  test('U-RT-6/7 DOCX: reale Word-Datei importieren, Export unabhängig von readDocx geprüft', async ({ page }) => {
     const fs = await import('node:fs/promises')
     const path = await import('node:path')
     const buffer = await fs.readFile(path.join(process.cwd(), 'tests/fixtures/external/docx/52449.docx'))
-    const input = docxCard(page).locator('input[type="file"]')
-    await input.setInputFiles({ name: '52449.docx', mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', buffer })
-    await expect(page.locator('.ProseMirror u').first()).toBeVisible()
-
-    // als ODT exportieren -> Karte wechseln nicht nötig, sofern die App Format-übergreifendes
-    // Exportieren-in-anderes-Format unterstützt; falls die App stattdessen "Neu in ODT" +
-    // manuellen Copy/Paste erfordert, hier den tatsächlichen App-Workflow nachbilden
-    // (siehe Hinweis unten).
-  })
-
-  test('U-RT-4: Cross-Format ODT -> DOCX (reale Fremddatei character-styles.odt)', async ({ page }) => {
-    const fs = await import('node:fs/promises')
-    const path = await import('node:path')
-    const buffer = await fs.readFile(path.join(process.cwd(), 'tests/fixtures/external/odt/character-styles.odt'))
-    const input = odtCard(page).locator('input[type="file"]')
-    await input.setInputFiles({ name: 'character-styles.odt', mimeType: 'application/vnd.oasis.opendocument.text', buffer })
-    await expect(page.locator('.ProseMirror u')).toContainText('Lorem ipsum')
-  })
-
-  test('U-RT-5: doppelte Cross-Format-Rundreise DOCX -> ODT -> DOCX', async ({ page }) => { /* Kombination aus U-RT-3/4, zweimal verkettet */ })
-
-  test('U-RT-6/7 DOCX: reale Word-Datei importieren, Export unabhängig von readDocx() geprüft', async ({ page }) => {
-    const fs = await import('node:fs/promises')
-    const path = await import('node:path')
-    const buffer = await fs.readFile(path.join(process.cwd(), 'tests/fixtures/external/docx/52449.docx'))
-    await docxCard(page).locator('input[type="file"]').setInputFiles({ name: '52449.docx', buffer })
-    await expect(page.locator('.ProseMirror u').first()).toBeVisible()
-    const zip = await downloadAndUnzip(page, docxCard(page))
+    await docxCard(page).locator('input[type="file"]').setInputFiles({ name: '52449.docx', mimeType: DOCX_MIME, buffer })
+    await expect(page.locator('.ProseMirror u').first()).toBeVisible()   // reale underline-Runs sichtbar
+    const zip = await exportAndUnzip(page)
     const documentXml = await zip.file('word/document.xml')!.async('text')
-    expect(documentXml).toMatch(/<w:u\s+w:val="single"\s*\/>/) // Regex-Prüfung, NICHT über readDocx()
+    expect(documentXml).toMatch(/<w:u\s+w:val="single"\s*\/>/)           // Regex, NICHT über readDocx
   })
 
-  test('U-RT-6/7 ODT: reale LibreOffice-Datei importieren, Export unabhängig von readOdt() geprüft', async ({ page }) => {
+  test('U-RT-6/7 ODT: reale LibreOffice-Datei importieren, Export unabhängig von readOdt geprüft', async ({ page }) => {
     const fs = await import('node:fs/promises')
     const path = await import('node:path')
     const buffer = await fs.readFile(path.join(process.cwd(), 'tests/fixtures/external/odt/character-styles.odt'))
-    await odtCard(page).locator('input[type="file"]').setInputFiles({ name: 'character-styles.odt', buffer })
-    const zip = await downloadAndUnzip(page, odtCard(page))
+    await odtCard(page).locator('input[type="file"]').setInputFiles({ name: 'character-styles.odt', mimeType: ODT_MIME, buffer })
+    await expect(page.locator('.ProseMirror u')).toContainText('Lorem ipsum')
+    const zip = await exportAndUnzip(page)
     const contentXml = await zip.file('content.xml')!.async('text')
     expect(contentXml).toContain('style:text-underline-style="solid"')
   })
@@ -574,200 +721,242 @@ test.describe('Unterstrichen (einfach) — Rundreisen', () => {
     await page.keyboard.press('ControlOrMeta+a')
     await page.getByTitle('Fett').click()
     await page.getByTitle('Unterstrichen').click()
-    await page.locator('input[aria-label="Textfarbe"]').fill('#0000ff')
+    await page.getByLabel('Textfarbe').fill('#0000ff')
 
-    const zip = await downloadAndUnzip(page)
+    const zip = await exportAndUnzip(page)
     const buffer = await zip.generateAsync({ type: 'nodebuffer' })
-    await page.reload()
-    await page.getByRole('button', { name: /verstanden/i }).click()
-    await odtCard(page).locator('input[type="file"]').setInputFiles({ name: 'kombi.odt', buffer })
+    await reimport(page, odtCard, 'kombi.odt', ODT_MIME, buffer)
     const reimported = page.locator('.ProseMirror')
-    await expect(reimported.locator('u strong, strong u')).toContainText('Kombitext')
+    await expect(reimported.locator('strong u')).toContainText('Kombitext')
+    await expect(reimported.locator('span[style*="color"]')).toContainText('Kombitext')
   })
 })
 ```
 
-**Wichtiger Hinweis zu `U-RT-3`/`U-RT-4`/`U-RT-5` (Cross-Format):** Ob die App
-Cross-Format-Export ("importiertes DOCX als ODT exportieren") tatsächlich über einen
-Format-Umschalter in der UI anbietet oder ob dafür zwei Karten (DOCX-Karte importieren,
-Inhalt manuell in die ODT-Karte übertragen) bedient werden müssen, ist **vor
-Implementierung dieser Tests am tatsächlichen UI zu verifizieren** (in den bisherigen
-Spec-Dateien nicht abschließend spezifiziert). Die obigen Codeskizzen markieren diese
-Stelle bewusst als zu klären, statt einen nicht existierenden Workflow zu unterstellen —
-**erster Schritt bei der Umsetzung dieses Testplans:** manuell im Browser prüfen, wie
-Cross-Format-Export tatsächlich ausgelöst wird, danach die Skizze konkretisieren.
+**Verschärfung `tests/e2e/clipboard-roundtrip.spec.ts` (Testfall 10):** die schwache
+Assertion `expectedXml: '<w:u '` auf `/<w:u\s+w:val="single"\s*\/>/` heben und zusätzlich
+sicherstellen, dass **kein anderer** Run fälschlich `w:u` trägt (z. B. Anzahl der
+`w:val="single"`-Vorkommen gegen die Anzahl unterstrichener Läufe prüfen). Bereits durch
+`U-RT-1`/`U-RT-6-7` mit abgedeckt; die Bestandsdatei wird zusätzlich nachgezogen, damit sie
+nicht länger als Falschbeleg dient (Req Abschnitt 0/7).
 
-### 5.4 Sichtprüfung / Screenshot-Vergleich (`U-TF-12`)
+### 5.4 Paste-Test (`U-TF-14` / Grenzfall 16) — Chromium-only
 
 ```ts
-test('U-TF-12: visuelles Erscheinungsbild der Unterstreichung bleibt nach Re-Import gleich', async ({ page }) => {
+test('U-TF-14/U-GF-16: Paste erkennt <u> und text-decoration:underline; underline line-through geht verloren (dokumentiert)', async ({ page, browserName }) => {
+  test.skip(browserName !== 'chromium', 'clipboard-read/-write nur unter Chromium zuverlässig (siehe cut.spec.ts Testfall 12).') // R5
+  await page.context().grantPermissions(['clipboard-read', 'clipboard-write'])
+  await page.goto('/')
+  await page.getByRole('button', { name: /verstanden/i }).click()
   await odtCard(page).getByRole('button', { name: 'Neu erstellen' }).click()
   const editor = page.locator('.ProseMirror')
   await editor.click()
-  await page.keyboard.type('Visueller Vergleichstext')
-  await page.keyboard.press('ControlOrMeta+a')
-  await page.getByTitle('Unterstrichen').click()
-  await expect(editor.locator('u')).toHaveScreenshot('underline-before-export.png')
 
-  const zip = await downloadAndUnzip(page)
-  const buffer = await zip.generateAsync({ type: 'nodebuffer' })
-  await page.reload()
-  await page.getByRole('button', { name: /verstanden/i }).click()
-  await odtCard(page).locator('input[type="file"]').setInputFiles({ name: 'reimport.odt', buffer })
-  await expect(page.locator('.ProseMirror u')).toHaveScreenshot('underline-before-export.png')
+  // 1) <u>-HTML wird als Unterstrichen erkannt
+  await page.evaluate(async () => {
+    const html = '<p><u>Aus u-Tag</u></p>'
+    await navigator.clipboard.write([new ClipboardItem({ 'text/html': new Blob([html], { type: 'text/html' }) })])
+  })
+  await page.keyboard.press('ControlOrMeta+v')
+  await expect(editor.locator('u')).toContainText('Aus u-Tag')
+
+  // 2) text-decoration: underline wird erkannt
+  await page.evaluate(async () => {
+    const html = '<p><span style="text-decoration: underline">Aus Style</span></p>'
+    await navigator.clipboard.write([new ClipboardItem({ 'text/html': new Blob([html], { type: 'text/html' }) })])
+  })
+  await page.keyboard.press('ControlOrMeta+v')
+  await expect(editor.locator('u')).toContainText('Aus Style')
+
+  // 3) zusammengesetzter Wert -> Unterstreichung geht verloren (dokumentiertes Ist, schema.ts:171
+  //    matcht exakt "text-decoration=underline"). Kein stiller Verlust: hier explizit fixiert.
+  await page.evaluate(async () => {
+    const html = '<p><span style="text-decoration: underline line-through">Zusammengesetzt</span></p>'
+    await navigator.clipboard.write([new ClipboardItem({ 'text/html': new Blob([html], { type: 'text/html' }) })])
+  })
+  await page.keyboard.press('ControlOrMeta+v')
+  await expect(editor).toContainText('Zusammengesetzt')
+  await expect(editor.locator('u')).not.toContainText('Zusammengesetzt') // dokumentierter Verlust (Req 3.6/DoD 5)
 })
 ```
 
-Playwright-Snapshot-Vergleich (`toHaveScreenshot`) statt manueller Pixel-Diffs; erster
-Lauf erzeugt die Baseline (`--update-snapshots`), spätere Läufe vergleichen automatisch.
-Läuft auf allen drei konfigurierten Projekten (Desktop Chrome/Mobile/Tablet) — je
-Projekt eigene Baseline, da Schriftrendering/Linienabstand je Viewport leicht abweichen
-kann; das ist beabsichtigt und kein Fehlalarm.
+### 5.5 Sichtprüfung (`U-TF-15`) — bewusst als niedrigprioritär und determinismus-gehärtet
+
+Ein Screenshot-Vergleich der Unterstreichungslinie ist über Viewports/Schriftrendering
+**inhärent nicht deterministisch** und widerspricht dem Determinismus-Auftrag, wenn er auf
+allen drei Projekten mit strikter Pixelgleichheit läuft. Deshalb:
+
+- Nur auf **„Desktop Chrome"** ausführen (`test.skip(testInfo.project.name !== 'Desktop
+  Chrome', …)`) — eine stabile Baseline, kein Viewport-Rauschen.
+- `toHaveScreenshot('underline.png', { maxDiffPixelRatio: 0.02 })` (Toleranzbudget gegen
+  Sub-Pixel-Antialiasing), Baseline initial per `--update-snapshots`.
+- Vergleich: Editor-Darstellung der Unterstreichung **vor** Export vs. **nach** Re-Import
+  derselben Datei — ein Sprung deutet auf fehlerhaften Reader/Writer hin.
+
+Alternativ (falls Screenshot-Baselines im CI unerwünscht sind) genügt zur Erfüllung von
+Req Abschnitt 6/Testfall 15 die **strukturelle** Prüfung, dass nach Re-Import erneut genau
+`.ProseMirror u` mit demselben Text existiert (bereits durch `U-RT-2` abgedeckt) — dann
+`U-TF-15` als optionalen Zusatz führen, nicht als Blocker.
 
 ---
 
-## 6. Abnahme-Mapping (Anforderung → Testdatei/Testname)
+## 6. Nomenklatur
 
-| Anforderungsabschnitt | Testfall-ID | Testdatei |
+- `U-TF-<n>` — Testfall aus Req Abschnitt 6; `U-GF-<n>` — Grenzfall aus Req Abschnitt 4;
+  `U-RT-<n>` — Rundreise aus Req Abschnitt 5; `U-BUG-<n>` — in `unterstrichen-einfach-code.md`
+  Abschnitt 3 dokumentierter Fund (Nummer folgt der dortigen Abschnittsnummer).
+- IDs erscheinen im Testnamen und in Commit-/PR-Texten, damit die Abnahme (Req Abschnitt 8)
+  eindeutig nachvollziehbar bleibt.
+
+---
+
+## 7. Abnahme-Mapping (Anforderung → Testartefakt)
+
+| Anforderung | Testfall-ID | Datei |
 |---|---|---|
-| Abschnitt 6, Testfälle 1–9 | `U-TF-1` … `U-TF-9` | `tests/e2e/underline.spec.ts`, describe „Toolbar & Tastatur" |
-| Abschnitt 6, Testfall 8 / Grenzfall 8 | `U-GF-8` | `tests/e2e/selection-regression.spec.ts` (Erweiterung) |
-| Abschnitt 6, Testfall 10 (= Rundreisen) | `U-RT-1` … `U-RT-8` | `tests/e2e/underline.spec.ts`, describe „Rundreisen" |
-| Abschnitt 6, Testfall 11 (= Grenzfälle) | `U-GF-1` … `U-GF-15` | `tests/e2e/underline.spec.ts`, describe „Grenzfälle" (mit Verweisen auf Unit-Tests für `U-GF-9/10/11/14`) |
-| Abschnitt 6, Testfall 12 (Sichtprüfung) | `U-TF-12` | `tests/e2e/underline.spec.ts` |
-| Abschnitt 5, Rundreise 1–2 (Eigenrundreise) | `U-RT-1`, `U-RT-2` | `tests/e2e/underline.spec.ts` |
-| Abschnitt 5, Rundreise 3–5 (Cross-Format) | `U-RT-3`, `U-RT-4`, `U-RT-5` | `tests/e2e/underline.spec.ts` (Workflow vorab am UI zu klären, siehe Abschnitt 5.3 Hinweis) |
-| Abschnitt 5, Rundreise 6 (echte Fremddatei) | `U-RT-6/7` (DOCX: `52449.docx`; ODT: `character-styles.odt`) | `tests/e2e/underline.spec.ts` + Unit-Tests Abschnitt 4.2/4.3 |
-| Abschnitt 5, Rundreise 7 (unabhängiger Parser) | `U-RT-6/7` (Regex gegen `document.xml`/`content.xml`, **nicht** über `readDocx`/`readOdt`) + manueller Einmal-Check (Abschnitt 8) | `tests/e2e/underline.spec.ts` |
-| Abschnitt 5, Rundreise 8 (kombiniert) | `U-RT-8` | `tests/e2e/underline.spec.ts` |
-| Grenzfall 9 (DOCX `w:val` Fremdwerte) | Abschnitt 4.2.3 | `src/formats/docx/__tests__/underline.test.ts` |
-| Grenzfall 10 (ODT `text-underline-style` Fremdwerte) | Abschnitt 4.3.3 | `src/formats/odt/__tests__/underline.test.ts` |
-| Grenzfall 11 (Stilnamenskollision) | Abschnitt 4.3 (Erweiterung) | `src/formats/odt/__tests__/roundtrip.test.ts` |
-| Grenzfall 12 (nur-Underline-Datei) | Abschnitt 4.4 | `src/formats/odt/__tests__/roundtrip.test.ts` |
-| Grenzfall 13 (Performance) | Abschnitt 4.5 | beide `roundtrip.test.ts` |
-| Grenzfall 14 (Groß-/Kleinschreibung) | Abschnitt 4.2.4, 4.3.3 | beide `underline.test.ts` |
-| **`U-BUG-3.1`** (ODT: Absatzstil-Ebene ignoriert) | Abschnitt 4.3.4/4.3.5 | `src/formats/odt/__tests__/underline.test.ts` — **aktuell absichtlich ROT**, siehe Abschnitt 7 |
-| **`U-BUG-3.2`** (DOCX: Formatvorlagen-Default ignoriert) | Abschnitt 4.2.5 | `src/formats/docx/__tests__/underline.test.ts` — **aktuell absichtlich ROT**, siehe Abschnitt 7 |
-| **`U-BUG-3.3`** (ODT: `<text:a>` komplett ignoriert) | Abschnitt 4.3.6/4.3.7 | dokumentiert, **kein Fix hier**, siehe Abschnitt 7 |
-| DoD Punkt 2 (unabhängiger Parser, reale Fremddatei) | `U-RT-6/7` + Abschnitt 8 dieses Plans | — |
-| DoD Punkt 3 (Regressionstest dauerhaft verankert) | `U-GF-8` in `selection-regression.spec.ts`, nicht in Extra-Datei | — |
-| DoD Punkt 4 (Fallback-Verhalten Fremddateien dokumentiert) | Abschnitt 4.2.3/4.2.4, 4.3.3, Testkommentare | — |
-| DoD Punkt 5 (kein Fund ohne Vermerk) | Abschnitt 7 dieses Plans | — |
+| Req 6, Testfälle 1–9 | `U-TF-1 … U-TF-9` | `tests/e2e/underline.spec.ts` (Toolbar & Tastatur) |
+| **Defekt A** (Button per Tastatur, code.md 3.8) | `U-TF-4a` | `tests/e2e/underline.spec.ts` — Primärnachweis, siehe Abschnitt 10 |
+| **Defekt B** (aria-pressed folgt `storedMarks`, code.md 3.9) | `U-TF-8` | `tests/e2e/underline.spec.ts` — Primärnachweis, siehe Abschnitt 10 |
+| Req 6, Testfall 8 / Grenzfall 8 | `U-GF-8` | `tests/e2e/selection-regression.spec.ts` (Erweiterung) |
+| Req 6, Testfall 10 (Export-Assertion verschärft) | `U-RT-1`, `U-RT-6/7`, + Nachzug `clipboard-roundtrip.spec.ts` | `tests/e2e/underline.spec.ts` |
+| Req 6, Testfall 11 (UI-ODT-Export, fehlte) | `U-RT-2` | `tests/e2e/underline.spec.ts` |
+| Req 6, Testfall 12 (Rundreisen) | `U-RT-1/2/6/7/8` + Unit 4.6 (`U-RT-3/4/5`) | E2E + Vitest |
+| Req 6, Testfall 13 (Grenzfälle) | `U-GF-1 … U-GF-15` | `tests/e2e/underline.spec.ts` + Unit 4.2–4.4 |
+| Req 6, Testfall 14 (Paste) | `U-TF-14`/`U-GF-16` | `tests/e2e/underline.spec.ts` (Chromium-only) |
+| Req 6, Testfall 15 (Sichtprüfung) | `U-TF-15` | `tests/e2e/underline.spec.ts` (Desktop Chrome, optional) |
+| Req 5, Rundreise 1–2 (Eigen) | `U-RT-1`, `U-RT-2` | E2E |
+| Req 5, Rundreise 3–5 (Cross-Format, UI unmöglich) | `U-RT-3/4/5` | **Unit** `cross-format-underline.test.ts` (4.6) |
+| Req 5, Rundreise 6 (reale Fremddatei) | `U-RT-6/7` (`52449.docx`, `character-styles.odt`) | E2E + Unit 4.2/4.3 |
+| Req 5, Rundreise 7 (unabhängiger Parser) | `U-RT-6/7` (Regex, ohne Reader) + DOCX-Schema-Validierung 4.5 + Manuell 11 | E2E + Vitest + Manuell |
+| Req 5, Rundreise 8 (kombiniert) | `U-RT-8` (E2E) + Unit 4.6 | E2E + Vitest |
+| Grenzfall 9/10/11/12/13/14 | 4.2.3 / 4.3.3 / 4.4 / 4.4 / 4.4 / 4.2.4+4.3.3 | Vitest |
+| `U-BUG-3.1` (ODT Absatzstil) | 4.3.4 / 4.3.5 | Vitest — siehe Abschnitt 10 |
+| `U-BUG-3.2` (DOCX Formatvorlagen-Default) | 4.2.5 | Vitest — siehe Abschnitt 10 |
+| Korrektur 3.5 (`<text:a>` NICHT ignoriert) | bereits grün `external-fixtures.test.ts` „U-4" + 4.3.6 | Vitest |
+| DoD 2 (unabhängiger Parser / DOCX-Schema) | 4.5 + `U-RT-6/7` + Manuell 11 | — |
+| DoD 4 (Regressionstest verankert) | `U-GF-8` | — |
+| DoD 5 (Fallback dokumentiert) | 4.2.3/4.2.4, 4.3.3, `U-TF-14`, Abschnitt 10 | — |
+| DoD 6 (offene Klärungen 3.2/3.6/3.7) | `U-TF-9`-Hinweis (storedMark), `U-TF-14` (Paste), `U-GF`-Überschrift-Test unten | — |
+
+**Zusatz zu DoD 6 / Req 3.7 (Unterstrichen in Überschrift):** ein E2E-Test — Absatzformat
+per `getByLabel('Absatzformat')` auf „Überschrift 1", Text, `Strg+A`, `Strg+U` — prüft, dass
+`.ProseMirror h1 u` sichtbar ist (Unterstreichung in Überschrift **sichtbar**, anders als
+Fett), und die ODT/DOCX-Rundreise (analog `U-RT-1/2`) sie erhält, ohne die
+Überschriften-Formatvorlage zu beschädigen. Ergebnis in Req 3.7 nachtragen.
 
 ---
 
-## 7. Bekannte, aktuell erwartet-ROTE Tests (Stand dieses Plans)
+## 8. Bestehende Tests: neu bewerten (Req Abschnitt 0/7)
 
-Der Vollständigkeit und Ehrlichkeit halber (Anforderungsabschnitt 7/DoD Punkt 5): Die
-folgenden Tests aus diesem Plan **werden beim ersten Lauf fehlschlagen**, weil sie gegen
-zwei in `unterstrichen-einfach-code.md` Abschnitt 3.1/3.2 dokumentierte, zum Zeitpunkt
-dieses Plans **noch nicht behobene** Bugs im Reader-Code testen. Das ist **beabsichtigt**
-— die Tests fixieren das korrekte Soll-Verhalten und dienen als Abnahmekriterium für den
-Fix, nicht als „muss beim Schreiben schon grün sein":
-
-| Test | Datei | Grund | Muss behoben sein, bevor Status auf „verifiziert" wechselt? |
-|---|---|---|---|
-| 4.3.4 (`Tabelle1.odt`, „Gomez"-Absätze) | `src/formats/odt/__tests__/underline.test.ts` | `U-BUG-3.1` — ODT-Reader liest keine Zeichenformatierung auf Absatzstil-Ebene | **Ja** — direkt Rundreise-relevant (Anforderung Abschnitt 5), DoD Punkt 4 verlangt explizit die Prüfung dieses Fallback-Pfads |
-| 4.3.5 (handgebauter Minimalfall, `solid` auf Absatzstil-Ebene) | `src/formats/odt/__tests__/underline.test.ts` | `U-BUG-3.1`, In-Scope-Wert `solid` statt `wave`/`dotted` | **Ja** |
-| 4.2.5 (Formatvorlagen-Default `TitleTest`) | `src/formats/docx/__tests__/underline.test.ts` | `U-BUG-3.2` — DOCX-Reader liest keinen Formatvorlagen-Default aus `styles.xml` | **Ja**, aus Konsistenzgründen zum analogen ODT-Bug, auch wenn im Fixture-Korpus (Stand `unterstrichen-einfach-code.md` Abschnitt 3.2) noch kein nicht-leerer Anwendungsfall bestätigt ist — der Code-Pfad ist strukturell identisch riskant |
-| 4.3.6 (`hyperlinkSpaces.odt`, Textverlust) | `src/formats/odt/__tests__/underline.test.ts` | `U-BUG-3.3` — gehört zu `hyperlink-einfuegen-req.md`, nicht zu dieser Anforderung | **Nein** — wird als dokumentierter Fund geführt (DoD Punkt 5 erfüllt durch Dokumentation, nicht durch Fix in diesem Ticket); Test bleibt dauerhaft rot **markiert als bekannt**, bis `hyperlink-einfuegen-req.md` das aufgreift |
-| 4.2.4 (`w:val="NONE"` Großschreibung) | `src/formats/docx/__tests__/underline.test.ts` | `U-BUG-3.4`/Grenzfall 14 — geringe Priorität, da im realen Korpus (Stand Code-Audit) durchgehend Kleinschreibung vorliegt | Empfohlen, aber laut Anforderungsabschnitt 4 Grenzfall 14 als „zu härten", nicht als kritischer Blocker eingestuft — vor Status „verifiziert" idealerweise mit erledigt, sonst als bekannte Restlücke im DoD-Vermerk |
-
-**Vorgehen für die Testausführung:** Diese Tests **nicht** mit `test.skip`/`it.skip`
-auskommentieren und **nicht** die Assertion auf das aktuell falsche Verhalten ändern, nur
-damit die Suite grün wird — das wäre exakt die in Anforderungsabschnitt 7 kritisierte
-Praxis („Code-Vorhandensein mit Funktionieren verwechselt"). Stattdessen: Tests wie oben
-beschrieben auf das **korrekte Soll** schreiben, beim ersten CI-Lauf als erwartet
-fehlschlagend im PR vermerken, Fix gemäß `unterstrichen-einfach-code.md` Abschnitt 3.1/3.2
-in einem eigenen Dev-Commit nachziehen, danach werden dieselben Tests grün — ohne dass am
-Testcode noch etwas geändert werden musste. Für `U-BUG-3.3` (out of scope) reicht eine
-`test.fixme('U-BUG-3.3: ...')`-Markierung mit Verweis auf das Ticket bei
-`hyperlink-einfuegen-req.md`, damit Playwright ihn nicht als „failed", sondern als
-„fixme, bekannt" auflistet — hier **darf** `test.fixme` verwendet werden, weil der Fix
-explizit einem anderen Backlog-Eintrag zugeordnet ist, nicht stillschweigend übersprungen
-wird.
+- `tests/e2e/clipboard-roundtrip.spec.ts:194-202` — prüft nur Substring `'<w:u '`:
+  **unzureichend**, verschärfen (5.3).
+- `tests/e2e/docx.spec.ts:301` / `tests/e2e/odt.spec.ts:277` — prüfen nur **Import** einer
+  selbst erzeugten Fixture: als Teilnachweis behalten, aber **keine** vollständige
+  UI-Rundreise; ersetzt durch `U-RT-1/2`.
+- `src/formats/{docx,odt}/__tests__/roundtrip.test.ts` (underline) — konstruiertes JSON:
+  behalten (4.1), ersetzt nicht die Fremddatei-/Cross-Format-Tests.
 
 ---
 
-## 8. Unabhängige Parser-Validierung (DoD Punkt 2, manueller Einmalschritt)
-
-Automatisiert (Teil der CI-Suite): `U-RT-6/7` prüfen den exportierten XML-String direkt
-per Regex (`/<w:u\s+w:val="single"\s*\/>/` bzw.
-`'style:text-underline-style="solid"'`), **ohne** die App-eigenen `readDocx`/`readOdt`-
-Funktionen zu verwenden (Abschnitt 5.3) — das deckt „unabhängig vom eigenen Reader"
-bereits weitgehend ab, ist aber noch dieselbe Sprache/Laufzeit wie die Anwendung selbst.
-
-**Zusätzlich, manuell, einmalig vor dem Statuswechsel auf „verifiziert" (DoD Punkt 2
-verlangt „echte, nicht selbst erzeugte Prüfwerkzeuge"):**
-
-1. `npm run test:e2e -- tests/e2e/underline.spec.ts -g "U-RT-6/7"` lokal laufen lassen,
-   den heruntergeladenen Dateien-Pfad aus dem Playwright-Trace/Testartefakt entnehmen
-   (oder Export manuell im laufenden Dev-Server auslösen).
-2. Exportierte DOCX-Datei mit `python-docx` öffnen (`pip install python-docx`):
-   ```python
-   from docx import Document
-   d = Document('export.docx')
-   for p in d.paragraphs:
-       for r in p.runs:
-           if r.underline:
-               print('OK, python-docx erkennt Unterstreichung:', r.text)
-   ```
-3. Exportierte ODT-Datei in LibreOffice Writer öffnen, visuell bestätigen, dass der Text
-   unterstrichen dargestellt wird (LibreOffice selbst ist die unabhängige
-   Referenzimplementierung für ODF in diesem Schritt).
-4. Ergebnis (Datum, LibreOffice-/python-docx-Version, Screenshot oder Konsolenausgabe)
-   als Vermerk in dieser Datei (Abschnitt 9) oder in `unterstrichen-einfach-req.md`
-   festhalten — **nicht** offen lassen (DoD Punkt 2 ist sonst nicht erfüllt, egal wie
-   grün die automatisierte Suite ist).
-
-Bewusst **kein** Bestandteil der automatisierten CI-Pipeline (keine Python-Laufzeit in
-CI einführen nur für einen einmaligen Statusnachweis) — siehe auch
-`unterstrichen-einfach-code.md` Abschnitt 7.
-
----
-
-## 9. Vermerk manueller Prüfschritt (auszufüllen bei Durchführung)
-
-| Datum | Durchgeführt von | python-docx-Ergebnis | LibreOffice-Ergebnis | Anmerkungen |
-|---|---|---|---|---|
-| _offen_ | _offen_ | _offen_ | _offen_ | Noch nicht durchgeführt — siehe Abschnitt 8, Schritt 1–4. Muss vor Statuswechsel auf „verifiziert" nachgetragen werden (DoD Punkt 2). |
-
----
-
-## 10. Ausführung — Kommandos
+## 9. Ausführung — Kommandos
 
 ```bash
-# Unit-Tests (neu + bestehend)
-npm test                          # vitest run — alle Unit-Tests inkl. neuer underline.test.ts
-npm test -- underline             # nur die neuen Underline-Unit-Tests (Namensfilter)
+# Unit-Tests
+npm test                              # vitest run (inkl. neuer underline.test.ts + cross-format)
+npm test -- underline                 # nur Underline-Unit-Tests (Namensfilter)
 
-# E2E-Tests (Playwright, startet Preview-Server automatisch)
+# E2E (Playwright startet Preview-Server automatisch)
 npm run test:e2e -- tests/e2e/underline.spec.ts
 npm run test:e2e -- tests/e2e/selection-regression.spec.ts
-npm run test:e2e -- --update-snapshots tests/e2e/underline.spec.ts   # Baseline für U-TF-12 initial erzeugen
+npm run test:e2e -- --update-snapshots tests/e2e/underline.spec.ts   # Baseline U-TF-15 (Desktop Chrome)
 ```
 
 ---
 
-## 11. Offene Punkte / Risiken für die Umsetzung dieses Plans
+## 10. Umgang mit den Bug-Tests (CI-grün UND ehrlich)
 
-1. **Cross-Format-Workflow (`U-RT-3/4/5`) ist am tatsächlichen UI zu verifizieren**,
-   bevor der Testcode final geschrieben wird (siehe Hinweis Abschnitt 5.3) — dieser Plan
-   beschreibt die Zielstruktur, nicht bereits den 1:1 lauffähigen Endzustand für diese
-   drei Tests.
-2. **`U-GF-3` (Tabellenzellgrenze) hängt von tatsächlichem ProseMirror-`CellSelection`-
-   Verhalten im konkreten Editor-Setup ab** — welche exakte Tastenkombination/Mausaktion
-   im Browser eine `CellSelection` statt einer normalen Text-Selektion erzeugt, ist beim
-   Schreiben des Tests empirisch zu ermitteln (z. B. Shift+Klick in Nachbarzelle), nicht
-   nur aus dem ProseMirror-Tabellen-Modul-Dokument abzuleiten.
-3. **Zwei der neuen Unit-Tests sind erwartungsgemäß rot, bis die zugehörigen Bugs
-   (`U-BUG-3.1`, `U-BUG-3.2`) gefixt sind** — siehe Abschnitt 7. Wer diesen Plan
-   umsetzt, muss das im PR/CI-Lauf transparent machen (z. B. im PR-Text „2 von N Tests
-   rot, erwartet — siehe Abschnitt 7 des QA-Plans"), nicht kommentarlos einchecken.
-4. **DoD Punkt 2 (unabhängiger Parser) bleibt bis zur manuellen Durchführung offen** —
-   Abschnitt 9 dieser Datei ist der Ort, an dem das Ergebnis nachgetragen wird.
-5. **Test-Fixtures für Bilder (`U-GF-5`)**: Es existiert noch keine Mini-PNG-Testdatei im
-   Repo für E2E-Uploads — `src/formats/*/__tests__/roundtrip.test.ts` verwendet dafür
-   eine inline Base64-`TINY_PNG`-Konstante; für den E2E-Test kann dieselbe Byte-Folge
-   dekodiert und als `Buffer` an `setInputFiles` übergeben werden, statt eine neue
-   Bilddatei ins Repo aufzunehmen.
+Vier neue Tests treffen reale, noch nicht behobene Bugs: zwei Unit-Tests die Reader-Bugs
+(`unterstrichen-einfach-code.md` 3.1/3.2) **und** die zwei E2E-Tests `U-TF-4a` (Defekt A,
+Button-Tastaturbedienung, code.md 3.8) und `U-TF-8` (Defekt B, `storedMarks`-Aktivzustand,
+code.md 3.9). Ziel ist, sie **weder** grün zu lügen (Assertion auf das falsche Verhalten)
+**noch** die CI dauerhaft rot zu lassen (der Pipeline-Grundsatz verlangt grüne CI nach
+jedem Schritt). Reihenfolge der Präferenz:
+
+1. **Bevorzugt — Test + Fix im selben Arbeitspaket:** Die Assertion beschreibt das
+   **korrekte Soll** (`toContain('underline')`), und der zugehörige Reader-Fix aus code.md
+   3.1/3.2 wird **im selben PR** mitgeliefert. Dann ist der Test von Anfang an grün und
+   ehrlich. Das ist der Regelfall, weil code.md die Fixes ohnehin als „Hoch"-Priorität führt.
+2. **Falls Tests vor dem Fix landen müssen — expliziter xfail-Marker:** In Vitest
+   `it.fails('… (KNOWN BUG U-BUG-3.1, remove marker when odt/reader.ts paragraph-style fix
+   lands)', …)` mit Soll-Assertion. `it.fails` ist grün, **solange** die Soll-Assertion
+   fehlschlägt, und schlägt **rot** um, sobald der Bug behoben ist — das erzwingt aktiv das
+   Entfernen des Markers und verhindert stilles Vergessen. Der Testname deklariert den Bug,
+   also kein „grün lügen".
+3. **Verboten:** `it.skip`/`test.skip` ohne Bug-Bezug, oder Assertion auf das aktuell falsche
+   Verhalten — genau die in Req Abschnitt 7 kritisierte Praxis.
+
+| Test | Bug | Präferenz | Muss vor Status „verifiziert" grün? |
+|---|---|---|---|
+| 4.3.4 / 4.3.5 (`Tabelle1.odt`, `solid` auf Absatzstil) | `U-BUG-3.1` | Fix mitliefern | **Ja** — rundreiserelevant (Req 5), DoD 4 |
+| 4.2.5 (DOCX Formatvorlagen-Default) | `U-BUG-3.2` | Fix mitliefern | **Ja** (Konsistenz zum ODT-Bug; Code-Pfad strukturell gleich riskant) |
+| 4.2.4 (`w:val="NONE"` Groß-/Kleinschreibung) | Härtung 3.3 | Fix mitliefern oder `it.fails` | Empfohlen; sonst als bekannte Restlücke im DoD vermerken |
+| 4.3.6 (`hyperlinkSpaces.odt`, Underline via `parent-style-name`) | `U-BUG-3.3` (out of scope) | Test prüft **Text überlebt** (grün) + kommentiert fehlende Underline als bekannt (`hyperlink-einfuegen-req.md`) | **Nein** — dokumentierter Fund, kein Fix in diesem Ticket (DoD 5 via Doku erfüllt) |
+| `U-TF-4a` (Button-Tastaturbedienung Enter/Space) | Defekt A / 3.8 (UI, „hoch") | Fix mitliefern (Toolbar `onMouseDown`→`onClick`) | **Ja** — DoD Punkt 2 verlangt Defekt A behoben **und** mit Regressionstest abgesichert |
+| `U-TF-8` (aria-pressed folgt `storedMarks`) | Defekt B / 3.9 (UI, „hoch") | Fix mitliefern (`isMarkActive`) | **Ja** — DoD Punkt 2 verlangt Defekt B behoben **und** mit Regressionstest abgesichert |
+
+**Playwright-Äquivalent zu `it.fails`:** Muss ein E2E-Test (`U-TF-4a`/`U-TF-8`)
+ausnahmsweise **vor** dem UI-Fix landen, ist `test.fail()` zu verwenden (Playwright markiert
+den Test als erwartet-fehlschlagend: grün solange die Assertion rot ist, rot sobald der Fix
+sie grün macht — erzwingt aktiv das Entfernen des Markers). Bevorzugt bleibt aber „Fix +
+Test im selben PR", weil code.md Defekt A/B als „hoch" führt und die Fixes klein/lokal sind.
+
+---
+
+## 11. Unabhängige Parser-Validierung (DoD Punkt 2, manueller Einmalschritt)
+
+Automatisiert deckt `U-RT-6/7` (Regex direkt gegen `document.xml`/`content.xml`, **ohne**
+`readDocx`/`readOdt`) plus die neue DOCX-Schema-Validierung (4.5) „unabhängig vom eigenen
+Reader" weitgehend ab — bleibt aber dieselbe Laufzeit wie die App. Zusätzlich **einmalig vor
+dem Statuswechsel** (bewusst **nicht** in CI — keine Python-Laufzeit einführen):
+
+1. Export lokal auslösen (`npm run test:e2e -- tests/e2e/underline.spec.ts -g "U-RT-6/7"`;
+   Datei aus dem Playwright-Artefakt/Trace ziehen oder im Dev-Server manuell exportieren).
+2. DOCX mit `python-docx` öffnen und `run.underline` prüfen:
+   ```python
+   from docx import Document
+   for p in Document('export.docx').paragraphs:
+       for r in p.runs:
+           if r.underline: print('python-docx erkennt Unterstreichung:', r.text)
+   ```
+3. ODT in **LibreOffice Writer** öffnen und visuell bestätigen (LibreOffice = unabhängige
+   ODF-Referenz).
+4. Ergebnis (Datum, Versionen, Ausgabe/Screenshot) in Abschnitt 12 eintragen — sonst ist
+   DoD Punkt 2 nicht erfüllt, egal wie grün die automatisierte Suite ist.
+
+---
+
+## 12. Vermerk manueller Prüfschritt (bei Durchführung ausfüllen)
+
+| Datum | Von | python-docx-Ergebnis | LibreOffice-Ergebnis | Anmerkungen |
+|---|---|---|---|---|
+| _offen_ | _offen_ | _offen_ | _offen_ | Noch nicht durchgeführt — Abschnitt 11. Vor Statuswechsel auf „verifiziert" nachzutragen (DoD 2). |
+
+---
+
+## 13. Offene Punkte / Risiken für die Umsetzung
+
+1. **`U-GF-3` (Tabellen-Zellgrenze):** welche Aktion eine `CellSelection` erzeugt, ist am
+   konkreten Editor-Setup zu bestätigen — der Plan setzt auf den **committeten** Maus-Drag
+   zwischen Zellen (`cut.spec.ts` Testfall 7), nicht auf eine zu erratende Tastenkombi.
+2. **`U-BUG-3.1`/`3.2`:** siehe Abschnitt 10 — Test bevorzugt gemeinsam mit dem Reader-Fix
+   landen, sonst xfail-Marker; im PR-Text transparent machen.
+3. **DoD Punkt 2:** bleibt bis zur manuellen Durchführung offen (Abschnitt 11/12).
+4. **`U-GF-5`/Bild-Upload:** dieselbe Mini-PNG-Base64-Konstante wie in `cut.spec.ts`
+   verwenden (kein neues Binär-Asset ins Repo aufnehmen).
+5. **Mobile-CI-Vorbehalt (R5):** falls `U-TF-6` (gemischte `Shift+Pfeil`-Selektion) auf dem
+   „Mobile"-Projekt in CI als No-Op flaket, denselben dokumentierten
+   `test.skip(testInfo.project.name === 'Mobile', …)` setzen wie in `cut.spec.ts` — aber
+   erst bei belegter CI-Flake, nicht prophylaktisch.
+6. **Req 3.10 (`formatierung-loeschen`) / 3.11 (Hyperlinks):** Zielfunktionen fehlen; im
+   Testfile als „nicht anwendbar, Zielfunktion fehlt" vermerken, nicht stillschweigend
+   auslassen (Req 3.10/3.11).

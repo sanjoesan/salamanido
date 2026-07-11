@@ -53,10 +53,22 @@ Fixes für Befund 0.4/0.5, Writer inkl. `RELATIONSHIP_TYPES.hyperlink` +
 `TargetMode="External"` + `escapeXml`-Fix auf `Relationship.target`,
 Standardoptik über referenzierte Zeichenformatvorlage statt Inline-Styling,
 Toolbar-Button, Strg+K, `LinkDialog`, `linkClickPlugin`) **vor** dem finalen
-grünen Lauf dieser Suite vorliegt. Test 1.1 dokumentiert bewusst den **noch
-nicht behobenen** Ausgangszustand (Befund 0.4/0.5) als Vorher-Beleg und bleibt
-danach als dauerhafter Regressionsschutz bestehen — das ist der einzige Test
-in diesem Plan, der absichtlich einen Datenverlust erwartet und behauptet.
+grünen Lauf dieser Suite vorliegt.
+
+**Klarstellung zu Befund 0.4/0.5 — kein Datenverlust-Bug (load-bearing, darf
+nicht wieder verwischt werden):** `hyperlink-einfuegen-req.md` §0.4/§0.5 und
+`hyperlink-einfuegen-code.md` §0/§1 stellen ausdrücklich und mehrfach richtig,
+dass die beiden Reader den **sichtbaren Linktext schon heute vollständig
+bewahren** (DOCX über `collectRuns`, das in `<w:hyperlink>` absteigt; ODT über
+den `else`-Zweig in `walk`, der in `text:a` absteigt — empirisch an `rtl.docx`
+bestätigt). Die **einzige** Lücke ist die **Ziel-URL** (`href`). Dieser Plan
+darf die von beiden Vorgängerdokumenten korrigierte Fehlbehauptung „der Reader
+verschluckt den Text" **nicht wieder einführen**. Test 1.1 ist deshalb **kein**
+Datenverlust-Test: seine Text-Erhalt-Assertion ist **bereits heute grün** (und
+belegt genau, dass kein Datenverlust vorliegt); **rot** ist vor dem Fix
+ausschließlich die zusätzliche `href`-Assertion. Nach dem Fix sind beide grün.
+Damit setzt dieser Plan Testplan-Punkt 1 / §6.1 der Anforderung („bestehende
+Text-Erhalt-Tests **erweitern**, nicht ersetzen") korrekt um.
 
 ---
 
@@ -89,23 +101,31 @@ direkt** (`readDocx`, `writeDocx`, `readOdt`, `writeOdt`, `sanitizeHref`,
 `buildLinkDialogRequest`) — das ist hier ausdrücklich erlaubt und richtig,
 weil sie durch die Playwright-Ebene (Abschnitt 2) ergänzt, nicht ersetzt wird.
 
-### 1.1 Regressionstest zuerst: Befund 0.4 (DOCX) / 0.5 (ODT) reproduzieren
+### 1.1 Regressionstest zuerst: href-Erfassung für Befund 0.4 (DOCX) / 0.5 (ODT)
 
-Testplan-Punkt 1 der Anforderung verlangt ausdrücklich, den stillen
-Textverlust **vor** jeder neuen Funktionalität nachzuweisen. Zwei neue,
-minimale Tests, die absichtlich den **unreparierten** Reader gegen eine
-handgebaute XML-Struktur laufen lassen:
+Testplan-Punkt 1 der Anforderung verlangt ausdrücklich, die
+**Reader-`href`-Tests vor dem Fix zu schreiben** (TDD) und die bestehenden
+Text-Erhalt-Tests dabei zu **erweitern, nicht zu ersetzen** (§6.1). Zwei neue,
+minimale Tests laufen gegen eine handgebaute XML-Struktur. **Wichtig (siehe
+Klarstellung oben):** Es wird **kein** Textverlust nachgewiesen — die
+Text-Erhalt-Assertion ist **schon vor** dem Fix grün und beweist, dass kein
+Datenverlust vorliegt; **rot** ist vor dem Fix ausschließlich die neue
+`href`-Assertion. Jeder Test prüft daher **beide** Aspekte getrennt (Text
+vorhanden / `href` vorhanden), damit rot/grün eindeutig der href-Lücke
+zugeordnet ist.
 
 | # | Datei | Testfall | Eingabe | Erwartung **vor** Fix | Erwartung **nach** Fix (dauerhafter Regressionsschutz) |
 |---|---|---|---|---|---|
-| 1 | `src/formats/docx/__tests__/hyperlink.test.ts` (neu) | minimaler `<w:hyperlink><w:r><w:t>` verliert Text | per JSZip gebaute Mini-DOCX mit `<w:p><w:hyperlink r:id="rId4"><w:r><w:t>Beispieltext</w:t></w:r></w:hyperlink></w:p>` (analog `buildSampleDocx()`-Muster aus `tests/e2e/docx.spec.ts`) → `readDocx(blob)` | Text „Beispieltext" fehlt komplett im resultierenden Dokumentbaum | Text „Beispieltext" vorhanden **und** trägt `link`-Mark mit `href` aus `rId4` aufgelöst |
-| 2 | `src/formats/odt/__tests__/hyperlink.test.ts` (neu) | minimaler `<text:a xlink:href="…">Text</text:a>` verliert Text | handgebautes `content.xml` mit `<text:p><text:a xlink:href="http://www.heise.de/">Beispieltext</text:a></text:p>` → `readOdt(blob)` | Text „Beispieltext" fehlt komplett | Text „Beispieltext" vorhanden **und** trägt `link`-Mark mit `href="http://www.heise.de/"` |
+| 1 | `src/formats/docx/__tests__/hyperlink.test.ts` (neu) | `<w:hyperlink r:id>`: Text erhalten (heute), `href` fehlt (heute) | per JSZip gebaute Mini-DOCX mit `<w:p><w:hyperlink r:id="rId4"><w:r><w:t>Beispieltext</w:t></w:r></w:hyperlink></w:p>` **plus** passender `word/_rels/document.xml.rels` (`rId4` → `Target="https://example.com/ziel"`, `TargetMode="External"`) (analog `buildSampleDocx()`-Muster aus `tests/e2e/docx.spec.ts`) → `readDocx(blob)` | Text „Beispieltext" **ist vorhanden** (Text-Erhalt-Assertion **schon grün**, kein Datenverlust), aber **kein** `link`-Mark / **kein** `href` → Test rot **allein** wegen der fehlenden href-Assertion | Text „Beispieltext" vorhanden **und** trägt `link`-Mark mit `href="https://example.com/ziel"` (aus `rId4` über die Relationship-Map aufgelöst) |
+| 2 | `src/formats/odt/__tests__/hyperlink.test.ts` (neu) | `<text:a xlink:href>`: Text erhalten (heute), `href` fehlt (heute) | handgebautes `content.xml` mit `<text:p><text:a xlink:href="http://www.heise.de/">Beispieltext</text:a></text:p>` → `readOdt(blob)` | Text „Beispieltext" **ist vorhanden** (Text-Erhalt-Assertion **schon grün**), aber **kein** `link`-Mark / **kein** `href` → Test rot **allein** wegen der fehlenden href-Assertion | Text „Beispieltext" vorhanden **und** trägt `link`-Mark mit `href="http://www.heise.de/"` |
 
-Diese beiden Tests werden **vor** dem jeweiligen Reader-Fix geschrieben und
-rot laufen gelassen (Beleg für Befund 0.4/0.5), danach — nach Umsetzung der in
-`hyperlink-einfuegen-code.md` Abschnitt 4.10/4.14 beschriebenen Fixes — grün
-erwartet und bleiben als permanenter Schutz gegen ein Wiederauftreten in der
-Suite. Ergebnis (rot vor Fix bestätigt, grün nach Fix bestätigt) wird hier
+Beide Tests werden **vor** dem jeweiligen Reader-Fix geschrieben
+(`hyperlink-einfuegen-code.md` §4.11 DOCX-Reader / §4.15 ODT-Reader — **nicht**
+§4.10/§4.14, das sind die Writer) und rot laufen gelassen: Beleg, dass die
+href-Assertion fehlschlägt, **während** die Text-Erhalt-Assertion schon grün
+ist (Befund 0.4/0.5, kein Datenverlust). Nach dem Fix sind beide grün und
+bleiben als permanenter Regressionsschutz. Ergebnis (href-Assertion rot vor
+Fix / alles grün nach Fix; Text-Assertion in **beiden** Läufen grün) wird hier
 nachgetragen.
 
 ### 1.2 Neu: `src/formats/shared/__tests__/url.test.ts`
@@ -201,7 +221,7 @@ Analog zu 1.4, über `readOdt(blob)`/`writeOdt(doc)` und handgebautem
 
 | # | Testfall | Erwartung | Deckt |
 |---|---|---|---|
-| 1 | (siehe 1.1) Regressionstest `<text:a>` verliert Text/geht nicht in Kind-Knoten | Text + `link`-Mark vollständig erhalten | Befund 0.5 |
+| 1 | (siehe 1.1) `<text:a>`: `href`-Erfassung, während der `walk`-Abstieg in die Kind-Knoten (Text-Erhalt) erhalten bleibt | Text (bereits heute) + `link`-Mark mit `href` (neu) vollständig vorhanden | Befund 0.5 |
 | 2 | Writer: `link`-Mark → Export | exakt `<text:a xlink:href="…" xlink:type="simple">…</text:a>` um den betroffenen Text | Anforderung 3.14/5.2.1 |
 | 3 | Zusätzliche Zeichenformatierung innerhalb des Links (z. B. fett) → Export | innerer `text:span` mit eigener Formatvorlage bleibt **innerhalb** von `<text:a>` erhalten, keine der beiden Ebenen verdrängt die andere | Anforderung 3.14 |
 | 4 | URL mit Sonderzeichen (`&`, Anführungszeichen, Leerzeichen, Umlaute) → Export | `xlink:href` korrekt XML-escaped (`escapeXml`), gültiges `content.xml` | Grenzfall 4.6 |
@@ -311,6 +331,61 @@ function linkDialog(page) {
 je nach Testfall `odtCard`/`docxCard` „Neu erstellen" klicken (analog zu
 `selection-regression.spec.ts`).
 
+### 2.0.1 Determinismus / keine Race-Conditions (verbindlich für alle Tests dieses Abschnitts)
+
+Dieses Repo hat eine **dokumentierte, wiederkehrende Flakiness-Quelle**:
+ProseMirror erfährt eine native, tastaturgetriebene Cursor-/Selektions­änderung
+(z. B. `End`, Pfeiltasten) erst über das **asynchrone** `selectionchange`-Event
+des Browsers. Feuert der nächste Tastendruck sofort danach (wie es
+`page.keyboard.press()` ohne menschliche Reaktionszeit tut), kann er der
+Selektions-Synchronisation **vorauslaufen** und auf der veralteten Position
+wirken — genau der Fehler, den `selection-regression.spec.ts:26-34` mit einem
+kurzen `await page.waitForTimeout(50)` **zwischen** caret-bewegender Taste und
+Folgetaste abfängt (in der Git-Historie mehrfach als „async selection-sync
+race" behoben, u. a. für die **Mobile-Projekt**-Läufe von `cut.spec.ts` und
+`selection-regression.spec.ts`). Für die Link-Tests **verbindlich**:
+
+1. **Selektions-Sync abwarten, nicht überrennen.** Nach jeder caret-bewegenden
+   Tastenaktion (`End`, `Home`, Pfeiltasten, `editor.click()`-Neupositionierung)
+   und **vor** dem nächsten `keyboard.press`/`type` denselben
+   `await page.waitForTimeout(50)` einfügen wie `selection-regression.spec.ts`
+   (mit demselben erklärenden Kommentar). Betrifft insbesondere die
+   Pflichtsequenz §2.11 (markieren → Dialog bestätigen → klicken → `End` →
+   `Enter` → tippen): Der Wait **muss** vor `Enter` stehen, sonst reproduziert
+   der Test exakt die historische Cut-/Selection-Flakiness (die gerade auf dem
+   Mobile- und Tablet-Projekt auftrat).
+2. **URL-/Anzeigetext-Felder mit `locator.fill()` befüllen, nicht mit
+   `keyboard.type()`.** `fill()` setzt den Wert atomar und wartet auf
+   Editierbarkeit/Sichtbarkeit — deterministisch. Getipptes `keyboard.type()`
+   in ein kontrolliertes React-Eingabefeld kann bei voller Geschwindigkeit
+   Zeichen verlieren. `keyboard.type()` nur dort, wo bewusst das Tippen **in
+   den Editor** (nicht ins Dialogfeld) geprüft wird.
+3. **Auf beobachtbare Zustände warten, nicht auf feste Zeiten.** Vor jeder
+   Assertion Playwright-Auto-Waiting nutzen (`await expect(locator).toHaveText/…`,
+   `toHaveAttribute`, `toBeVisible`). Kein `waitForTimeout` als Ersatz für eine
+   echte Bedingung; der 50-ms-Wait aus Punkt 1 ist die **einzige** erlaubte
+   feste Wartezeit und ausschließlich für die native-`selectionchange`-Lücke
+   reserviert.
+4. **Dialog-Öffnen setzt die Selektion nicht zurück** (`hyperlink-einfuegen-
+   code.md` §4.8: Felder liegen außerhalb `view.dom`, kein Fokuswechsel im
+   Editor). Trotzdem gilt: Nach `ControlOrMeta+a` **direkt** den Link-Button
+   klicken bzw. `ControlOrMeta+k` drücken (kein zwischengeschalteter caret-Move),
+   damit der Dialog die stabile, vollständige Selektion liest — exakt wie
+   `selection-regression.spec.ts` `ControlOrMeta+a` → `getByTitle('Fett').click()`
+   ohne Zwischenschritt macht.
+5. **Negativ-Assertions brauchen einen positiven Sync-Punkt.** Für „es passiert
+   *nichts*" (z. B. `javascript:` abgelehnt, kein `alert`): erst den Listener
+   registrieren (`page.on('dialog', …)` / `page.on('pageerror', …)`), dann die
+   Aktion ausführen, dann **auf ein sichtbares positives Signal warten** (die
+   Fehlermeldung `role="alert"` im Dialog `await expect(...).toBeVisible()`) und
+   **erst danach** die Abwesenheit prüfen — nie „kurz warten und hoffen".
+6. **Cross-Project.** `hyperlink.spec.ts` läuft laut `playwright.config.ts` auf
+   `Desktop Chrome`, `Mobile` (Pixel 7, Touch) und `Tablet` (iPad Mini, WebKit
+   Touch). Die Selektions-Sync-Lücke trat historisch **gerade auf Mobile/Tablet**
+   auf — die Wait-Disziplin aus Punkt 1 ist dort nicht optional. Rein
+   desktop-spezifische Interaktionen (Strg/Cmd+Klick-Popup) werden so geprüft,
+   dass sie auch auf Touch-Projekten deterministisch sind (siehe §2.8-Hinweis).
+
 ### 2.1 Grundfunktion: Link setzen per Button-Klick (Bedienelement 1/3, Anforderung 3.1)
 
 | # | Testfall | Schritte (echte Bedienung) | Assertion |
@@ -385,8 +460,18 @@ je nach Testfall `odtCard`/`docxCard` „Neu erstellen" klicken (analog zu
 |---|---|---|---|
 | 1 | Einfacher Klick auf verlinkten Text navigiert **nicht** weg | Link setzen, `editor.locator('a[href]').click()` | Seite bleibt auf der App (`page.url()` unverändert), kein neuer Tab/Popup geöffnet |
 | 2 | Einfacher Klick platziert den Cursor zum Weiterbearbeiten | Fortsetzung von #1: direkt danach `page.keyboard.type('X')` | eingegebenes „X" erscheint an der Klickposition im Linktext (bestätigt, dass Caret-Platzierung trotz `preventDefault` auf die Navigation weiterhin funktioniert) |
-| 3 | Strg/Cmd+Klick öffnet die Ziel-URL in neuem Tab | `page.waitForEvent('popup')` parallel zu `editor.locator('a[href]').click({ modifiers: ['ControlOrMeta'] })` | Popup-Event feuert, neue Seite mit der erwarteten Ziel-URL geöffnet |
+| 3 | Strg/Cmd+Klick öffnet die Ziel-URL in neuem Tab | `const popupPromise = page.waitForEvent('popup')` **vor** `editor.locator('a[href]').click({ modifiers: ['ControlOrMeta'] })`, dann `const popup = await popupPromise` | Popup-Event feuert; `popup.url()` beginnt mit der erwarteten Ziel-URL. **Nicht** auf das *Laden* der externen Seite warten (die E2E-Umgebung ist netzwerkisoliert, siehe `tests/e2e/network-isolation.spec.ts`) — geprüft wird nur, dass `window.open` mit korrekter URL/`_blank` ausgelöst wurde; Popup anschließend `await popup.close()` |
 | 4 | Doppelklick auf verlinkten Text selektiert das Wort, keine Navigation | `editor.locator('a[href]').dblclick()` | Wort ist selektiert (`window.getSelection()` bzw. sichtbare Textauswahl), kein neuer Tab, keine Navigation (Grenzfall 19, darf durch 3.9 nicht beeinträchtigt werden) |
+
+**Touch-Projekte (Mobile/Tablet) und Determinismus:** einfacher Klick und
+`click({ modifiers: ['ControlOrMeta'] })` werden von Playwright auch auf den
+Touch-Projekten als echte Zeiger-Interaktion emuliert; die Assertions sind
+bewusst zustands-/attributbasiert (`page.url()` unverändert, Cursor-Position
+nach Klick, `popup.url()`), damit sie projektunabhängig deterministisch sind
+und nicht vom externen Seitenladen abhängen. Der Tooltip (Bedienelement 8)
+wird **nicht** über echtes Hover, sondern über den `title`-Attributwert des
+`<a>` geprüft (§2.1 #1) — das funktioniert auf Desktop wie Touch gleichermaßen
+deterministisch.
 
 ### 2.9 Zwischenablage (Anforderung 3.10)
 
@@ -427,6 +512,25 @@ und `word/_rels/document.xml.rels` aus dem Zip gelesen und per `DOMParser`
 bzw. Regex geprüft), nicht nur, dass der Editor nach Re-Import „irgendwie
 richtig aussieht".
 
+**Pflicht-Zwischenschritt bei jedem Re-Import-/Cross-Format-Szenario (§2.12 #2,
+#7; §2.13 #2, #4, #5, #6; §2.14):** Das Datei-`input[type="file"]` existiert nur
+auf dem Format-Auswahl-Bildschirm, **nicht** im geöffneten Editor. Vor jedem
+zweiten `setInputFiles` daher zurück zur Auswahl navigieren —
+`await page.getByRole('button', { name: /formate/i }).click()` — exakt wie
+`docx.spec.ts:241`/`docx.spec.ts:331`. Andernfalls ist der Upload-Locator gar
+nicht vorhanden und das Szenario nicht ausführbar. Für den Re-Import stets die
+**exakten heruntergeladenen Bytes** (`exportedBuffer`) verwenden, nicht das
+In-Memory-Dokument aus Schritt 1.
+
+**Cross-Format-Machbarkeit (§2.12 #7, §2.13 #4, §2.14):** Falls die App-UI
+keinen direkten Wechsel des Export-Formats bei geladenem Dokument anbietet, wird
+die Cross-Format-Rundreise auf **Unit-Ebene** abgesichert (§1.6 #15:
+`readDocx`-Ergebnis mit `link`-Mark → `writeOdt`, und Gegenrichtung), und das
+E2E-Cross-Format-Szenario wird nur ausgeführt, soweit der reale App-Workflow es
+zulässt. Diese Feststellung ist beim Umsetzen einmalig zu treffen und hier zu
+vermerken (Abschnitt 4), damit kein E2E-Szenario stillschweigend übersprungen
+wird.
+
 | # | Szenario | Ablauf | Assertion an heruntergeladener Datei |
 |---|---|---|---|
 | 1 | Basisfall: Link setzen, exportieren | Neu erstellen → tippen → markieren → Link mit `https://example.com/pfad?x=1&y=2` setzen → Export | `word/document.xml` enthält `<w:hyperlink r:id="rIdN">` um genau den erwarteten Run, kein anderer Text betroffen; `word/_rels/document.xml.rels` enthält für `rIdN` `Type=".../hyperlink"`, `Target="https://example.com/pfad?x=1&y=2"` (korrekt escaped, `DOMParser`-parsebar) **und** `TargetMode="External"` |
@@ -445,7 +549,7 @@ richtig aussieht".
 | 2 | Reimport derselben Datei | erneut hochladen | `href` exakt erhalten |
 | 3 | Link entfernt, exportiert | setzen, entfernen, exportieren | `content.xml` enthält kein `<text:a>` mehr für diesen Textlauf, verbleibender `text:span` (falls vorhanden) bleibt bestehen |
 | 4 | Cross-Format: DOCX mit Link (aus diesem Editor erzeugt) importieren → als ODT exportieren | DOCX aus 2.12 #1 hochladen (in DOCX-Karte) → Inhalt als ODT exportieren | `href` bleibt erhalten |
-| 5 | **Kritischer Test:** alle fünf inhaltstragenden realen ODT-Fixtures | `hyperlink.odt`, `hyperlinkSpaces.odt`, `hyperlinkSpacesNoUnderline.odt`, `Hyperlink-AOO401.odt` einzeln hochladen (nicht `hyperlink_destination.odt`, siehe 1.7 #5) | in jeder Datei: Linktext **und** Ziel-URL vollständig im Editor sichtbar (Regressionsnachweis Befund 0.5) |
+| 5 | **Kritischer Test:** alle vier inhaltstragenden realen ODT-Fixtures (die fünfte in Anforderung 5.2.5 genannte, `hyperlink_destination.odt`, enthält laut code.md §1 **kein** `<text:a>` und ist reiner Crash-Test, siehe 1.7 #5) | `hyperlink.odt`, `hyperlinkSpaces.odt`, `hyperlinkSpacesNoUnderline.odt`, `Hyperlink-AOO401.odt` einzeln hochladen | in jeder Datei: Linktext **und** Ziel-URL vollständig im Editor sichtbar (Regressionsnachweis Befund 0.5) |
 | 6 | `invalid_simple_overlapping_hyperlinks.odt` | hochladen | kein Absturz, Text „heise" (und umgebender Text) mindestens vollständig lesbar sichtbar |
 
 ### 2.14 Doppelte Rundreise / Cross-Format hin und zurück (Anforderung 5.3)
@@ -470,8 +574,8 @@ richtig aussieht".
 
 | Anforderungs-Abschnitt | Testebene(n) | Datei(en) |
 |---|---|---|
-| Befund 0.4 (DOCX-Textverlust) | Unit + E2E | `docx/hyperlink.test.ts` §1.1/#1, `hyperlink.spec.ts` §2.12 #5, `external-fixtures.test.ts` §1.5 #1 |
-| Befund 0.5 (ODT-Textverlust) | Unit + E2E | `odt/hyperlink.test.ts` §1.1/#1, `hyperlink.spec.ts` §2.13 #5, `external-fixtures.test.ts` §1.7 #1 |
+| Befund 0.4 (DOCX href-Erfassung; Text-Erhalt heute schon gegeben, **kein** Datenverlust) | Unit + E2E | `docx/hyperlink.test.ts` §1.1/#1, `hyperlink.spec.ts` §2.12 #5, `external-fixtures.test.ts` §1.5 #1 |
+| Befund 0.5 (ODT href-Erfassung; Text-Erhalt heute schon gegeben, **kein** Datenverlust) | Unit + E2E | `odt/hyperlink.test.ts` §1.1/#1, `hyperlink.spec.ts` §2.13 #5, `external-fixtures.test.ts` §1.7 #1 |
 | Befund 0.7 (`TargetMode="External"`) | Unit + E2E | `docx/hyperlink.test.ts` #3, `hyperlink.spec.ts` §2.12 #1 |
 | Bedienelemente 1-8 | E2E | `hyperlink.spec.ts` §2.1, §2.2, §2.4 #3-4, §2.7 #2 |
 | Bedienelement 9 (Klickverhalten) | E2E | `hyperlink.spec.ts` §2.8 |
@@ -530,13 +634,22 @@ richtig aussieht".
 - [ ] Kein Test in `hyperlink.spec.ts` ruft `readDocx`/`writeDocx`/`readOdt`/
       `writeOdt`/`setLink`/`removeLink`/`insertLinkText`/`sanitizeHref`/
       `normalizeHref` direkt auf — stichprobenartig per Review bestätigt.
-- [ ] **Kritischer Punkt (Befund 0.4):** Regressionstest 1.1 #1 ist rot **vor**
-      dem Reader-Fix und grün **nach** dem Fix nachgewiesen; `rtl.docx`-Import
-      (§2.12 #5) bestätigt Text + Link vollständig erhalten.
-- [ ] **Kritischer Punkt (Befund 0.5):** Regressionstest 1.1 #2 ist rot **vor**
-      dem Reader-Fix und grün **nach** dem Fix nachgewiesen; alle fünf
-      inhaltstragenden ODT-Fixtures (§2.13 #5) bestätigen Text + Link
-      vollständig erhalten.
+- [ ] **Kritischer Punkt (Befund 0.4):** In Regressionstest 1.1 #1 ist vor dem
+      Reader-Fix **nur die `href`-Assertion** rot, die **Text-Erhalt-Assertion
+      bereits grün** (belegt: kein Datenverlust); nach dem Fix sind beide grün.
+      `rtl.docx`-Import (§2.12 #5) bestätigt Text **und** Link vollständig
+      erhalten. (Kein Test behauptet an irgendeiner Stelle einen Textverlust.)
+- [ ] **Kritischer Punkt (Befund 0.5):** In Regressionstest 1.1 #2 ist vor dem
+      Reader-Fix **nur die `href`-Assertion** rot, die **Text-Erhalt-Assertion
+      bereits grün**; nach dem Fix beide grün. Alle vier inhaltstragenden
+      ODT-Fixtures (§2.13 #5) bestätigen Text **und** Link vollständig erhalten.
+- [ ] **Determinismus (§2.0.1):** Jede caret-bewegende Tastenaktion in
+      `hyperlink.spec.ts` ist vor der Folgetaste durch den `waitForTimeout(50)`
+      aus `selection-regression.spec.ts` abgesichert (insb. §2.11 vor `Enter`);
+      Dialogfelder werden per `fill()` befüllt; Negativ-Assertions haben einen
+      positiven Sync-Punkt (`role="alert"` sichtbar). Suite ist auf **allen**
+      Projekten (`Desktop Chrome`, `Mobile`, `Tablet`) mehrfach hintereinander
+      grün (kein Retry-Maskieren einer Race-Condition).
 - [ ] **Kritischer Punkt (Befund 0.7):** `TargetMode="External"` und
       `RELATIONSHIP_TYPES.hyperlink` sind mit unabhängigem Parser verifiziert
       (`docx/hyperlink.test.ts` #3, `hyperlink.spec.ts` §2.12 #1) **und**

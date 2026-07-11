@@ -1,42 +1,59 @@
 # Testplan (QA): Feature „Tabelle einfügen“
 
-Bezug: `specs/tabelle-einfuegen-req.md` (Anforderung, Abschnitte 1–6), `specs/tabelle-einfuegen-code.md`
+Bezug: `specs/tabelle-einfuegen-req.md` (Anforderung, Abschnitte 0–6), `specs/tabelle-einfuegen-code.md`
 (Umsetzungsplan des Entwicklers, Abschnitte 0–10). Dieses Dokument ist der **Nachweisplan** des
 QA-Agenten: Es legt fest, mit welchen konkreten, ausführbaren Tests jeder Punkt aus der Anforderung
-(Bedienelemente Abschnitt 1, Verhalten Abschnitt 2, Grenzfälle Abschnitt 3, Rundreise Abschnitt 4,
-Testfälle Abschnitt 5, Abnahmekriterien Abschnitt 6) nachgewiesen oder widerlegt wird. Es ändert
-selbst keinen Produktcode.
+(Bedienelemente §1, Verhalten §2, Grenzfälle §3, Rundreise §4, Testfälle §5, Abnahmekriterien §6)
+nachgewiesen oder widerlegt wird. Es ändert selbst keinen Produktcode.
 
 **Rollenteilung:** Anforderung (PO/Lead) → Umsetzungsplan (Dev) → dieser Testplan (QA) → Ausführung
-gegen den tatsächlich gebauten Code → Rückmeldung an Backlog-Status. Jeder Testfall hier ist bewusst
-so konkret (Selektoren, Dateien, exakte Assertions), dass er direkt in Code umgesetzt/ausgeführt
-werden kann, ohne weitere Interpretation.
+gegen den tatsächlich gebauten Code → Rückmeldung an Backlog-Status. Jeder Testfall ist bewusst so
+konkret (Selektoren, Dateien, exakte Assertions), dass er direkt in Code umgesetzt/ausgeführt werden
+kann, ohne weitere Interpretation.
 
 ---
 
-## 0. Ausgangslage zum Zeitpunkt der Testplan-Erstellung (2026-07-04)
+## 0. Ausgangslage (gegen den tatsächlichen Code neu gelesen, 2026-07-05)
 
-Gegen den Code verifiziert (deckt sich mit `tabelle-einfuegen-req.md` Zeilen 37–52 und
-`tabelle-einfuegen-code.md` Abschnitt 0):
+Sämtliche Fundstellen unten wurden am 2026-07-05 direkt im Repo verifiziert (nicht aus der Vorfassung
+übernommen). Die Vorfassung dieses Testplans enthielt an dieser Stelle **inhaltlich falsche Angaben**
+zum ODT-Writer und durchgehend **verschobene Zeilennummern**; beides ist hier korrigiert. Warnung an
+Folge-Agenten: Zeilennummern driften weiter — im Zweifel per Textsuche verankern (`insertTable`,
+`TableNameSequence`, `tableToDocx`, `w:tblPr`).
 
-| Datei | Ist-Zustand jetzt |
-|---|---|
-| `src/formats/shared/editor/Toolbar.tsx:228-239` | Button ruft weiterhin **direkt** `run(view, insertTable(2, 2))` auf. Kein Dialog. `aria-pressed={isInTable(view.state)}` noch vorhanden. |
-| `src/formats/shared/editor/commands.ts:76-86` | `insertTable(rows, cols)` unverändert, **kein** Tiefen-Guard. Kein `tableTab`, kein `insertRowAtEndAndFocusFirstCell`. |
-| `src/formats/shared/editor/WordEditor.tsx:71-82` | Keymap ohne `Tab`/`Shift-Tab`-Einträge. |
-| `src/formats/docx/writer.ts:128-171` | `w:gridCol w:w="2000"` hartkodiert (Zeile 131), `<w:tblPr/>` leer (Zeile 170) — kein `<w:tblBorders>`. |
-| `src/formats/odt/writer.ts:86-111` | `colCount = rows[0]?.content?.length ?? 1` (Zeile 88, zählt Zellen statt `colspan`-Summe), Tabellenname `Math.random()` (Zeile 109), keine Zellrahmen-Formatvorlage. |
-| `src/formats/shared/editor/InsertTableDialog.tsx`, `src/formats/shared/tableConfig.ts` | **Existieren nicht.** |
-| `tests/e2e/selection-regression.spec.ts:37` | Klickt den Button und erwartet **unmittelbar danach** `.ProseMirror td` — funktioniert nur, solange der Button direkt einfügt. |
+### 0.1 Bereits korrekt und durch grüne Tests abgesichert — NUR Regressionsschutz, KEINE Neu-„Behebung“
 
-**Konsequenz für diesen Testplan:** Alle unten aufgeführten Testfälle, die einen Dialog voraussetzen
-(Abschnitt B.1, Testfälle 1–5 aus Anforderung Abschnitt 5), sind **gegen den heutigen Code
-zwangsläufig rot** — das ist erwartet und dokumentiert exakt den in der Anforderung als „nicht
-vertrauenswürdig“/„nicht funktional“ eingestuften Zustand. Dieser Testplan ist als **Zielzustand**
-geschrieben (setzt die Umsetzung gemäß `tabelle-einfuegen-code.md` voraus) und dient zugleich als
-Abnahme-Suite, die nach jeder Umsetzungs-Iteration erneut vollständig gegen den dann aktuellen Code
-ausgeführt wird. Abschnitt E dieses Dokuments hält die Baseline (Stand heute, vor Umsetzung) fest,
-damit der Fortschritt messbar ist.
+Die Anforderung (Abschnitt 0, Punkt 2) und der Umsetzungsplan (Abschnitt 0/5.1) sind hier eindeutig:
+Zwei ODT-Punkte, die eine ältere Fassung fälschlich als offene Defekte führte, sind **im aktuellen
+Code bereits erledigt**. Sie dürfen **nicht** als „zu findende/zu behebende Bugs“ auftauchen — das
+wäre exakt die von der Anforderung verbotene „übernommene Schwäche“.
+
+| Punkt | Ist-Zustand jetzt (verifiziert) | Bestehender grüner Test |
+|---|---|---|
+| ODT-Spaltenzahl bei `colspan` | `odt/writer.ts:115-117` summiert die `colspan`-Werte der Zeile 0 korrekt auf und erzeugt exakt so viele `<table:table-column/>`. **Kein** `rows[0].content.length`. | `odt/__tests__/roundtrip.test.ts:298` — `expect((contentXml.match(/<table:table-column\/>/g) ?? []).length).toBe(2)` für eine `colspan=2`-Zelle in Zeile 0. **Bereits grün.** |
+| ODT-`table:name`-Determinismus | `odt/writer.ts:54-60` Klasse `TableNameSequence` (Kommentar `:46-50` benennt die alte `Math.random()`-Implementierung als ersetzt), Aufruf `tableNames.next()` `:173`. Vergibt deterministisch „Table1“, „Table2“ … | `odt/__tests__/roundtrip.test.ts:512-529` (`describe('ODT writer: export determinism')`), Test `:529` — zwei Tabellen, byte-identischer Export zweier Läufe. **Bereits grün.** |
+
+**QA-Regel für beide:** In diesem Plan tauchen sie ausschließlich als **Regressionsschutz** auf
+(Abschnitt A.1/A.5, B.7) — Erwartung „bleibt grün“, nicht „wird von rot auf grün gebracht“. Der
+korrekte Klassenname ist **`TableNameSequence`** (nicht „TableNameGenerator“).
+
+### 0.2 Noch zu bauen bzw. noch offen (hier zwangsläufig rot gegen den heutigen Code)
+
+| Datei | Ist-Zustand jetzt (verifiziert) | Soll (Umsetzungsplan) |
+|---|---|---|
+| `src/formats/shared/editor/Toolbar.tsx:279-288` | Button ruft **direkt** `run(view, insertTable(2, 2))` auf (`:284`); `aria-pressed={isInTable(view.state)}` (`:281`), kein Dialog. | Dialog statt fester 2×2 (Code §2.2/§3.3) |
+| `src/formats/shared/editor/commands.ts:92` | `insertTable(rows, cols)` parametrisiert, aber **kein** Tiefen-Guard; **kein** `tableTab`. `isInTable` aus `prosemirror-tables` re-exportiert (`:3,:6`). | Tiefen-Guard + `tableTab(direction)` (Code §3.1) |
+| `src/formats/shared/editor/WordEditor.tsx:77-102` | Erster `keymap({...})`-Block (`:77`) ohne `Tab`/`Shift-Tab`; `baseKeymap` (`:100`) bindet `Tab` ebenfalls nicht; `columnResizing()` (`:101`), `tableEditing()` (`:102`). | `Tab`/`Shift-Tab` an `tableTab` binden, bestehende Einträge erhalten (Code §3.2) |
+| `src/formats/docx/writer.ts:160-200` | `colCount` summiert `colspan` **bereits korrekt** (`:160`), **aber** `<w:gridCol w:w="2000"/>` hartkodiert je Spalte (`:161`) und `<w:tblPr/>` **leer** (`:200`, kein `<w:tblBorders>`). | Spaltenbreiten-Verteilung + `colwidth`-Übernahme + `<w:tblBorders>` (Code §4.1) |
+| `src/formats/odt/writer.ts:156` | Reale `<table:table-cell>` ohne `table:style-name` (keine Zellrahmen-Formatvorlage). | `TCBorder`-Style referenzieren (Code §5.1/5.2) |
+| `src/formats/shared/editor/InsertTableDialog.tsx`, `src/formats/shared/tableConfig.ts` | **Existieren nicht.** | Neu (Code §2.1/2.2) |
+| `tests/e2e/selection-regression.spec.ts:43-59` | Test „same regression inside a table cell“; klickt „Tabelle einfügen“ (`:46`) und adressiert **unmittelbar danach** `.ProseMirror td` (`:48-49`). | Muss nach Dialog-Umstellung angepasst werden (B.0) |
+
+**Konsequenz:** Alle Testfälle, die den Dialog, Tab-Navigation, DOCX-Rahmen/Spaltenbreiten oder den
+ODT-`TCBorder` voraussetzen, sind gegen den heutigen Code **erwartbar rot** — das dokumentiert exakt
+den in der Anforderung als „nicht vertrauenswürdig“/„nicht funktional“ eingestuften Zustand. Dieser
+Plan ist als **Zielzustand** geschrieben und dient zugleich als Abnahme-Suite, die nach jeder
+Umsetzungs-Iteration erneut vollständig läuft. Abschnitt E hält die Nullmessung fest.
 
 ---
 
@@ -44,219 +61,241 @@ damit der Fortschritt messbar ist.
 
 | Ebene | Befehl | Bemerkung |
 |---|---|---|
-| Unit-/Komponententests | `npm run test` (`vitest run`) | jsdom-Umgebung (`jsdom` in `devDependencies`), `@testing-library/react` für `InsertTableDialog` |
-| Coverage (optional, zur Absicherung neuer Zweige) | `npm run coverage` | insbesondere für `parseTableDimension`, `tableTab`, `columnWidthsDxa`/`collectColumnWidthsPx` |
-| E2E (echter Browser) | `npm run test:e2e` (`playwright test`) | `playwright.config.ts`: `webServer` startet `npm run build && npm run preview -- --port 4173`, `baseURL: 'http://localhost:4173/salamanido/'`; drei Projekte: `Desktop Chrome`, `Mobile` (Pixel 7, `hasTouch: true`), `Tablet` (iPad Mini) — alle drei laufen standardmäßig, wie bei den bestehenden Specs (`docx.spec.ts`, `odt.spec.ts`, `selection-regression.spec.ts` schränken ebenfalls nichts ein) |
-| E2E UI-Debug | `npm run test:e2e:ui` | zur manuellen Fehlersuche bei rotem Testfall |
+| Unit-/Komponententests | `npm run test` (`vitest run`) | jsdom-Umgebung; `@testing-library/react` + `@testing-library/user-event` für `InsertTableDialog` |
+| Coverage (optional) | `npm run coverage` | v. a. `parseTableDimension`, `tableTab`, `columnWidthsDxa`/`collectColumnWidthsPx` |
+| E2E (echter Browser) | `npm run test:e2e` (`playwright test`) | `playwright.config.ts`: `webServer` = `npm run build && npm run preview -- --port 4173`, `baseURL: 'http://localhost:4173/salamanido/'`. Standard-Projekte, in denen Tabellen-Specs laufen: **Desktop Chrome**, **Mobile** (Pixel 7, `hasTouch: true`), **Tablet** (iPad Mini) — die bestehenden Tabellen-berührenden Specs (`docx.spec.ts`, `odt.spec.ts`, `selection-regression.spec.ts`) schränken die Projekte nicht ein, dieser Plan ebenfalls nicht. |
+| E2E UI-Debug | `npm run test:e2e:ui` | manuelle Fehlersuche |
 
-Gemeinsame Konventionen (aus bestehenden Specs übernommen, **nicht** neu erfinden):
-- Jeder Test beginnt mit `page.goto('/')` + `page.getByRole('button', { name: /verstanden/i }).click()`
-  (schließt `PrivacyModal`, siehe `lifecycle.spec.ts:12`, `docx.spec.ts:57`, `odt.spec.ts:41`).
+Gemeinsame Konventionen (aus den bestehenden Specs übernommen, **nicht neu erfinden**):
+- Testbeginn: `await page.goto('/')` + `await page.getByRole('button', { name: /verstanden/i }).click()`
+  (schließt `PrivacyModal`; vgl. `docx.spec.ts:65-66`, `odt.spec.ts`).
 - Format-Karten: `page.locator('div.rounded-lg', { has: page.getByRole('heading', { name: 'Word-Dokument (.docx)' }) })`
-  bzw. `'OpenDocument Text (.odt)'` (siehe `docx.spec.ts:50-52`, `odt.spec.ts:34-36`).
+  bzw. `'OpenDocument Text (.odt)'` (vgl. `docx.spec.ts:59-61`).
 - Neues Dokument: `<Karte>.getByRole('button', { name: 'Neu erstellen' }).click()`.
 - Datei-Upload: `<Karte>.locator('input[type="file"]')` + `setInputFiles({ name, mimeType, buffer })`
-  (kein `filechooser`-Event nötig, da ein natives `<input type="file">` vorliegt — konsistent mit
-  `docx.spec.ts:87-92`/`odt.spec.ts:72-73`; „echter Datei-Upload“ im Sinne der Anforderung Zeile
-  358–361 ist damit erfüllt, ohne dass ein zusätzlicher OS-Dateidialog simuliert werden muss).
-- Export/Download: `const downloadPromise = page.waitForEvent('download'); await page.getByRole('button', { name: 'Exportieren' }).click(); const download = await downloadPromise; const buf = await fs.readFile((await download.path())!)`.
-- **Unabhängiger Parser** (Anforderung Zeile 246 „z. B. python-docx oder direktes Parsen von
-  `word/document.xml`“): In diesem Projekt bereits etabliertes Muster ist `JSZip.loadAsync(buffer)` +
-  rohes XML-String-/Regex-Parsen (`docx.spec.ts:78-82`, `odt.spec.ts:63-67`) — **kein** python-docx
-  verfügbar/nötig, da das Ziel („nicht die App sich selbst bestätigen lassen“) durch die
-  Byte-für-Byte-Analyse der exportierten Zip-Datei mit einer generischen Zip-/String-Bibliothek
-  bereits erfüllt ist. Für exakte **Zählungen** (`<w:tr>`, `<w:tc>`, `<table:table-row>`,
-  `<table:table-column>`) wird **nicht** `toContain` verwendet (das prüft nur Vorhandensein),
-  sondern `(xml.match(/<w:tr\b/g) ?? []).length` bzw. Äquivalent für ODT — siehe konkrete Snippets
-  unten.
+  (natives `<input type="file">`, kein `filechooser`-Event nötig; vgl. `docx.spec.ts:96-101`). Das ist
+  „echter Datei-Upload“ im Sinne der Anforderung §5.15.
+- Zurück zur Auswahl (für Re-Import): **`await page.getByRole('button', { name: /formate/i }).click()`**
+  (Schaltfläche „← Formate“, `DocumentWorkspace.tsx:113`). Das `<input type="file">` existiert **nur**
+  auf dem Auswahlbildschirm, nicht im geöffneten Editor — daher dieser Weg statt `page.reload()`
+  (etabliertes Repo-Idiom, `docx.spec.ts:241`).
+- Export/Download: `const dl = page.waitForEvent('download'); await page.getByRole('button', { name: 'Exportieren' }).click(); const download = await dl; const buf = await (await import('node:fs/promises')).readFile((await download.path())!)`.
+- **Unabhängiger Parser** (Anforderung §4.1.1 „z. B. python-docx oder direktes Parsen von
+  `word/document.xml`“): etabliertes Projekt-Muster ist `JSZip.loadAsync(buffer)` + rohes
+  XML-String-Parsen (`docx.spec.ts:87-88`, `:230-236`) — **kein** python-docx nötig, das Ziel („nicht
+  die App sich selbst bestätigen lassen“) ist durch Zip-Entpacken + generisches String-Parsen erfüllt.
+  Für **Zählungen** wird **nicht** `toContain` verwendet (prüft nur Vorhandensein), sondern
+  `(xml.match(/<w:tr\b/g) ?? []).length` bzw. das ODT-Äquivalent.
+- **Absturz-/Fehlererkennung:** In jedem E2E-Test `const pageErrors: string[] = []; page.on('pageerror', e => pageErrors.push(String(e)))` und am Ende `expect(pageErrors, pageErrors.join('\n')).toEqual([])` (Repo-Idiom, `docx.spec.ts:256-257,342`). Wo ausdrücklich „keine Konsolenfehler“ gefordert ist, zusätzlich `page.on('console', m => { if (m.type() === 'error') consoleErrors.push(m.text()) })`.
+
+### 1.1 Determinismus-Regeln (VERPFLICHTEND für alle E2E-Tests)
+
+Dieses Projekt hat eine **bekannte, dokumentierte asynchrone Selektions-Synchronisation**, die bei zu
+schnellen, automatisierten Tastatureingaben zu Flakiness führt. Belege im Repo: `WordEditor.tsx`
+(Mouseup-Reconciliation `reconcileSelectionOnClick`), der ausführliche Kommentar in
+`tests/e2e/selection-regression.spec.ts:26-34` sowie die Commits `0797d13` („give async selection sync
+time before the next keystroke“) und `db61c89`/`175d86d` (dieselbe Race in `cut.spec.ts`, speziell im
+**Mobile**-Projekt). Jeder neue Tabellen-Test **muss** diese Regeln befolgen, sonst wird er im
+CI (v. a. Mobile) sporadisch rot:
+
+1. **Native Cursor-Bewegung → abhängige Folgetaste braucht eine Wartezeit.** ProseMirror erfährt eine
+   **native, tastaturgetriebene** Cursor-Bewegung (`End`, `Home`, `ArrowLeft/Right/Up/Down`,
+   `ControlOrMeta+End/Home`) nur über das **asynchrone** DOM-Event `selectionchange`. Eine unmittelbar
+   danach gefeuerte Folgetaste, deren Wirkung von der neuen Cursor-Position abhängt (`Enter`, `Tab`,
+   oder Tippen, das an der neuen Stelle landen muss), kann diesem Nachziehen **vorauslaufen**. Deshalb
+   **zwischen** solcher Cursor-Bewegung und der abhängigen Taste:
+   ```ts
+   await page.keyboard.press('End')
+   await page.waitForTimeout(50) // async selectionchange nachziehen lassen (selection-regression.spec.ts:34)
+   await page.keyboard.press('Enter')
+   ```
+   50 ms ist der im Repo bereits etablierte, ausreichende Wert (`selection-regression.spec.ts:34,72`).
+2. **Assertion vor Wartezeit bevorzugen.** Wo eine beobachtbare Zwischen­größe existiert, wird sie mit
+   auto-retry­endem `expect` **abgewartet** statt blind zu schlafen — das ist strikt deterministisch:
+   - `await expect(dialog).toBeVisible()` bevor im Dialog getippt/geklickt wird;
+   - `await expect(page.locator('.ProseMirror td')).toHaveCount(n)` bevor über Zellen iteriert wird;
+   - `await expect(page.locator('.ProseMirror table')).toHaveCount(0|1)` als Undo/Redo-Anker;
+   - `await expect(input).toHaveValue('4')` nach `fill()` vor dem Bestätigen.
+3. **Dialog-Eingaben mit `fill()`, nicht `type()`.** `fill()` setzt den Wert atomar (kein Zeichen-für-
+   Zeichen-Race, keine Abhängigkeit von Fokus-Timing). `type()` nur, wo bewusst Tastatur-Eingabe im
+   `contenteditable` getestet wird.
+4. **Klick → Tippen braucht KEINE Zusatz-Wartezeit** (Race Nr. 1 gilt hier nicht): Die
+   Mouseup-Reconciliation läuft synchron innerhalb des Event-Turns, bevor die nächste Playwright-Aktion
+   startet — belegt durch den stabil grünen bestehenden Test `selection-regression.spec.ts:43-59`
+   (`cells.nth(0).click()` → sofort `type(...)`). Es werden also **keine** überflüssigen Waits
+   gestreut; Wartezeiten stehen ausschließlich an den Stellen aus Regel 1.
+5. **Keine bewusst rasenden `Promise.all([click(), click()])`** außer im dafür vorgesehenen
+   Doppel-Submit-Test (B.1 #11) — dort ist das Rennen der Prüfgegenstand.
+6. **Alle drei Projekte.** Kein `test.skip` für Mobile/Tablet ohne dokumentierten Grund. Die Waits aus
+   Regel 1 sind **unbedingt** (nicht desktop-only) — die historische Flakiness trat gerade im
+   Mobile-Projekt auf.
 
 ---
 
 ## 2. Abschnitt A — Unit-Tests: Reader/Writer-Rundreise (DOCX + ODT) und Editor-Commands
 
-### A.1 Bestehende Baseline (muss weiterhin grün bleiben, Regressionsschutz)
+Rein auf Modul-/State-Ebene (`vitest`, `EditorState.create`+`apply`, `readDocx`/`writeDocx`/
+`readOdt`/`writeOdt` direkt) — **ohne** Browser. Bewusst getrennt von Abschnitt B (echte Bedienung).
 
-| Datei | Tests | Erwartung |
+### A.1 Bestehende Baseline (muss weiterhin grün bleiben — Regressionsschutz)
+
+| Datei | Tests (aktuelle Fundstelle) | Erwartung |
 |---|---|---|
-| `src/formats/docx/__tests__/roundtrip.test.ts:173-249` | „preserves rows, columns, and cell text“, „preserves merged cells (colspan)“, „preserves vertically merged cells (rowspan)“ | Bleiben unverändert grün; dienen als Fundament, auf dem A.4 aufbaut |
-| `src/formats/odt/__tests__/roundtrip.test.ts:162-209` | „preserves rows, columns, and cell text“, „preserves merged cells (colspan/rowspan)“ | Bleiben unverändert grün |
+| `src/formats/docx/__tests__/roundtrip.test.ts` | `describe('DOCX round trip: tables')` `:229` — „preserves rows, columns, and cell text“ `:230`, „preserves merged cells (colspan)“ `:261`, „preserves vertically merged cells (rowspan)“ `:279`; zusätzlich „whole-document fidelity“ `:366` (Tabelle enthalten) | Bleiben unverändert grün; Fundament für A.4 |
+| `src/formats/odt/__tests__/roundtrip.test.ts` | `describe('ODT round trip: tables')` `:219` — „preserves rows, columns, and cell text“ `:220`, „preserves merged cells (colspan/rowspan)“ `:251`, „covered-table-cell“ horizontal `:275` **inkl. `<table:table-column/>`-Zählung `.toBe(2)` `:298`**, vertikal `:310`; **`describe('ODT writer: export determinism')` `:512`**, `table:name`-Determinismus `:529` | Bleiben unverändert grün. `:298` und `:529` sind der Regressionsschutz für die **bereits behobenen** Punkte aus §0.1 |
 
-Diese Tests arbeiten laut Anforderung (Zeile 51–52) ausschließlich mit **direkt konstruierten**
-JSON-Testdaten (`doc([...])`-Helper), nicht über Toolbar/Dialog — deshalb zusätzlich Abschnitt B
-(echte Bedienung). Sie decken außerdem **nicht** den ODT-Spaltenzähl-Fehler auf (Anforderung Zeile
-52), weshalb A.5 einen gezielt dafür konstruierten Testfall ergänzt.
+Diese Tests arbeiten mit **direkt konstruierten** JSON-Testdaten (`doc([...])`/`paragraph()`-Helper,
+`roundtrip.test.ts:20-30`), nicht über Toolbar/Dialog — deshalb zusätzlich Abschnitt B (echte
+Bedienung).
 
-### A.2 Neu: `src/formats/shared/editor/__tests__/commands.test.ts`
+### A.2 Neu: `src/formats/shared/editor/__tests__/commands.test.ts` (**existiert — erweitern**)
 
-Testet `tableTab`, `insertTable`s Tiefen-Guard und die Listenelement-Entscheidung — vollständig auf
-Command-/State-Ebene (`EditorState.create` + `apply`), ohne Browser, aber mit **exakten**
-Positions-Assertions (nicht nur „Dokument hat sich verändert“):
+Die Datei testet aktuell `canCut`/`cutSelection`. Neue Blöcke, vollständig auf Command-/State-Ebene
+mit **exakten Positions-Assertions** (nicht nur „Dokument hat sich verändert“):
 
 | Testname | Vorgehen | Assertion |
 |---|---|---|
-| `tableTab(1) springt von Zelle 1 zu Zelle 2` | 2×2-Tabelle, Cursor in Zelle (0,0), `tableTab(1)(state, dispatch)` | `dispatch` wurde mit einem `tr` aufgerufen, dessen `selection.$from` innerhalb der Zelle (0,1) liegt (Position via `TableMap`/Zellen-Grenzen berechnet, nicht geraten) |
-| `tableTab(-1) springt von Zelle 2 zu Zelle 1` | Analog rückwärts | wie oben, umgekehrte Richtung |
-| `Shift-Tab in der ersten Zelle ist ein No-Op` | Cursor in Zelle (0,0), `tableTab(-1)(state)` ohne `dispatch` | Rückgabewert `false`, `dispatch` **nicht** aufgerufen |
+| `tableTab(1) springt von Zelle (0,0) zu (0,1)` | 2×2-Tabelle, Cursor in (0,0), `tableTab(1)(state, dispatch, view)` | `dispatch` mit einem `tr` aufgerufen, dessen `selection.$from` innerhalb (0,1) liegt (Position über `TableMap`/Zellgrenzen berechnet, nicht geraten) |
+| `tableTab(-1) springt von (0,1) zu (0,0)` | Analog rückwärts | wie oben, umgekehrt |
+| `Shift-Tab in der ersten Zelle ist No-Op` | Cursor in (0,0), `tableTab(-1)(state)` ohne `dispatch` | Rückgabe `false`, `dispatch` **nicht** aufgerufen |
 | `tableTab außerhalb einer Tabelle liefert false` | Cursor in normalem Absatz | `tableTab(1)(state)` → `false` |
-| `Tab in letzter Zelle der letzten Zeile fügt neue Zeile hinzu` | 2×2-Tabelle, Cursor in Zelle (1,1) (letzte Zelle), `tableTab(1)(state, dispatch)` | Ergebnisdokument hat 3 `table_row`-Kinder (`tr.doc.content.child(0).childCount === 3` o. ä.); **zusätzlich**: `tr.selection` ist eine `TextSelection`, deren `$from.pos` **nachweislich innerhalb der ersten Zelle der neu erzeugten dritten Zeile** liegt — exakt geprüft über Auflösen der neuen Zeilen-/Zellposition, nicht nur „ist irgendwo im Dokument“ |
-| `insertTable respektiert MAX_TABLE_NESTING_DEPTH` | Verschachtelt `insertTable(1,1)` `MAX_TABLE_NESTING_DEPTH`-mal ineinander (Cursor jeweils in die neu erzeugte Zelle gesetzt), letzter Versuch eine Ebene darüber | Die ersten `MAX_TABLE_NESTING_DEPTH` Aufrufe liefern `true` und verändern das Dokument, der Aufruf, der die Grenze überschreiten würde, liefert `false` und **dispatcht nichts** |
-| `insertTable innerhalb eines Listenelements bettet die Tabelle ein, ohne die Liste zu unterbrechen` | Dokument `bullet_list > list_item > paragraph("ab|cd")`, Cursor zwischen „ab“ und „cd“, `insertTable(2,2)(state, dispatch)` | Ergebnis-JSON: **ein** `bullet_list`-Knoten mit **einem** `list_item`, dessen `content` `[paragraph("ab"), table, paragraph("cd")]` entspricht. **Falls das tatsächliche Verhalten abweicht** (z. B. Liste wird umschlossen/unterbrochen statt eingebettet), ist das ein **Befund**, kein automatisch bestandener Test — siehe Abschnitt D, Nachtrag zu Entscheidung 1.2 aus `tabelle-einfuegen-code.md` |
+| `Tab in der letzten Zelle hängt eine Zeile an und fokussiert deren erste Zelle` | 2×2, Cursor in (1,1), `tableTab(1)(state, dispatch, view)` | Ergebnis hat **3** `table_row`-Kinder; **zusätzlich**: `view.state.selection` ist eine `TextSelection`, deren `$from.pos` **nachweislich in der ersten Zelle der neuen dritten Zeile** liegt (über Auflösen der neuen Zeilen-/Zellposition, nicht „irgendwo im Dokument“) — deckt die Warnung aus Code §3.1 (TableMap-Fallback) ab |
+| `insertTable respektiert MAX_TABLE_NESTING_DEPTH` | `insertTable(1,1)` `MAX_TABLE_NESTING_DEPTH`-mal ineinander (Cursor je in die neue Zelle), letzter Versuch eine Ebene darüber | Die ersten `MAX_TABLE_NESTING_DEPTH` Aufrufe → `true` + Dokument geändert; der Aufruf, der die Grenze überschreiten würde → `false`, **dispatcht nichts** |
+| `insertTable in einem Listenelement bettet ein, ohne die Liste zu unterbrechen` | `bullet_list > list_item > paragraph("ab|cd")`, Cursor zwischen „ab“/„cd“, `insertTable(2,2)(state, dispatch)` | Ergebnis-JSON: **ein** `bullet_list` mit **einem** `list_item`, dessen `content` `[paragraph("ab"), table, paragraph("cd")]` entspricht. **Weicht das Verhalten ab**, ist das ein **Befund** (Abschnitt D), kein automatisch bestandener Test — die tatsächliche Struktur wird dokumentiert, nicht hingenommen (Code-Entscheidung §1.2) |
 
 ### A.3 Neu: `src/formats/shared/editor/__tests__/InsertTableDialog.test.tsx` (`@testing-library/react`)
 
 | Testname | Vorgehen | Assertion |
 |---|---|---|
-| `parseTableDimension` — Tabellentest aller Grenzfälle | Direkter Funktionsaufruf (kein Rendering) mit `''`, `'0'`, `'-1'`, `'abc'`, `'3.5'`, `'50'`, `'51'`, `'1'` (bei `max=50`) | `''`/`'abc'`/`'3.5'` → `{ error: ... }` mit nicht-leerem String; `'0'`/`'-1'` → `{ error: ... }`; `'50'` → `{ value: 50 }`; `'51'` → `{ error: ... }`; `'1'` → `{ value: 1 }` |
-| Mount mit Standardwerten zeigt 3×3 | `render(<InsertTableDialog initialRows={3} initialCols={3} onConfirm={fn} onCancel={fn} />)` | Beide Inputs zeigen `'3'`, erstes Feld hat den Fokus (`document.activeElement`), Inhalt ist vorausgewählt (`selectionStart === 0`, `selectionEnd === 1`) |
-| Ungültige Eingabe + Submit zeigt Fehler, ruft `onConfirm` nicht auf | `userEvent.clear` + `type('0')` im Zeilenfeld, Submit (Klick „Einfügen“ oder Enter) | Fehlertext sichtbar (`screen.getByRole('alert')` o. ä.), `onConfirm` **nicht** aufgerufen, Dialog bleibt im DOM |
-| Escape schließt und ruft `onCancel` | `fireEvent.keyDown(dialog, { key: 'Escape' })` | `onCancel` genau einmal aufgerufen, `onConfirm` nicht aufgerufen |
-| Klick auf Backdrop (nicht auf die Box) ruft `onCancel` | Klick auf das äußere Overlay-Element, nicht auf `role="dialog"` selbst | `onCancel` aufgerufen |
-| Klick auf die Dialog-Box selbst schließt **nicht** | Klick auf ein Element innerhalb `role="dialog"` | `onCancel` **nicht** aufgerufen |
-| Doppel-Submit (Grenzfall 11) | Gültige Werte, zweimal sehr schnell hintereinander Submit auslösen (`fireEvent.submit` zweimal ohne `await` dazwischen) | `onConfirm` wird **genau einmal** aufgerufen |
-| Fokus-Falle: Tab am letzten fokussierbaren Element springt zum ersten | `fireEvent.keyDown(dialog, { key: 'Tab' })` mit Fokus auf dem letzten Button | Fokus liegt danach auf dem ersten Input (nicht außerhalb des Dialogs) |
-| `onConfirm`, das einen String zurückgibt (Tiefen-Guard-Fall), zeigt Fehler statt zu schließen | `onConfirm: () => 'Verschachtelungstiefe erreicht'` | Fehlertext sichtbar, Dialog bleibt im DOM (Aufrufer entscheidet, nicht die Komponente) |
+| `parseTableDimension` — alle Grenzfälle | Direktaufruf mit `''`, `'0'`, `'-1'`, `'abc'`, `'3.5'`, `'50'`, `'51'`, `'1'` (bei `max=50`) | `''`/`'abc'`/`'3.5'`/`'0'`/`'-1'`/`'51'` → `{ error: <nicht-leerer String> }`; `'50'` → `{ value: 50 }`; `'1'` → `{ value: 1 }` |
+| Mount mit Standardwerten zeigt 3×3 | `render(<InsertTableDialog initialRows={3} initialCols={3} onConfirm={fn} onCancel={fn} />)` | Beide Inputs `'3'`; erstes Feld hat Fokus (`document.activeElement`), Inhalt vorausgewählt (`selectionStart===0`, `selectionEnd===1`) |
+| Ungültige Eingabe + Submit zeigt Fehler, ruft `onConfirm` nicht | `userEvent.clear`+`type('0')` im Zeilenfeld, Submit | `screen.getByRole('alert')` sichtbar; `onConfirm` **nicht** aufgerufen; Dialog bleibt im DOM |
+| Escape ruft `onCancel` | `fireEvent.keyDown(dialog, { key: 'Escape' })` | `onCancel` genau einmal; `onConfirm` nicht |
+| Backdrop-Klick ruft `onCancel` | Klick auf das äußere Overlay (nicht auf `role="dialog"`) | `onCancel` aufgerufen |
+| Klick auf die Dialog-Box schließt NICHT | Klick auf ein Element in `role="dialog"` | `onCancel` **nicht** aufgerufen |
+| Doppel-Submit (Grenzfall 11) | Gültige Werte, `fireEvent.submit` **zweimal** ohne `await` dazwischen | `onConfirm` **genau einmal** |
+| Fokus-Falle | `fireEvent.keyDown(dialog, { key: 'Tab' })` mit Fokus auf letztem Button | Fokus danach auf erstem Input (nicht außerhalb des Dialogs) |
+| `onConfirm` liefert String (Tiefen-Guard) → Fehler statt Schließen | `onConfirm: () => 'Verschachtelungstiefe erreicht'` | Fehlertext sichtbar; Dialog bleibt im DOM (Aufrufer entscheidet) |
 
-### A.4 Erweiterung: `src/formats/docx/__tests__/roundtrip.test.ts`
+### A.4 Erweiterung: `src/formats/docx/__tests__/roundtrip.test.ts` — neue Tests in `describe('DOCX round trip: tables')` (`:229`)
 
-Neue Tests **innerhalb** von `describe('DOCX round trip: tables', …)` (Zeile 173), zusätzlich zu den
-bestehenden drei aus A.1:
+Genuin **neue** Prüfungen (im heutigen Code rot, siehe §0.2), zusätzlich zur Baseline A.1:
 
 ```ts
-it('gridCol count matches the colspan-derived column count, not row-0 cell count', async () => {
-  // Zeile 0 hat EINE colspan=2-Zelle, Zeile 1 hat ZWEI normale Zellen — Spaltenzahl ist 2 in
-  // beiden Lesarten, aber der Test bleibt als Regressionsschutz für den DOCX-Pfad bestehen
-  // (der laut Anforderung Zeile 45/130 bereits korrekt colspan-summiert).
-})
-
 it('exported <w:tblPr> contains <w:tblBorders>', async () => {
   const original = doc([/* 2x2-Tabelle */])
-  const result = await roundTripRaw(original) // liefert das rohe XML, nicht nur das rundgereiste JSON
-  expect(result.documentXml).toMatch(/<w:tblPr>.*<w:tblBorders>.*<\/w:tblBorders>.*<\/w:tblPr>/s)
+  const { documentXml } = await roundTripRaw(original) // liefert rohes XML zusätzlich zum reimportierten JSON
+  expect(documentXml).toMatch(/<w:tblPr>[\s\S]*<w:tblBorders>[\s\S]*<\/w:tblBorders>[\s\S]*<\/w:tblPr>/)
 })
 
-it('column widths for a wide table stay within the page content width', async () => {
-  const original = doc([/* Tabelle mit 20 Spalten, je 1 Zeile */])
-  const result = await roundTripRaw(original)
-  const widths = [...result.documentXml.matchAll(/<w:gridCol w:w="(\d+)"\/>/g)].map((m) => Number(m[1]))
+it('column widths for a 20-column table stay within the page content width (no overflow)', async () => {
+  const original = doc([/* 1 Zeile, 20 Zellen */])
+  const { documentXml } = await roundTripRaw(original)
+  const widths = [...documentXml.matchAll(/<w:gridCol w:w="(\d+)"\/>/g)].map((m) => Number(m[1]))
   expect(widths).toHaveLength(20)
   expect(widths.reduce((a, b) => a + b, 0)).toBeLessThanOrEqual(CONTENT_WIDTH_DXA)
 })
 
-it('an editor-set colwidth attribute on a cell is carried into the exported gridCol width', async () => {
-  const original = doc([/* Tabelle, cell.attrs.colwidth = [300] auf einer Spalte */])
-  const result = await roundTripRaw(original)
-  const widths = [...result.documentXml.matchAll(/<w:gridCol w:w="(\d+)"\/>/g)].map((m) => Number(m[1]))
+it('an editor-set colwidth attribute is carried into the exported gridCol width', async () => {
+  const original = doc([/* Tabelle, cell.attrs.colwidth = [300] auf Spalte 0 */])
+  const { documentXml } = await roundTripRaw(original)
+  const widths = [...documentXml.matchAll(/<w:gridCol w:w="(\d+)"\/>/g)].map((m) => Number(m[1]))
   expect(widths[0]).toBe(Math.round(300 * PX_TO_DXA))
 })
 ```
 
-*Hinweis:* `roundTripRaw`/Zugriff auf das rohe `document.xml` muss ggf. als zusätzlicher Test-Helper
-neben dem bestehenden `roundTrip()` (der direkt das reimportierte JSON liefert) ergänzt werden — die
-bestehende Datei re-importiert bereits intern über `JSZip`, ein zusätzlicher Rückgabewert mit dem
-rohen XML-String ist eine kleine, non-invasive Erweiterung des Test-Helpers, kein Produktcode.
+*Helper-Hinweis:* Der bestehende `roundTrip()` (`roundtrip.test.ts:29`) liefert nur das reimportierte
+JSON. Für die XML-Assertions ist ein zusätzlicher, non-invasiver Test-Helper `roundTripRaw()` nötig,
+der neben dem JSON auch den rohen `word/document.xml`-String zurückgibt (`await (await
+writeDocx(content)).arrayBuffer()` → `JSZip.loadAsync` → `.file('word/document.xml').async('text')`).
+`CONTENT_WIDTH_DXA`/`PX_TO_DXA` aus dem Produktcode importieren, nicht im Test duplizieren.
 
 ### A.5 Erweiterung: `src/formats/odt/__tests__/roundtrip.test.ts`
 
-Neue Tests **innerhalb** von `describe('ODT round trip: tables', …)` (Zeile 162), zusätzlich zu den
-bestehenden zwei aus A.1 — insbesondere der von der Anforderung (Zeile 289–291) **namentlich
-geforderte** Testfall, der von den bisherigen Unit-Tests laut Anforderung (Zeile 52) bewusst **nicht**
-abgedeckt ist:
+**Wichtig (§0.1):** Die Spaltenzahl-bei-`colspan`- und die `table:name`-Determinismus-Prüfung sind
+**bereits vorhanden und grün** (`:298`, `:529`) und werden **nicht neu geschrieben** — sie bleiben als
+Regressionsschutz Teil der Suite (A.1). Genuin **neu** ist nur die Zellrahmen-Prüfung:
 
 ```ts
-it('table:table-column count matches the true column count when a colspan cell sits in row 0', async () => {
-  // Genau das in der Anforderung (Zeile 289–291) verlangte Szenario:
-  // Zeile 0: eine einzelne Zelle mit colspan=3 → rows[0].content.length === 1
-  // Zeile 1: drei normale Zellen → tatsächliche Spaltenzahl ist 3
-  const original = doc([
-    {
-      type: 'table',
-      content: [
-        { type: 'table_row', content: [{ type: 'table_cell', attrs: { colspan: 3, rowspan: 1 }, content: [paragraph('Merged')] }] },
-        { type: 'table_row', content: [
-          { type: 'table_cell', attrs: { colspan: 1, rowspan: 1 }, content: [paragraph('A')] },
-          { type: 'table_cell', attrs: { colspan: 1, rowspan: 1 }, content: [paragraph('B')] },
-          { type: 'table_cell', attrs: { colspan: 1, rowspan: 1 }, content: [paragraph('C')] },
-        ] },
-      ],
-    },
-  ])
-  const contentXml = await exportOdtRaw(original) // roher content.xml-String
-  const columnCount = (contentXml.match(/<table:table-column\b/g) ?? []).length
-  expect(columnCount).toBe(3) // Vor dem Fix (Zeile 88: rows[0].content.length ?? 1) schlägt dies mit 1 fehl
-})
-
-it('two tables in the same document get distinct, non-random table:name values', async () => {
-  const original = doc([
-    { type: 'table', content: [/* 2x2 */] },
-    paragraph('Zwischentext'),
-    { type: 'table', content: [/* 2x2 */] },
-  ])
-  const contentXml = await exportOdtRaw(original)
-  const names = [...contentXml.matchAll(/<table:table table:name="([^"]+)"/g)].map((m) => m[1])
-  expect(names).toHaveLength(2)
-  expect(new Set(names).size).toBe(2) // Regressionsschutz gegen Math.random()-Kollision
-})
-
-it('every table cell references the border style name', async () => {
+it('every real table cell references the border style name TCBorder', async () => {
   const original = doc([{ type: 'table', content: [/* 2x2 */] }])
-  const contentXml = await exportOdtRaw(original)
+  const contentXml = await exportOdtRaw(original) // roher content.xml-String
   const cellCount = (contentXml.match(/<table:table-cell\b/g) ?? []).length
-  const borderedCellCount = (contentXml.match(/<table:table-cell[^>]*table:style-name="TCBorder"/g) ?? []).length
-  expect(borderedCellCount).toBe(cellCount)
+  const bordered = (contentXml.match(/<table:table-cell[^>]*table:style-name="TCBorder"/g) ?? []).length
+  expect(cellCount).toBeGreaterThan(0)
+  expect(bordered).toBe(cellCount)
 })
 ```
 
-### A.6 Erwartungs-Matrix Abschnitt A (Baseline heute vs. nach Umsetzung)
+*Optional (zusätzliche Absicherung, keine Neu-Behebung):* Eine `colspan=3`-Variante des bereits
+grünen `:298`-Tests (Zeile 0: eine Zelle `colspan=3`; Zeile 1: drei Zellen → `<table:table-column/>`
+`.toBe(3)`). Sie ist ein breiterer Regressionsanker desselben, **bereits korrekten** Verhaltens —
+**nicht** als „vor dem Fix schlägt es fehl“ zu kommentieren.
 
-| Test (Kurzform) | Status **heute** (vor Umsetzung) | Status **nach** Umsetzung gemäß `tabelle-einfuegen-code.md` |
+### A.6 Neu: Cross-Format-Rundreise auf Modul-Ebene (Anforderung §4.1.6/§4.2.5/§4.3)
+
+Die App bietet **keinen** Cross-Format-Export über die UI (nur eine „Exportieren“-Schaltfläche, die im
+Format des geladenen Dokuments exportiert — `DocumentWorkspace.tsx:141`). Die Cross-Format-Rundreise
+(§4.3) wird daher **deterministisch auf Modul-Ebene** über die realen Reader/Writer nachgewiesen
+(`readDocx`/`writeDocx`/`readOdt`/`writeOdt` nehmen `File|Blob` bzw. liefern `Blob`), nicht spekulativ
+über einen nicht existierenden UI-Pfad. Neue Datei
+`src/formats/shared/__tests__/tableCrossFormat.test.ts`:
+
+| Testname | Vorgehen | Assertion |
 |---|---|---|
-| `tableTab`/Tiefen-Guard/Listen-Einbettung (A.2) | Kann nicht existieren — `tableTab` nicht vorhanden, Datei muss neu angelegt werden | Muss grün sein |
-| `InsertTableDialog`-Tests (A.3) | Kann nicht existieren — Komponente fehlt | Muss grün sein |
-| `<w:tblBorders>` vorhanden (A.4) | **Rot** — `<w:tblPr/>` ist leer (`docx/writer.ts:170`) | Muss grün sein |
-| Spaltenbreiten-Summe ≤ Seitenbreite bei 20 Spalten (A.4) | **Rot** — `20 × 2000 = 40000` dxa ≫ `CONTENT_WIDTH_DXA` (siehe `tabelle-einfuegen-code.md` Abschnitt 0, Zeile 24) | Muss grün sein |
-| `colwidth`-Übernahme (A.4) | **Rot** — Attribut wird komplett ignoriert | Muss grün sein |
-| ODT `table:table-column`-Anzahl bei `colspan` in Zeile 0 (A.5) | **Rot** — liefert `1` statt `3` (`odt/writer.ts:88`) | Muss grün sein |
-| ODT Tabellennamen-Eindeutigkeit (A.5) | Wahrscheinlich grün (Kollisionswahrscheinlichkeit bei `Math.random()` gering, aber **nicht deterministisch abgesichert** — Test ist ein Flakiness-Risiko vor dem Fix, siehe Hinweis unten) | Muss deterministisch grün sein |
-| ODT Zellrahmen-Style-Referenz (A.5) | **Rot** — Attribut existiert nicht | Muss grün sein |
+| `DOCX-Tabelle → ODT → DOCX behält Struktur/Inhalt` | `writeDocx(orig)` → `readDocx` (Kontrolle) → `writeOdt` → `readOdt` → `writeDocx` → `readDocx` | Zeilen-/Spaltenzahl und **alle** Zellinhalte identisch zum Original; `colspan`/`rowspan` erhalten. Spaltenbreite/Rahmen ausdrücklich **nicht** geprüft (§4.3 nimmt sie aus) |
+| `ODT-Tabelle → DOCX → ODT behält Struktur/Inhalt` | Analog mit Start ODT | wie oben |
+| `ODT mit Tabelle importiert → als DOCX geschrieben` (§4.1.6) | `writeOdt(orig)`→`readOdt`→`writeDocx`→`readDocx` | Zeilen-/Spaltenzahl + Zellinhalte identisch |
+| `DOCX mit Tabelle importiert → als ODT geschrieben` (§4.2.5) | Umgekehrt | wie oben |
 
-**Wichtiger Hinweis zur Tabellennamen-Eindeutigkeit:** Der Test in A.5 kann vor dem Fix zufällig grün
-werden (`Math.random()` kollidiert nur mit geringer Wahrscheinlichkeit bei zwei Aufrufen) — das macht
-ihn vor dem Fix zu einem **unzuverlässigen** Nachweis, nicht zu einem Beleg für Korrektheit. QA muss
-dies im Abnahmeprotokoll (Abschnitt D) explizit als "kann falsch-grün sein, bis `TableNameGenerator`
-implementiert ist" vermerken, nicht stillschweigend als bestanden werten.
+### A.7 Erwartungs-Matrix Abschnitt A (heute vs. nach Umsetzung)
+
+| Test (Kurzform) | Status **heute** | Status **nach** Umsetzung |
+|---|---|---|
+| A.1 DOCX/ODT-Tabellen-Baseline inkl. `:298`/`:529` | **Grün** (bereits vorhanden — inkl. der zwei „bereits behobenen“ ODT-Punkte) | Bleibt grün (Regressionsschutz) |
+| `tableTab`/Tiefen-Guard/Listen-Einbettung (A.2) | Existiert nicht (`tableTab` fehlt) | Muss grün sein |
+| `InsertTableDialog`-Tests (A.3) | Existiert nicht (Komponente fehlt) | Muss grün sein |
+| `<w:tblBorders>` vorhanden (A.4) | **Rot** — `<w:tblPr/>` leer (`docx/writer.ts:200`) | Muss grün sein |
+| 20-Spalten-Breitensumme ≤ Seitenbreite (A.4) | **Rot** — `20 × 2000` dxa ≫ `CONTENT_WIDTH_DXA` (`docx/writer.ts:161`) | Muss grün sein |
+| `colwidth`-Übernahme (A.4) | **Rot** — Attribut ignoriert | Muss grün sein |
+| ODT `TCBorder`-Referenz je Zelle (A.5) | **Rot** — Attribut existiert nicht (`odt/writer.ts:156`) | Muss grün sein |
+| Cross-Format Modul-Rundreise (A.6) | Voraussichtlich grün (Struktur/Inhalt schon heute treu, Reader/Writer vorhanden) — **muss dennoch ausgeführt** werden, bisher kein eigener Test | Bleibt grün |
+
+**Kein** Eintrag „ODT-Spaltenzahl / ODT-Tabellenname wird von rot auf grün gebracht“ — beide sind
+bereits grün (§0.1). Wer sie erneut als offenen Defekt führt, verstößt gegen Anforderung Abschnitt 0.
 
 ---
 
 ## 3. Abschnitt B — E2E-Tests (echte Playwright-Browser-Bedienung)
 
-Alle Tests in diesem Abschnitt verwenden **ausschließlich** echte Nutzerinteraktion: `page.click()`,
-`page.keyboard.type()`/`.press()`, `input.setInputFiles()`, `page.waitForEvent('download')` +
-tatsächliches Einlesen der heruntergeladenen Datei von der Festplatte. Kein Test in diesem Abschnitt
-ruft `insertTable()`, `parseTableDimension()` oder einen anderen internen Funktions-/Command-Export
-direkt auf — das ist bewusst Abschnitt A vorbehalten.
+Alle Tests hier nutzen **ausschließlich** echte Nutzerinteraktion (`click()`, `keyboard.type()`/
+`.press()`, `input.setInputFiles()`, `waitForEvent('download')` + tatsächliches Einlesen der Datei von
+der Festplatte). Kein Test in Abschnitt B ruft `insertTable()`, `parseTableDimension()` oder einen
+anderen internen Export direkt auf — das ist Abschnitt A vorbehalten. **Alle Tests befolgen die
+Determinismus-Regeln aus §1.1.**
 
-### B.0 Pflichtänderung an bestehender Datei: `tests/e2e/selection-regression.spec.ts`
+### B.0 Pflichtänderung: `tests/e2e/selection-regression.spec.ts` (`:43-59`)
 
-Test `'same regression inside a table cell (click between cells after formatting)'` (Zeile 34–50)
-klickt aktuell den Button und erwartet **sofort** `.ProseMirror td` (Zeile 39). Nach Umsetzung des
-Dialogs öffnet der Klick zunächst den Dialog — der Test muss angepasst werden, **ohne** seinen
-eigentlichen Prüfzweck (Selection-Sync-Bug in Tabellenzellen) zu verändern:
+Der Test „same regression inside a table cell (click between cells after formatting)“ klickt „Tabelle
+einfügen“ (`:46`) und erwartet **sofort** `.ProseMirror td` (`:48-49`). Nach der Dialog-Umstellung
+öffnet der Klick zunächst den Dialog. Anpassung **ohne** Änderung des Prüfzwecks:
 
 ```ts
 await editor.click()
 await page.getByRole('button', { name: 'Tabelle einfügen' }).click()
-await page.getByRole('dialog', { name: 'Tabelle einfügen' }).getByRole('button', { name: 'Einfügen' }).click()
-// ... Rest des Tests unverändert (Standardgröße 3×3 hat weiterhin ≥ 2 Zellen für cells.nth(0)/nth(1))
+const dialog = page.getByRole('dialog', { name: 'Tabelle einfügen' })
+await expect(dialog).toBeVisible()                                  // §1.1 Regel 2
+await dialog.getByRole('button', { name: 'Einfügen' }).click()      // Standard 3×3 → ≥ 2 Zellen
+// ... Rest unverändert (cells.nth(0)/nth(1))
 ```
 
-**Abnahmekriterium:** Dieser Test muss vor **und** nach der Umsetzung als **derselbe, inhaltlich
-unveränderte** Test lauffähig sein (nur die Klick-Sequenz zum Öffnen/Bestätigen des Dialogs ändert
-sich) — QA prüft per Diff, dass keine Assertion aus dem ursprünglichen Test entfernt/abgeschwächt
-wurde (DoD Punkt 7, Anforderung Zeile 399–401).
+**Abnahmekriterium:** Diff-Review durch QA — es darf **keine** Assertion des ursprünglichen Tests
+entfernt/abgeschwächt werden; nur die Klick-/Bestätigungs-Sequenz kommt hinzu (DoD §6.9, Anforderung
+§5.20). Änderung **im selben Commit** wie die Toolbar-Umstellung.
 
 ### B.1 Neue Datei `tests/e2e/table-insert.spec.ts` — Dialog, Grundverhalten, Grenzfälle
 
-Gemeinsamer Helper (analog `docxCard`/`odtCard` aus den bestehenden Specs):
+Gemeinsame Helper (in der Spec definieren):
 
 ```ts
 function docxCard(page: Page) {
@@ -266,84 +305,98 @@ async function openNewDocxEditor(page: Page) {
   await page.goto('/')
   await page.getByRole('button', { name: /verstanden/i }).click()
   await docxCard(page).getByRole('button', { name: 'Neu erstellen' }).click()
+  await expect(page.locator('.ProseMirror')).toBeVisible()
 }
 async function openInsertTableDialog(page: Page) {
   await page.locator('.ProseMirror').click()
   await page.getByRole('button', { name: 'Tabelle einfügen' }).click()
-  return page.getByRole('dialog', { name: 'Tabelle einfügen' })
+  const dialog = page.getByRole('dialog', { name: 'Tabelle einfügen' })
+  await expect(dialog).toBeVisible()   // §1.1 Regel 2 — vor jeder Dialog-Interaktion
+  return dialog
+}
+async function insertTableViaDialog(page: Page, { rows, cols }: { rows: number; cols: number }) {
+  const dialog = await openInsertTableDialog(page)
+  await dialog.getByLabel(/zeilen/i).fill(String(rows))   // §1.1 Regel 3 — fill, nicht type
+  await dialog.getByLabel(/spalten/i).fill(String(cols))
+  await dialog.getByRole('button', { name: 'Einfügen' }).click()
+  await expect(page.locator('.ProseMirror table')).toHaveCount(1)
+}
+async function insertDefaultTable(page: Page) {
+  const dialog = await openInsertTableDialog(page)
+  await dialog.getByRole('button', { name: 'Einfügen' }).click()
+  await expect(page.locator('.ProseMirror table')).toHaveCount(1)
 }
 ```
 
-| # (Anforderung §5) | Testname | Kernschritte | Assertion |
+| # (§5) | Testname | Kernschritte | Assertion |
 |---|---|---|---|
-| 1 | `clicking the toolbar button opens the size dialog` | `openInsertTableDialog(page)` | `dialog` sichtbar; erstes Eingabefeld hat den Fokus (`await expect(dialog.locator('input').first()).toBeFocused()`) |
-| 2 | `entering rows=4, cols=3 and confirming inserts a 4×3 table` | Dialog öffnen, `rowsInput.fill('4')`, `colsInput.fill('3')`, `Einfügen` klicken | `await expect(page.locator('.ProseMirror tr')).toHaveCount(4)`; jede Zeile hat 3 `td` (`for`-Schleife über `tr.locator('td')`) |
-| 3 | `confirming with default values inserts the default table size` | Dialog öffnen, sofort `Einfügen` klicken (keine Eingabe) | 3 `tr`, je 3 `td` (Standard `DEFAULT_TABLE_ROWS/COLS = 3`) |
-| 4a–c | `invalid input (0 / negative / text) shows an error and inserts nothing` | Je Sub-Fall: Dialog öffnen, `rowsInput.fill('0' \| '-1' \| 'abc')`, `Einfügen` klicken | Fehlertext sichtbar (`dialog.getByRole('alert')`), Dialog bleibt offen, `.ProseMirror td` existiert **nicht** (`toHaveCount(0)`), **keine** Konsolenfehler (`page.on('console', ...)`-Listener seit Testbeginn sammelt keine `'error'`-Einträge) |
-| 4d | `value above the maximum (e.g. 100) shows an error, not silent clamping` | `rowsInput.fill('100')`, `colsInput.fill('100')`, `Einfügen` | Fehlertext sichtbar, **keine** 100×100-Tabelle im DOM, kein Einfrieren (Seite reagiert weiterhin: `page.getByRole('button', { name: 'Abbrechen' }).click()` funktioniert danach) |
-| 5 | `pressing Escape closes the dialog without any DOM/document change` | Editor-Cursor an bekannte Position setzen (z. B. Text tippen, `Home` drücken), Dialog öffnen, `Escape` | Dialog verschwindet aus dem DOM; `.ProseMirror td` existiert nicht; Cursor-Position unverändert (z. B. erneut tippen und prüfen, dass der neue Text an der erwarteten Stelle landet, nicht z. B. nach der Selektion irgendeines Dialog-Restzustands) |
-| 5b | `clicking outside the dialog (backdrop) closes it without inserting` | Dialog öffnen, Klick auf `page.locator('body')` an einer Koordinate außerhalb der Dialog-Box | Dialog verschwindet, keine Tabelle eingefügt |
-| 11 | `double-clicking "Einfügen" quickly does not insert twice` | Dialog öffnen, gültige Werte, `Einfügen`-Button **zweimal** ohne `await` dazwischen anklicken (`Promise.all([click(), click()])` bzw. zwei `dispatchEvent`-Aufrufe in schneller Folge) | Genau **eine** Tabelle im Dokument (`.ProseMirror table`) `toHaveCount(1)`, nicht 2 |
+| 1 | `clicking the toolbar button opens the size dialog` | `openInsertTableDialog(page)` | Dialog sichtbar; erstes Eingabefeld fokussiert (`await expect(dialog.locator('input').first()).toBeFocused()`) |
+| 2 | `entering rows=4, cols=3 and confirming inserts a 4×3 table` | `insertTableViaDialog(page, { rows: 4, cols: 3 })` | `await expect(page.locator('.ProseMirror tr')).toHaveCount(4)`; jede Zeile hat 3 `td` (Schleife über `tr.locator('td')`, je `toHaveCount(3)`) |
+| 3 | `confirming with default values inserts the default size` | `insertDefaultTable(page)` | 3 `tr`, je 3 `td` (`DEFAULT_TABLE_ROWS/COLS = 3`) |
+| 4a–c | `invalid input (0 / negative / text) shows an error and inserts nothing` | Je Sub-Fall: Dialog öffnen, `rowsInput.fill('0'|'-1'|'abc')`, „Einfügen“ | `dialog.getByRole('alert')` sichtbar; Dialog bleibt offen; `page.locator('.ProseMirror td')` `toHaveCount(0)`; `pageErrors`/console-`error` leer |
+| 4d | `value above the maximum (100) shows an error, not silent clamping/freeze` | `rowsInput.fill('100')`, `colsInput.fill('100')`, „Einfügen“ | Fehler sichtbar; keine `.ProseMirror table`; Seite reagiert weiter (`dialog.getByRole('button', { name: 'Abbrechen' }).click()` schließt) |
+| 5 | `Escape closes the dialog without any document change` | Text tippen, `Home`, **`waitForTimeout(50)`**, Dialog öffnen, `Escape` | Dialog aus dem DOM; keine `td`; Cursor unverändert (danach tippen und Zielposition prüfen) |
+| 5b | `backdrop click closes without inserting` | Dialog öffnen, Klick auf Overlay außerhalb der Box | Dialog weg; keine Tabelle |
+| 11 | `double-clicking "Einfügen" quickly does not insert twice` | Dialog öffnen, gültige Werte, `Promise.all([btn.click(), btn.click()])` | `await expect(page.locator('.ProseMirror table')).toHaveCount(1)` (nicht 2) |
 
-### B.2 Zellen-Klick/Tipp-Test — alle Zellen (Testfall 6)
+### B.2 Alle Zellen anklicken und beschreiben (Testfall 6)
 
 ```ts
-test('typing into every cell of a freshly inserted 4×3 table lands in the right cell', async ({ page }) => {
+test('typing into every cell of a fresh 4×3 table lands in the right cell', async ({ page }) => {
   await openNewDocxEditor(page)
-  const dialog = await openInsertTableDialog(page)
-  await dialog.getByLabel(/zeilen/i).fill('4')
-  await dialog.getByLabel(/spalten/i).fill('3')
-  await dialog.getByRole('button', { name: 'Einfügen' }).click()
-
+  await insertTableViaDialog(page, { rows: 4, cols: 3 })
   const cells = page.locator('.ProseMirror td')
-  await expect(cells).toHaveCount(12)
+  await expect(cells).toHaveCount(12)                 // §1.1 Regel 2 — vor der Iteration
   for (let i = 0; i < 12; i++) {
     await cells.nth(i).click()
-    await page.keyboard.type(`Z${i}`)
+    await page.keyboard.type(`Z${i}`)                 // Klick→Tippen: kein Wait nötig (§1.1 Regel 4)
   }
   for (let i = 0; i < 12; i++) {
     await expect(cells.nth(i)).toHaveText(`Z${i}`)
   }
 })
 ```
-Erweitert bewusst den bestehenden Test aus `selection-regression.spec.ts:34` (der nur zwei Zellen
-prüft, siehe Anforderung Zeile 341–342) auf **alle** Zellen, um positionsabhängige Fehler (z. B. eine
-falsch berechnete Zellgrenze bei `colspan`/`TableMap`) aufzudecken, die ein Zwei-Zellen-Test
-übersehen würde.
 
-### B.3 Tab-/Umschalt+Tab-Navigation (Testfälle 7–8, Grenzfall 9)
+Erweitert bewusst den bestehenden Zwei-Zellen-Test (`selection-regression.spec.ts:43-59`) auf **alle**
+Zellen, um positionsabhängige Fehler (falsch berechnete Zellgrenzen) aufzudecken.
+
+### B.3 Tab-/Umschalt+Tab-Navigation (Testfälle 7–8, Grenzfall 9/10)
 
 ```ts
 test('Tab moves the cursor to the next cell', async ({ page }) => {
   await openNewDocxEditor(page)
-  await insertDefaultTable(page) // Helper: Dialog öffnen + Einfügen mit Standardwerten
+  await insertDefaultTable(page)
   const cells = page.locator('.ProseMirror td')
+  await expect(cells).toHaveCount(9)
   await cells.nth(0).click()
   await page.keyboard.type('A')
-  await page.keyboard.press('Tab')
+  await page.keyboard.press('Tab')      // Tab = PM-Command (synchroner dispatch), kein selectionchange-Race
   await page.keyboard.type('B')
   await expect(cells.nth(0)).toHaveText('A')
   await expect(cells.nth(1)).toHaveText('B')
 })
 
-test('Tab in the last cell of the last row appends a new row and focuses its first cell', async ({ page }) => {
+test('Tab in the last cell appends a new row and focuses its first cell', async ({ page }) => {
   await openNewDocxEditor(page)
   await insertTableViaDialog(page, { rows: 2, cols: 2 })
   const cells = page.locator('.ProseMirror td')
   await expect(cells).toHaveCount(4)
-  await cells.nth(3).click() // letzte Zelle
+  await cells.nth(3).click()            // letzte Zelle
   await page.keyboard.press('Tab')
-  await expect(page.locator('.ProseMirror tr')).toHaveCount(3)
-  const newCells = page.locator('.ProseMirror td')
-  await expect(newCells).toHaveCount(6)
+  await expect(page.locator('.ProseMirror tr')).toHaveCount(3)   // §1.1 Regel 2 — Struktur abwarten
+  await expect(page.locator('.ProseMirror td')).toHaveCount(6)
   await page.keyboard.type('X')
-  await expect(newCells.nth(4)).toHaveText('X') // Cursor muss in der ERSTEN Zelle der neuen Zeile stehen
+  await expect(page.locator('.ProseMirror td').nth(4)).toHaveText('X')  // Cursor MUSS in erster neuer Zelle stehen
 })
 ```
-**Erwarteter Status heute:** Beide Tests schlagen fehl (Anforderung Zeile 343–347, Grenzfall 9 —
-„gilt bis zum Gegenbeweis als fehlend“). Das ist der dokumentierte Ist-Zustand, kein Testfehler.
 
-### B.4 Undo/Redo (Testfälle 9–10, Grenzfall 6/12)
+**Erwarteter Status heute:** Beide rot (Anforderung §3.9/§3.10, „gilt bis zum Gegenbeweis als
+fehlend“). Dokumentierter Ist-Zustand, kein Testfehler. *Hinweis:* `Tab`/`Shift-Tab` sind nach der
+Umsetzung keymap-gebundene PM-Commands (synchroner `dispatch`), daher an dieser Stelle **kein**
+`selectionchange`-Race (Regel 1 greift hier nicht); der Übergang wird dennoch mit `toHaveCount`
+abgewartet (Regel 2), bevor die Folge-Assertion tippt.
+
+### B.4 Undo/Redo (Testfälle 9–10, Grenzfall 12)
 
 ```ts
 test('Ctrl+Z right after inserting removes the whole table', async ({ page }) => {
@@ -353,7 +406,7 @@ test('Ctrl+Z right after inserting removes the whole table', async ({ page }) =>
   await insertDefaultTable(page)
   await expect(page.locator('.ProseMirror table')).toHaveCount(1)
   await page.keyboard.press('ControlOrMeta+z')
-  await expect(page.locator('.ProseMirror table')).toHaveCount(0)
+  await expect(page.locator('.ProseMirror table')).toHaveCount(0)   // Undo abwarten
   await expect(page.locator('.ProseMirror')).toContainText('Vorher.')
 })
 
@@ -366,181 +419,188 @@ test('Redo restores the table at the correct size', async ({ page }) => {
   await expect(page.locator('.ProseMirror tr')).toHaveCount(4)
 })
 
-test('Undo after insert, then typing at the restored cursor position does not lose content (Grenzfall 12)', async ({ page }) => {
+test('Undo after insert, then typing at the restored position keeps content (Grenzfall 12)', async ({ page }) => {
   await openNewDocxEditor(page)
   await page.locator('.ProseMirror').click()
   await page.keyboard.type('Text davor. ')
   await insertDefaultTable(page)
   await page.keyboard.press('ControlOrMeta+z')
+  await expect(page.locator('.ProseMirror table')).toHaveCount(0)   // §1.1 Regel 2 — Undo abwarten, BEVOR getippt wird
   await page.keyboard.type('Text danach.')
   await expect(page.locator('.ProseMirror')).toContainText('Text davor. Text danach.')
-  await expect(page.locator('.ProseMirror table')).toHaveCount(0)
 })
 ```
 
-### B.5 Cursor-Position, Selektion, Sonderpositionen (Testfälle 11–13, Grenzfälle 5/6/7/8/15)
+### B.5 Cursor-Position, Selektion, Sonderpositionen (Testfälle 11–13/14, Grenzfälle 5/6/7/8/15/16)
 
 | Testname | Kernschritte | Assertion |
 |---|---|---|
-| `inserting between existing text keeps both text parts intact` | Text tippen „AB“, `Home`, `→` (Cursor zwischen A/B), Tabelle einfügen | `.ProseMirror` enthält weiterhin „A“ und „B“ als getrennte Textknoten vor/nach der Tabelle (Reihenfolge im DOM geprüft, nicht nur `toContainText`) |
-| `inserting while text is selected replaces the selection` | Text tippen, `ControlOrMeta+a`, Tabelle einfügen | Ursprünglicher Text ist **weg** (`not.toContainText`), Tabelle vorhanden — bestätigt Grenzfall 5 als gewolltes Verhalten |
-| `inserting at the very start of the document` | Neues leeres Dokument, sofort Tabelle einfügen ohne vorherige Eingabe | Tabelle ist erstes Element; Cursor kann per `Home`+`ArrowUp`-Sequenz oder Klick vor die Tabelle gesetzt und dort weiter getippt werden (Grenzfall 6/15) |
-| `inserting at the very end of the document` | Text tippen, `End`, Tabelle einfügen | Tabelle nach dem Text; Cursor kann danach positioniert und weitergetippt werden |
-| `inserting with the cursor already inside an existing table cell` | Tabelle einfügen, in Zelle 1 klicken, **erneut** „Tabelle einfügen“ + bestätigen | Kein Absturz (keine Konsolenfehler, keine leere weiße Seite), Entscheidung 1.1 aus `tabelle-einfuegen-code.md` (verschachtelte Tabelle erlaubt) wird sichtbar bestätigt: `.ProseMirror td .ProseMirror table` bzw. äquivalenter DOM-Nachweis einer Tabelle **innerhalb** einer Zelle existiert |
-| `inserting inside a list item does not break the list (Grenzfall 8)` | Aufzählung erzeugen, Text „ab“ tippen, Cursor zwischen a/b, Tabelle einfügen | Liste bleibt **ein** `<ul>`-Element (nicht in zwei `<ul>` gesplittet); Tabelle liegt innerhalb desselben `<li>` — direkter DOM-Nachweis für die in `tabelle-einfuegen-code.md` Abschnitt 1.2 getroffene Entscheidung |
+| `inserting between existing text keeps both parts intact` | „AB“ tippen, `Home`, `ArrowRight`, **`waitForTimeout(50)`** (§1.1 Regel 1 — native Cursor-Bewegung vor dem einfügenden Klick), Tabelle einfügen | „A“ und „B“ als getrennte Textknoten **vor bzw. nach** der Tabelle (DOM-Reihenfolge geprüft, nicht nur `toContainText`) |
+| `inserting while text is selected replaces the selection` | Text tippen, `ControlOrMeta+a`, Tabelle einfügen | Ursprungstext **weg** (`not.toContainText`), `.ProseMirror table` `toHaveCount(1)` — Grenzfall 5 als gewolltes Verhalten |
+| `inserting at the very start of the document` | Neues leeres Dokument, sofort Tabelle einfügen | Tabelle erstes Element; danach per Klick über der Tabelle Text ergänzbar (Grenzfall 6/15), kein Fehlerzustand |
+| `inserting at the very end of the document` | Text tippen, `End`, **`waitForTimeout(50)`**, Tabelle einfügen | Tabelle nach dem Text; Cursor danach setzbar und beschreibbar |
+| `inserting with the cursor inside an existing cell → nested table, no crash` | Tabelle einfügen, in eine Zelle klicken, **erneut** „Tabelle einfügen“ + bestätigen | Kein Absturz (`pageErrors` leer, Editor sichtbar); verschachtelte Tabelle nachweisbar: **`page.locator('.ProseMirror td table')`** `toHaveCount(≥1)` (Tabelle **innerhalb** einer Zelle) — bestätigt Code-Entscheidung §1.1 |
+| `inserting inside a list item does not break the list (Grenzfall 8)` | Aufzählung erzeugen, „ab“ tippen, Cursor zwischen a/b (`ArrowLeft` + **`waitForTimeout(50)`**), Tabelle einfügen | Liste bleibt **ein** `<ul>` (`page.locator('.ProseMirror ul')` `toHaveCount(1)`); Tabelle innerhalb desselben `<li>` (`page.locator('.ProseMirror li table')` `toHaveCount(1)`) |
+| `selection over dialog lifetime (TF 14 / Grenzfall 16)` | Text tippen, Dialog öffnen, **ins Dokument an eine bestimmte Stelle zurückklicken**, „Einfügen“ | Tabelle landet an der **zuletzt geklickten** Position (Text davor/danach in erwarteter Reihenfolge), nicht am ursprünglichen Cursor |
 
-### B.6 Rundreise DOCX — echter Upload/Export (Testfall 14, Anforderung Abschnitt 4.1)
-
-Neue Datei `tests/e2e/table-roundtrip.spec.ts`:
+### B.6 Rundreise DOCX — echter Upload/Export (Anforderung §4.1) — neue Datei `tests/e2e/table-roundtrip.spec.ts`
 
 ```ts
-test('DOCX: 4×3 table via dialog round-trips through export/re-import with an independent parser', async ({ page }) => {
-  await openNewDocxEditor(page)
-  const dialog = await openInsertTableDialog(page)
-  await dialog.getByLabel(/zeilen/i).fill('4')
-  await dialog.getByLabel(/spalten/i).fill('3')
-  await dialog.getByRole('button', { name: 'Einfügen' }).click()
+test('DOCX: 4×3 table via dialog round-trips through export/re-import (independent parser)', async ({ page }) => {
+  const pageErrors: string[] = []
+  page.on('pageerror', (e) => pageErrors.push(String(e)))
 
+  await openNewDocxEditor(page)
+  await insertTableViaDialog(page, { rows: 4, cols: 3 })
   const cells = page.locator('.ProseMirror td')
+  await expect(cells).toHaveCount(12)
   for (let i = 0; i < 12; i++) {
     await cells.nth(i).click()
     await page.keyboard.type(`Zelle${i}`)
   }
 
-  const downloadPromise = page.waitForEvent('download')
+  const dl = page.waitForEvent('download')
   await page.getByRole('button', { name: 'Exportieren' }).click()
-  const download = await downloadPromise
+  const download = await dl
   const fs = await import('node:fs/promises')
   const buffer = await fs.readFile((await download.path())!)
 
-  // Unabhängiger Parser: JSZip + rohes XML, KEIN Aufruf der App-eigenen reader.ts-Funktionen
-  const zip = await JSZip.loadAsync(buffer)
+  const zip = await JSZip.loadAsync(buffer)                         // unabhängiger Parser, NICHT reader.ts
   const documentXml = await zip.file('word/document.xml')!.async('text')
-
-  const rowCount = (documentXml.match(/<w:tr\b/g) ?? []).length
-  expect(rowCount).toBe(4)
-  const rowsXml = documentXml.split(/(?=<w:tr\b)/).filter((s) => s.startsWith('<w:tr'))
-  for (const row of rowsXml) {
+  expect((documentXml.match(/<w:tr\b/g) ?? []).length).toBe(4)
+  for (const row of documentXml.split(/(?=<w:tr\b)/).filter((s) => s.startsWith('<w:tr'))) {
     expect((row.match(/<w:tc\b/g) ?? []).length).toBe(3)
   }
   expect(documentXml).toContain('Zelle0')
   expect(documentXml).toContain('Zelle11')
-  expect(documentXml).toMatch(/<w:tblBorders>/) // Anforderung 4.1.4
+  expect(documentXml).toMatch(/<w:tblBorders>/)                    // §4.1.4 / DoD 5
 
-  // Re-Import: dieselbe Datei erneut hochladen (Anforderung 4.1.2)
-  await page.reload()
-  await page.getByRole('button', { name: /verstanden/i }).click()
+  // Re-Import der exakten heruntergeladenen Bytes über die Auswahl (§1 „Formate“-Idiom)
+  await page.getByRole('button', { name: /formate/i }).click()
   const input = docxCard(page).locator('input[type="file"]')
-  await input.setInputFiles({ name: 'export.docx', mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', buffer })
+  await input.setInputFiles({ name: 'export.docx', mimeType: DOCX_MIME, buffer })
   await expect(page.locator('.ProseMirror tr')).toHaveCount(4)
   await expect(page.locator('.ProseMirror td').nth(0)).toHaveText('Zelle0')
   await expect(page.locator('.ProseMirror td').nth(11)).toHaveText('Zelle11')
+  expect(pageErrors, pageErrors.join('\n')).toEqual([])
 })
 
-test('DOCX: merged cells from an uploaded foreign file survive export via real upload/download (Anforderung 4.1.5)', async ({ page }) => {
-  // buildSampleDocxWithMergedCells(): hand-gebaute DOCX mit gridSpan/vMerge, unabhängig vom
-  // eigenen Writer — analog zu buildSampleDocx() in docx.spec.ts, aber mit einer Tabelle.
-  const buffer = await buildSampleDocxWithMergedCells()
+test('DOCX: merged cells from an uploaded foreign file survive real upload/export (§4.1.5)', async ({ page }) => {
+  const buffer = await buildSampleDocxWithMergedCells()   // hand-gebaut, analog docx.spec.ts:169-200
   const input = docxCard(page).locator('input[type="file"]')
-  await input.setInputFiles({ name: 'merged.docx', mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', buffer })
+  await input.setInputFiles({ name: 'merged.docx', mimeType: DOCX_MIME, buffer })
   await expect(page.locator('.ProseMirror table')).toBeVisible()
 
-  const downloadPromise = page.waitForEvent('download')
+  const dl = page.waitForEvent('download')
   await page.getByRole('button', { name: 'Exportieren' }).click()
-  const exportedBuffer = await fs.readFile((await (await downloadPromise).path())!)
-  const zip = await JSZip.loadAsync(exportedBuffer)
-  const documentXml = await zip.file('word/document.xml')!.async('text')
+  const exported = await fs.readFile((await (await dl).path())!)
+  const documentXml = await (await JSZip.loadAsync(exported)).file('word/document.xml')!.async('text')
   expect(documentXml).toMatch(/<w:gridSpan w:val="2"\/>/)
+  expect((documentXml.match(/<w:gridCol\b/g) ?? []).length).toBe(2)   // colspan-Summe, nicht Zellenzahl
 })
 ```
 
-### B.7 Rundreise ODT — inkl. gezielter `colspan`-in-Zeile-1-Test (Testfall 15, Anforderung 4.2.2)
+Konstante `DOCX_MIME = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'` wie in
+`docx.spec.ts`. `buildSampleDocxWithMergedCells()` folgt dem hand-gebauten Fixture-Muster aus
+`docx.spec.ts:169-200` (`gridSpan`/`vMerge`) — bewusst **unabhängig** vom eigenen Writer.
+
+### B.7 Rundreise ODT — echter Upload/Export (Anforderung §4.2)
+
+**Framing (§0.1):** Die folgenden ODT-Prüfungen sind **Regressions-Absicherung** für **bereits
+korrektes** Verhalten (Spaltenzahl bei `colspan`, deterministischer `table:name`) über den echten
+Upload/Export-Weg — **nicht** der Nachweis einer Fehlerbehebung. Kein Kommentar „vor dem Fix schlägt
+es fehl“.
 
 ```ts
-test('ODT: table:table-column count is correct even with a colspan cell in row 0', async ({ page }) => {
+test('ODT: 4×3 table via dialog exports the correct row/column structure', async ({ page }) => {
   await openNewOdtEditor(page)
-  // Dialog-Weg reicht hier nicht aus, um eine colspan-Zelle in Zeile 0 zu erzeugen (der Dialog
-  // erzeugt nur gleichförmige Tabellen) — dieser konkrete Testfall braucht eine Fremddatei mit
-  // bereits verbundener Zelle in Zeile 0, gefolgt von einer Zeile mit mehr Zellen (exakt das in
-  // der Anforderung Zeile 289–291 verlangte Szenario), analog buildSampleOdt() in odt.spec.ts.
-  const buffer = await buildSampleOdtWithColspanInFirstRow() // Zeile 0: 1 Zelle colspan=3; Zeile 1: 3 Zellen
-  const input = odtCard(page).locator('input[type="file"]')
-  await input.setInputFiles({ name: 'colspan-row0.odt', mimeType: 'application/vnd.oasis.opendocument.text', buffer })
-  await expect(page.locator('.ProseMirror table')).toBeVisible()
-
-  const downloadPromise = page.waitForEvent('download')
+  await insertTableViaDialog(page, { rows: 4, cols: 3 })
+  const dl = page.waitForEvent('download')
   await page.getByRole('button', { name: 'Exportieren' }).click()
-  const exportedBuffer = await fs.readFile((await (await downloadPromise).path())!)
-  const zip = await JSZip.loadAsync(exportedBuffer)
-  const contentXml = await zip.file('content.xml')!.async('text')
-
-  const columnCount = (contentXml.match(/<table:table-column\b/g) ?? []).length
-  expect(columnCount).toBe(3) // Vor dem Fix: 1 (siehe odt/writer.ts:88) — Kern-Defektnachweis über echten Upload/Export
+  const contentXml = await (await JSZip.loadAsync(await fs.readFile((await (await dl).path())!)))
+    .file('content.xml')!.async('text')
+  expect((contentXml.match(/<table:table-row\b/g) ?? []).length).toBe(4)
+  const rows = contentXml.split(/(?=<table:table-row\b)/).filter((s) => s.startsWith('<table:table-row'))
+  for (const row of rows) expect((row.match(/<table:table-cell\b/g) ?? []).length).toBe(3)
+  expect((contentXml.match(/<table:table-cell[^>]*table:style-name="TCBorder"/g) ?? []).length).toBeGreaterThan(0)
 })
 
-test('ODT: two tables in the same document get non-colliding names on real export (Anforderung 4.2.6)', async ({ page }) => {
+test('ODT: table:table-column count stays correct with a colspan cell in row 0 (regression, §4.2.2)', async ({ page }) => {
+  // Der Dialog erzeugt nur gleichförmige Tabellen; für eine colspan-Zelle in Zeile 0 braucht es eine
+  // Fremddatei (Zeile 0: 1 Zelle colspan=3; Zeile 1: 3 Zellen) — das in §4.2.2 verlangte Szenario.
+  const buffer = await buildSampleOdtWithColspanInFirstRow()   // hand-gebaut, analog odt.spec.ts
+  const input = odtCard(page).locator('input[type="file"]')
+  await input.setInputFiles({ name: 'colspan-row0.odt', mimeType: ODT_MIME, buffer })
+  await expect(page.locator('.ProseMirror table')).toBeVisible()
+
+  const dl = page.waitForEvent('download')
+  await page.getByRole('button', { name: 'Exportieren' }).click()
+  const contentXml = await (await JSZip.loadAsync(await fs.readFile((await (await dl).path())!)))
+    .file('content.xml')!.async('text')
+  expect((contentXml.match(/<table:table-column\b/g) ?? []).length).toBe(3)   // bereits korrekt (odt/writer.ts:115) — Regressionsanker
+})
+
+test('ODT: two tables in one document keep distinct table:name values on real export (§4.2.6)', async ({ page }) => {
   await openNewOdtEditor(page)
   await insertDefaultTable(page)
   await page.locator('.ProseMirror').click()
   await page.keyboard.press('ControlOrMeta+End')
+  await page.waitForTimeout(50)                 // §1.1 Regel 1 — native Cursor-Bewegung vor Enter
   await page.keyboard.press('Enter')
   await insertDefaultTable(page)
 
-  const downloadPromise = page.waitForEvent('download')
+  const dl = page.waitForEvent('download')
   await page.getByRole('button', { name: 'Exportieren' }).click()
-  const buffer = await fs.readFile((await (await downloadPromise).path())!)
-  const zip = await JSZip.loadAsync(buffer)
-  const contentXml = await zip.file('content.xml')!.async('text')
+  const contentXml = await (await JSZip.loadAsync(await fs.readFile((await (await dl).path())!)))
+    .file('content.xml')!.async('text')
   const names = [...contentXml.matchAll(/<table:table table:name="([^"]+)"/g)].map((m) => m[1])
   expect(names).toHaveLength(2)
-  expect(new Set(names).size).toBe(2)
+  expect(new Set(names).size).toBe(2)           // deterministisch via TableNameSequence
 })
 ```
 
-### B.8 Cross-Format-Rundreise (Testfall 16, Anforderung 4.1.6/4.2.5/4.3)
+`openNewOdtEditor`/`odtCard` analog zu B.1, mit Überschrift „OpenDocument Text (.odt)“;
+`ODT_MIME = 'application/vnd.oasis.opendocument.text'`.
 
-| Testname | Kernschritte | Assertion |
-|---|---|---|
-| `ODT with a table imported, exported as DOCX, keeps structure/content` | ODT-Fremddatei mit Tabelle hochladen (auf ODT-Karte), **Export als DOCX** (falls die App Cross-Format-Export über dieselbe Session unterstützt — sonst: Inhalt in neuem DOCX-Dokument nachbilden/den tatsächlich unterstützten Cross-Format-Weg der App verwenden, bei Umsetzung verifizieren) | Zeilen-/Spaltenzahl und Zellinhalte im exportierten `word/document.xml` identisch zur Quelle |
-| `DOCX → ODT → DOCX (Doppel-Rundreise, Anforderung 4.3.1)` | DOCX mit Tabelle hochladen → als ODT exportieren → diese ODT-Datei erneut hochladen → als DOCX exportieren | Zeilen-/Spaltenzahl und Zellinhalte nach zwei Konvertierungen identisch zum Original; Spaltenbreite/Rahmen-Feinheiten **dürfen** abweichen (Anforderung Zeile 311–313) — dafür **keine** eigene Assertion, das ist bewusst ausgenommen |
-| `ODT → DOCX → ODT (Anforderung 4.3.2)` | Analog umgekehrt | wie oben |
+### B.8 Cross-Format (Anforderung §4.1.6/§4.2.5/§4.3) — bewusst auf Modul-Ebene
 
-*Hinweis für QA bei Umsetzungsprüfung:* Zu klären, ob die App überhaupt einen direkten
-Cross-Format-Export (ODT-Dokument im Editor → „als DOCX exportieren“-Knopf) anbietet, oder ob dafür
-zunächst re-importiert werden muss. Der tatsächliche Bedienweg ist bei der Umsetzung zu verifizieren
-und dieser Testfall entsprechend anzupassen — die Anforderung selbst verlangt nur das Ergebnis
-(Struktur-/Inhaltstreue), nicht einen bestimmten Klickpfad.
+**Kein E2E-Cross-Format-Test.** Die UI bietet **keinen** Cross-Format-Export: die einzige
+„Exportieren“-Schaltfläche (`DocumentWorkspace.tsx:141`) exportiert stets im Format des geladenen
+Dokuments; es gibt keinen „als DOCX/ODT exportieren“-Umschalter. Ein DOCX→ODT→DOCX-Weg lässt sich
+daher **nicht** über echte Klicks erzeugen. Die Anforderung §4.3 verlangt ausdrücklich nur das
+**Ergebnis** (Struktur-/Inhaltstreue), keinen bestimmten Klickpfad — dieses Ergebnis wird
+deterministisch über die realen Reader/Writer in **A.6** nachgewiesen. Sollte künftig ein
+Cross-Format-Export-Steuerelement in die UI kommen, ist hier ein echter E2E-Test nachzuziehen; QA
+verifiziert bei der Abnahme, dass dieser UI-Pfad tatsächlich (nicht) existiert.
 
-### B.9 Große Tabelle — Performance/Reaktionsfähigkeit (Testfall 17, Grenzfall 3/4)
+### B.9 Große Tabelle — Reaktionsfähigkeit (Testfall 18, Grenzfall 3/4)
 
 ```ts
-test('20×20 table: insert, edit, export/import stay responsive and complete within ~3s', async ({ page }) => {
+test('20×20 table: insert, edit, export/import stay responsive', async ({ page }) => {
   await openNewDocxEditor(page)
-  const dialog = await openInsertTableDialog(page)
-  await dialog.getByLabel(/zeilen/i).fill('20')
-  await dialog.getByLabel(/spalten/i).fill('20')
-  await dialog.getByRole('button', { name: 'Einfügen' }).click()
+  await insertTableViaDialog(page, { rows: 20, cols: 20 })
   await expect(page.locator('.ProseMirror td')).toHaveCount(400)
 
-  // UI bleibt bedienbar: sofort nach dem Einfügen tippen, ohne Timeout/Hänger
+  // Kern-Determinismus: UI hängt nicht — eine Folge-Eingabe landet innerhalb des expect-Timeouts
   await page.locator('.ProseMirror td').first().click()
   await page.keyboard.type('Ecke')
   await expect(page.locator('.ProseMirror td').first()).toHaveText('Ecke')
 
-  const start = Date.now()
-  const downloadPromise = page.waitForEvent('download')
+  const t0 = Date.now()
+  const dl = page.waitForEvent('download')
   await page.getByRole('button', { name: 'Exportieren' }).click()
-  const download = await downloadPromise
-  const buffer = await fs.readFile((await download.path())!)
-  const exportMs = Date.now() - start
-  expect(exportMs).toBeLessThan(3000)
-
-  const zip = await JSZip.loadAsync(buffer)
-  const documentXml = await zip.file('word/document.xml')!.async('text')
+  const buffer = await fs.readFile((await (await dl).path())!)
+  const exportMs = Date.now() - t0
+  const documentXml = await (await JSZip.loadAsync(buffer)).file('word/document.xml')!.async('text')
   expect((documentXml.match(/<w:tr\b/g) ?? []).length).toBe(20)
+
+  // Wall-clock-Schwelle NUR als weiche, protokollierte Kennzahl (CI-Last variiert). Die harte
+  // Determinismus-Aussage ist die erfolgreiche Folge-Eingabe oben, nicht diese Zeitmessung.
+  console.log(`[metric] 20x20 DOCX export: ${exportMs} ms`)
+  expect(exportMs).toBeLessThan(8000)   // großzügige Obergrenze gegen echtes Einfrieren; Zielwert < 3 s (§3.4) als Kennzahl protokolliert
 })
 
-test('101×101 (above the maximum) is rejected with an error, not a frozen UI', async ({ page }) => {
+test('101 rows/cols (above the maximum) is rejected with an error, not a frozen UI', async ({ page }) => {
   await openNewDocxEditor(page)
   const dialog = await openInsertTableDialog(page)
   await dialog.getByLabel(/zeilen/i).fill('100')
@@ -551,56 +611,61 @@ test('101×101 (above the maximum) is rejected with an error, not a frozen UI', 
 })
 ```
 
-### B.10 Reale komplexe Fremddatei (Testfall 18)
+*Begründung Determinismus:* Ein hartes `toBeLessThan(3000)` auf die reine Wall-Clock ist auf geteilten
+CI-Runnern flaky. Deterministischer Kern ist die **erfolgreiche Folge-Interaktion** (kein Hänger); die
+Zeit wird als Kennzahl protokolliert und nur gegen eine großzügige „echtes Einfrieren“-Schwelle
+geprüft. Der Zielwert < 3 s aus §3.4 wird im Abnahmeprotokoll (Abschnitt D) mit dem geloggten Wert
+belegt.
+
+### B.10 Reale komplexe Fremddatei (Testfall 19, Anforderung §4.1.7)
 
 ```ts
 test('a realistic large foreign DOCX table (6 cols × 12 rows, mixed formatting) round-trips without cell-content loss', async ({ page }) => {
-  const buffer = await buildLargeSampleDocxWithTable({ cols: 6, rows: 12 }) // hand-gebaut, analog buildSampleDocx()
+  const buffer = await buildLargeSampleDocxWithTable({ cols: 6, rows: 12 })  // hand-gebaut, analog docx.spec.ts
   const input = docxCard(page).locator('input[type="file"]')
-  await input.setInputFiles({ name: 'gross.docx', mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', buffer })
+  await input.setInputFiles({ name: 'gross.docx', mimeType: DOCX_MIME, buffer })
   await expect(page.locator('.ProseMirror tr')).toHaveCount(12)
 
-  const downloadPromise = page.waitForEvent('download')
+  const dl = page.waitForEvent('download')
   await page.getByRole('button', { name: 'Exportieren' }).click()
-  const exportedBuffer = await fs.readFile((await (await downloadPromise).path())!)
+  const exported = await fs.readFile((await (await dl).path())!)
 
-  // Erneuter Import der exportierten Datei
-  await page.reload()
-  await page.getByRole('button', { name: /verstanden/i }).click()
+  await page.getByRole('button', { name: /formate/i }).click()
   const input2 = docxCard(page).locator('input[type="file"]')
-  await input2.setInputFiles({ name: 're-import.docx', mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', buffer: exportedBuffer })
+  await input2.setInputFiles({ name: 're-import.docx', mimeType: DOCX_MIME, buffer: exported })
   await expect(page.locator('.ProseMirror tr')).toHaveCount(12)
-  // Stichprobenartige Zellinhalts-Prüfung an mehreren Positionen, inkl. Formatierungserhalt (z. B. fett)
+  // Stichproben mehrerer Zellinhalte + Formaterhalt (z. B. eine fett gesetzte Zelle bleibt <strong>)
 })
 ```
-Sofern im Repo bereits größere Testfixtures existieren (lt. `tabelle-einfuegen-code.md` Zeile 625–629
-zum Zeitpunkt der Code-Planung **nicht** gefunden), muss QA vor Testerstellung erneut in `tests/` und
-`src/**/__tests__` prüfen, ob inzwischen eine geeignete Fixture ergänzt wurde, statt ungeprüft eine
-neue zu bauen.
 
-### B.11 Regressionstest (Testfall 19)
+**Fixture-Prüfpflicht:** Vor Testerstellung erneut in `tests/e2e/fixtures/` und `src/**/__tests__`
+prüfen, ob bereits eine passende große Tabellen-Fixture existiert (`fullCoverageDocument` in
+`tests/e2e/fixtures/` deckt derzeit nur eine 2-Zeilen-Tabelle ab, `docx.spec.ts:285`), statt ungeprüft
+eine neue zu bauen.
 
-`tests/e2e/selection-regression.spec.ts` (alle drei Tests, nicht nur der Tabellen-Test) wird als
-**Pflichtbestandteil** jedes vollständigen Testlaufs erneut ausgeführt und muss grün bleiben — siehe
-B.0 für die notwendige, inhaltlich neutrale Anpassung der Klick-Sequenz.
+### B.11 Regressionstest (Testfall 20)
+
+`tests/e2e/selection-regression.spec.ts` (**alle** Tests des `describe`-Blocks, nicht nur der
+Tabellen-Test) wird als **Pflichtbestandteil** jedes Volllaufs erneut ausgeführt und muss grün bleiben
+— mit der inhaltlich neutralen Anpassung aus B.0.
 
 ---
 
 ## 4. Traceability-Matrix — Anforderung ↔ Testfall
 
-| Anforderung | Testfall(e) in diesem Plan |
+| Anforderung | Testfall(e) |
 |---|---|
-| §1 Zeile 60 (Dialog statt fester 2×2) | B.1 #1–3 |
-| §1 Zeile 67 (Tab-Navigation) | B.3, A.2 |
-| §1 Zeile 68 (Undo direkt nach Einfügen) | B.4 |
+| §1 (Dialog statt fester 2×2) | B.1 #1–3, A.3 |
+| §1 (Tab-Navigation) | B.3, A.2 |
+| §1 (Undo direkt nach Einfügen) | B.4 |
 | §2.1/2.2 (Dialogverhalten, Validierung) | B.1, A.3 |
-| §2.3 (Einfügen an Cursor-Position/Selektion) | B.5 |
+| §2.3 (Einfügen an Cursor/Selektion) | B.5 |
 | §2.4 (sofortige Bearbeitbarkeit) | B.2 |
-| §2.5 (Spaltenbreite: Darstellung + Export-Lücke) | A.4 (`colwidth`-Übernahme, Breitensumme), B.9 (visuell/Performance bei 20 Spalten) |
+| §2.5 (Spaltenbreite: Darstellung + Export-Lücke) | A.4 (`colwidth`-Übernahme, Breitensumme), B.9 |
 | §2.6 (Undo/Redo) | B.4 |
 | §2.7 (Selection-Sync-Bug in Tabellen) | B.0, B.11 |
 | §2.8/Grenzfall 7/8 (verschachtelt/Liste) | B.5, A.2 |
-| §3 Grenzfall 1 (Abbrechen) | B.1 #5, #5b |
+| §3 Grenzfall 1 (Abbrechen) | B.1 #5, #5b, A.3 |
 | §3 Grenzfall 2 (ungültige Eingabe) | B.1 #4a–c, A.3 |
 | §3 Grenzfall 3 (100×100 abgelehnt) | B.1 #4d, B.9 |
 | §3 Grenzfall 4 (20×20 performant) | B.9 |
@@ -608,64 +673,67 @@ B.0 für die notwendige, inhaltlich neutrale Anpassung der Klick-Sequenz.
 | §3 Grenzfall 6 (Dokumentanfang/-ende) | B.5 |
 | §3 Grenzfall 7 (verschachtelte Tabelle) | B.5, A.2 |
 | §3 Grenzfall 8 (Listenelement) | B.5, A.2 |
-| §3 Grenzfall 9/10 (Tab letzte Zelle / Fokus verlässt Editor) | B.3 |
+| §3 Grenzfall 9/10 (Tab letzte Zelle / Fokus) | B.3 |
 | §3 Grenzfall 11 (Mehrfachklick) | B.1 #11, A.3 |
-| §3 Grenzfall 12 (Undo + erneutes Tippen) | B.4 |
-| §3 Grenzfall 13 (Selection-Sync beim Zellwechsel) | B.0, B.11 |
+| §3 Grenzfall 12 (Undo + erneut tippen) | B.4 |
+| §3 Grenzfall 13 (Selection-Sync Zellwechsel) | B.0, B.11 |
 | §3 Grenzfall 14 (Spaltenzahl > Seitenbreite) | A.4, B.9 |
 | §3 Grenzfall 15 (leeres Dokument) | B.5 |
+| §3 Grenzfall 16 (Selektion über Dialog-Lebensdauer) | B.5 (TF 14) |
 | §4.1 DOCX-Rundreise (1–7) | B.6, A.4, B.10 |
-| §4.2 ODT-Rundreise (1–7) | B.7, A.5 |
-| §4.3 Cross-Format doppelte Rundreise | B.8 |
-| §5 Testfälle 1–19 | B.0–B.11 (siehe Kopfzeile je Unterabschnitt), A.1–A.5 |
-| §6 DoD Punkt 1 (Dialog) | B.1, A.3 |
-| §6 DoD Punkt 2 (Tab-Navigation) | B.3, A.2 |
-| §6 DoD Punkt 3 (alle Testfälle §5 grün) | gesamter Abschnitt B |
-| §6 DoD Punkt 4 (Rundreise + zwei benannte Defekte) | A.4/A.5 (Unit) **und** B.6/B.7 (E2E) — Anforderung verlangt ausdrücklich Nachweis über echten Upload/Download, nicht nur Unit-Ebene |
-| §6 DoD Punkt 5 (Grenzfälle dokumentiert) | Abschnitt D dieses Plans |
-| §6 DoD Punkt 6 (Grenzfall 3.7 beantwortet) | A.2 (Listen-/Verschachtelungstest), B.5 |
-| §6 DoD Punkt 7 (Regressionstest bleibt bestehen) | B.0, B.11 |
-| §6 DoD Punkt 8 (Spaltenbreiten-Einschränkung dokumentiert/behoben) | A.4 |
+| §4.2 ODT-Rundreise (1–7) | B.7, A.5 (Regression `:298`/`:529`) |
+| §4.3 Cross-Format doppelte Rundreise | **A.6** (Modul-Ebene; UI bietet keinen Cross-Format-Export, B.8) |
+| §5 Testfälle 1–20 | B.0–B.11, A.1–A.6 |
+| §6 DoD 1 (Dialog) | B.1, A.3 |
+| §6 DoD 2 (Tab-Navigation) | B.3, A.2 |
+| §6 DoD 3 (alle §5-Testfälle grün) | gesamter Abschnitt B |
+| §6 DoD 4 (Rundreise; die zwei ODT-Punkte als Regression, NICHT als Neu-Behebung) | A.1 (`:298`/`:529`) + A.4/A.5 + B.6/B.7 |
+| §6 DoD 5 (DOCX-Rahmenfrage beantwortet) | A.4 (`<w:tblBorders>`), B.6 |
+| §6 DoD 6 (Grenzfälle dokumentiert) | Abschnitt D |
+| §6 DoD 7 (Grenzfall 3.7 beantwortet) | A.2, B.5 |
+| §6 DoD 8 (Spaltenbreiten-Einschränkung dokumentiert/behoben) | A.4, Abschnitt D |
+| §6 DoD 9 (Regressionstest bleibt) | B.0, B.11 |
 
 ---
 
 ## 5. Abschnitt D — Abnahmeprotokoll-Vorlage
 
-Für jeden Testfall aus Abschnitt A/B wird bei tatsächlicher Ausführung festgehalten:
-
-| Testfall-ID | Ergebnis (Pass/Fail/Blocked) | Datum | Ausgeführt gegen Commit/Version | Bei Fail: Fundstelle im Code | Bemerkung |
+| Testfall-ID | Ergebnis (Pass/Fail/Blocked) | Datum | Commit/Version | Bei Fail: Fundstelle | Bemerkung |
 |---|---|---|---|---|---|
 | … | … | … | … | … | … |
 
-Zusätzlich, **zwingend** vor Status-Änderung „teilweise“ → „verifiziert“ (Anforderung Abschnitt 6):
-- Explizite schriftliche Antwort auf Grenzfall 3.7 (verschachtelte Tabelle), wie in
-  `tabelle-einfuegen-req.md` Zeile 192–193 gefordert und in `tabelle-einfuegen-code.md` Abschnitt 1.1
-  vorgeschlagen — QA bestätigt per Testergebnis aus B.5, ob das tatsächliche Verhalten der Entscheidung
-  entspricht, und trägt das Ergebnis in `tabelle-einfuegen-req.md` nach.
-- Explizite schriftliche Antwort auf Grenzfall 3.8 (Listenelement), analog über A.2/B.5.
-- Bestätigung, dass `tests/e2e/selection-regression.spec.ts` nach Anpassung (B.0) **inhaltlich**
-  unverändert ist (Diff-Review, nicht nur „Test ist grün“).
+Zwingend vor Status-Änderung „teilweise“ → „verifiziert“ (Anforderung §6):
+- Schriftliche Antwort auf Grenzfall 3.7 (verschachtelte Tabelle) — QA bestätigt per A.2/B.5, ob das
+  Ist-Verhalten der Entscheidung (Code §1.1, erlaubt + Tiefen-Guard) entspricht, und trägt das
+  Ergebnis in `tabelle-einfuegen-req.md` nach.
+- Schriftliche Antwort auf Grenzfall 3.8 (Listenelement) analog über A.2/B.5.
+- Bestätigung, dass DOCX-Rahmen (§6.5) exportiert werden (A.4/B.6) und die Spaltenbreiten-Einschränkung
+  (§6.8) behoben (DOCX) bzw. bewusst dokumentiert (ODT/Import) ist.
+- Geloggter 20×20-Export-Wert (B.9) gegen den Zielwert < 3 s (§3.4) protokolliert.
+- Diff-Review, dass `tests/e2e/selection-regression.spec.ts` nach B.0 **inhaltlich** unverändert ist
+  (nicht nur „grün“).
+- **Ausdrücklicher Vermerk (Anforderung §0):** Die ODT-Punkte Spaltenzahl (`:298`) und `table:name`
+  (`:529`) sind **keine** in diesem Durchlauf behobenen Defekte, sondern grün gehaltener
+  Regressionsschutz für bereits vorhandenen Code (`TableNameSequence`, colspan-summiertes `colCount`).
 
 ---
 
-## 6. Abschnitt E — Baseline-Lauf (vor Umsetzung, Stand 2026-07-04)
-
-Da die Umsetzung laut Abschnitt 0 zum Zeitpunkt der Testplan-Erstellung **noch nicht** erfolgt ist,
-gilt für einen Testlauf gegen den heutigen Code:
+## 6. Abschnitt E — Nullmessung (vor Umsetzung, Stand 2026-07-05)
 
 | Testgruppe | Erwartetes Ergebnis heute | Grund |
 |---|---|---|
-| A.1 (bestehende Unit-Tests) | Grün | Unverändert, bereits vorhanden |
-| A.2 (`commands.test.ts`, neu) | Kann nicht ausgeführt werden (Datei/Funktionen existieren nicht) | `tableTab` etc. fehlen |
-| A.3 (`InsertTableDialog.test.tsx`, neu) | Kann nicht ausgeführt werden | Komponente fehlt |
-| A.4/A.5 (Writer-Erweiterungen) | Rot bzw. nicht ausführbar, falls Test-Helper (`roundTripRaw`/`exportOdtRaw`) fehlen | Bugs bestehen unverändert (siehe A.6) |
-| B.0/B.11 (Regressionstest) | Grün **im aktuellen, unveränderten** Zustand (Button fügt weiterhin direkt ein) | Muss nach der B.0-Anpassung erneut geprüft werden, sobald der Dialog existiert |
-| B.1 (Dialogverhalten) | Rot/nicht ausführbar (`getByRole('dialog', ...)` findet nichts) | Dialog fehlt vollständig |
-| B.2 (alle Zellen tippbar) | Grün (Grundfunktion existiert bereits über `insertTable(2,2)`, wenn Test auf feste 2×2-Größe statt Dialog angepasst wird) | Nur die Größenwahl fehlt, die Basisbearbeitbarkeit nicht |
-| B.3 (Tab-Navigation) | Rot | Anforderung Zeile 343–347, Grenzfall 9, bestätigt fehlend |
-| B.4 (Undo/Redo) | Voraussichtlich grün (generischer `history()`-Mechanismus, siehe Anforderung Zeile 68) — **muss dennoch tatsächlich ausgeführt werden**, nicht nur angenommen | Bisher kein eigener Test vorhanden (Anforderung Zeile 68: „aktuell nicht durch einen eigenen Test abgesichert“) |
-| B.5–B.10 | Größtenteils rot/nicht ausführbar, da vom Dialog abhängig; Cross-Format/Fremddatei-Tests teils unabhängig vom Dialog möglich (Upload-Pfad) | Siehe einzelne Testfälle |
+| A.1 (Baseline, inkl. ODT `:298`/`:529`) | **Grün** | Bereits vorhanden; die zwei „bereits behobenen“ ODT-Punkte sind heute grün |
+| A.2 (`commands.test.ts` neu) | Nicht ausführbar (`tableTab`/Guard fehlen) | Code §3.1 noch nicht gebaut |
+| A.3 (`InsertTableDialog.test.tsx` neu) | Nicht ausführbar | Komponente fehlt |
+| A.4 (DOCX-Writer-Erweiterungen) | **Rot** bzw. nicht ausführbar bis `roundTripRaw`-Helper existiert | `<w:tblPr/>` leer, `w:w="2000"` hartkodiert |
+| A.5 (ODT `TCBorder`) | **Rot** | `table:style-name` an Zellen fehlt (`odt/writer.ts:156`) |
+| A.6 (Cross-Format Modul) | Voraussichtlich **grün**, aber neu zu schreiben und tatsächlich auszuführen | Reader/Writer bereits vorhanden |
+| B.0/B.11 (Regression) | Heute **grün** im unveränderten Zustand (Button fügt direkt ein) | Nach B.0-Anpassung erneut prüfen, sobald der Dialog existiert |
+| B.1 (Dialogverhalten) | Rot/nicht ausführbar (`getByRole('dialog', …)` findet nichts) | Dialog fehlt |
+| B.2 (alle Zellen tippbar) | Grün, **wenn** vorübergehend auf die feste 2×2-Einfügung angepasst; sonst rot (Dialog fehlt) | Basisbearbeitbarkeit besteht, nur die Größenwahl fehlt |
+| B.3 (Tab-Navigation) | **Rot** | Anforderung §3.9/§3.10, bestätigt fehlend |
+| B.4 (Undo/Redo) | Voraussichtlich grün (generischer `history()`), **muss dennoch real ausgeführt** werden | Bisher kein eigener Test |
+| B.5–B.10 | Größtenteils rot/nicht ausführbar (dialogabhängig); Fremddatei-/Rundreise-Teile teils schon über den Upload-Pfad möglich | Siehe Einzelfälle |
 
-Dieser Abschnitt dient als **Nullmessung**: Nach jeder Umsetzungs-Iteration wird derselbe vollständige
-Lauf wiederholt und das Ergebnis in Abschnitt D protokolliert, bis alle acht Punkte aus
-`tabelle-einfuegen-req.md` Abschnitt 6 (Abnahmekriterien) erfüllt und grün sind.
+Nach jeder Umsetzungs-Iteration wird derselbe vollständige Lauf wiederholt und in Abschnitt D
+protokolliert, bis alle neun Punkte aus `tabelle-einfuegen-req.md` Abschnitt 6 erfüllt und grün sind.

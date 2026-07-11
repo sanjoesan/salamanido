@@ -3,106 +3,130 @@
 Gegenstück zu `specs/tabelle-loeschen-req.md` (Anforderung) und `specs/tabelle-loeschen-code.md`
 (Umsetzungsplan des Dev-Agenten). Dieses Dokument ist der **Testplan der QA-Rolle**: es legt fest,
 welche Tests geschrieben werden, mit welchem konkreten Code, gegen welche echten Dateien/Fixtures,
-und wie das Ergebnis gegen Anforderungsabschnitt 6/7 abgeglichen wird. Es ersetzt nicht die
+und wie das Ergebnis gegen Anforderungsabschnitt 3/4/7 abgeglichen wird. Es ersetzt nicht die
 Ausführung, sondern ist die verbindliche, ausführbare Grundlage dafür.
 
-Stil/Aufbau folgen bewusst `specs/liste-aufheben-qa.md` (zuletzt geprüftes Schwesterfeature),
-damit alle QA-Pläne in diesem Repo vergleichbar bleiben.
+Stil/Aufbau folgen bewusst den bereits geprüften Schwester-QA-Plänen dieses Repos, damit alle
+QA-Pläne vergleichbar bleiben.
+
+> **Revision (kritische Überarbeitung, 2026-07-05).** Die erste Fassung dieses Plans war gegen
+> einen **veralteten Code-Stand** (vor dem Merge des „Ausschneiden"-Features) geschrieben und
+> enthielt dadurch mehrere **faktisch falsche** Ist-Stand-Behauptungen. Sie sind gegen den
+> **tatsächlichen aktuellen Repo-Stand** neu verifiziert und korrigiert. Die wichtigsten
+> Korrekturen (Details je Stelle markiert):
+> 1. **ODT `covered-table-cell` ist implementiert**, nicht fehlend. `odt/writer.ts:115-116`
+>    summiert `colspan`, `odt/writer.ts:137/161` emittiert `<table:covered-table-cell/>` für
+>    horizontale **und** vertikale Merges; grüne Tests unter `odt/__tests__/roundtrip.test.ts:275`
+>    (colspan) / `:310` (rowspan) und `odt/__tests__/external-validation.test.ts:144-159`. Der
+>    frühere `test.todo`-„Blocker" entfällt ersatzlos; die betroffenen Tests dürfen volle
+>    Struktur-Assertions verwenden.
+> 2. **`tests/e2e/large-document-import.spec.ts` existiert.** `tests/e2e/` enthält aktuell **17**
+>    Spec-Dateien (nicht vier). Der frühere „Datei fehlt"-Befund war falsch.
+> 3. **ODT-Bilder liegen unter `Pictures/`** (`odt/imageCollector.ts:22`), nicht im ZIP-Wurzel-
+>    verzeichnis.
+> 4. **Der Einfüge-Button hat heute `aria-label="Tabelle einfügen"`** (`Toolbar.tsx:280`) zusätzlich
+>    zu `title` — die frühere Warnung „kein aria-label, Accessible Name nur aus sichtbarem Text"
+>    ist überholt. `getByRole('button', { name: 'Tabelle einfügen' })` matcht zuverlässig (so nutzt
+>    es auch `selection-regression.spec.ts:46`).
+> 5. **`commands.ts` hat 167 Zeilen** und exportiert zusätzlich `insertHardBreak`,
+>    `applyMarkColor`/`clearMarkColor`, `canCut`/`cutSelection`. Sämtliche Zeilenangaben in Abschnitt
+>    1 sind auf den aktuellen Stand gesetzt.
+> 6. **Zwei konkrete Testcode-Defekte der ersten Fassung behoben:** (a) der Bild-`<input>` liegt in
+>    der Toolbar, **nicht** in `.ProseMirror` — Locator ist jetzt seiten-, nicht editor-bezogen;
+>    (b) fehlende Selektions-Sync-Wartepunkte zwischen Reposition und Folgeaktion sind ergänzt
+>    (Abschnitt 5.1, Determinismus).
 
 ---
 
 ## 0. Kurzfassung für Eilige
 
 - **Vor Testerstellung wurde der tatsächliche Code geprüft** (nicht nur `tabelle-loeschen-code.md`
-  gelesen). Ergebnis, abweichend von den meisten Schwesterfeatures: Hier gibt es **keine**
-  Teilumsetzung zu verifizieren — der in `tabelle-loeschen-req.md` Abschnitt 5 und
-  `tabelle-loeschen-code.md` Abschnitt 1 beschriebene Ist-Zustand („zu 100 % ungebaut") ist exakt
-  der tatsächliche Code-Stand (Details Abschnitt 1). **Praktisch jeder** in diesem Plan neu
-  vorgeschlagene Test ist deshalb heute **RED** (Compile-/Laufzeitfehler oder fehlendes
-  UI-Element) — das ist der korrekte, erwartete Zustand vor dem Bau, kein Testfehler.
+  gelesen), und zwar erneut gegen den aktuellen Stand nach dem „Ausschneiden"-Merge. Ergebnis: Hier
+  gibt es **keine** Teilumsetzung zu verifizieren — der in `tabelle-loeschen-req.md` Abschnitt 5 und
+  `tabelle-loeschen-code.md` Abschnitt 1 beschriebene Ist-Zustand („zu 100 % ungebaut") ist exakt der
+  tatsächliche Code-Stand (Details Abschnitt 1). **Praktisch jeder** in diesem Plan neu
+  vorgeschlagene Test ist deshalb heute **RED** (Laufzeitfehler `deleteTable is not a function`
+  bzw. fehlendes UI-Element) — das ist der korrekte, erwartete Zustand vor dem Bau, kein Testfehler.
 - Zwei Testebenen, wie beauftragt:
   1. **Unit-Tests (Vitest/jsdom)** für die Reader/Writer-Rundreise DOCX **und** ODT — Abschnitt 4.
   2. **Echte Playwright-Browser-Tests** — echte Mausklicks, echtes Tippen über `page.keyboard`,
-     echter Datei-Upload über `input[type=file]`, echter Export-Download über
+     echter Datei-Upload über `input[type=file].setInputFiles(...)`, echter Export-Download über
      `page.waitForEvent('download')` mit anschließendem Einlesen/Entpacken der **tatsächlich
      heruntergeladenen Datei** per `JSZip` — nicht nur interne Aufrufe von
      `readDocx`/`writeDocx`/`readOdt`/`writeOdt`/`deleteTable`. Abschnitt 5.
-- Alle ~40 in `tabelle-loeschen-req.md` Abschnitt 4.2 gelisteten Fixture-Dateien wurden **vor dem
-  Schreiben dieses Plans** per `ls` gegen das tatsächliche Dateisystem geprüft — **alle
-  vorhanden** (Abschnitt 6), keine wurde unbesehen aus der Anforderung übernommen.
+- Alle in `tabelle-loeschen-req.md` Abschnitt 4.2 gelisteten Fixture-Dateien wurden **vor dem
+  Schreiben dieses Plans** per `ls` gegen das tatsächliche Dateisystem geprüft — **alle vorhanden**
+  (Abschnitt 6), keine wurde unbesehen aus der Anforderung übernommen.
 - Weder unter `src/**/__tests__/` noch unter `tests/e2e/` existiert **irgendeine** der in diesem
   Plan vorgeschlagenen neuen Testdateien (`tableCommands.test.ts`,
   `tableDelete.crossFormat.test.ts`, `tableDelete.fixtures.test.ts` ×2, `table-delete.spec.ts`) —
-  per `ls`/`Glob` bestätigt. Dieser Plan beschreibt vollständig **neue** Testabdeckung plus
-  Erweiterungen der beiden bestehenden `roundtrip.test.ts`-Dateien.
+  per `Glob` bestätigt. Dieser Plan beschreibt vollständig **neue** Testabdeckung plus Erweiterungen
+  der beiden bestehenden `roundtrip.test.ts`-Dateien.
 - **Wichtigste QA-Konsequenz gegenüber `tabelle-loeschen-code.md`:** Der Codeplan begründet an
-  mehreren Stellen (Abschnitt 2.1–2.5), dass ein Großteil des gewünschten Verhaltens „bereits
-  heute automatisch durch `prosemirror-tables`/ProseMirror selbst korrekt" sei. Das mag für die
-  **Bibliothek** `deleteTable` (direkt aus `prosemirror-tables` importiert) zutreffen — es trifft
-  **nicht** auf das Produkt zu, solange `commands.ts` keinen eigenen `deleteTable`/`canDeleteTable`
-  exportiert, kein Toolbar-Button existiert und kein Keymap-Eintrag gebunden ist. Dieser Plan
-  testet ausschließlich den **Produkt**-Zustand (echter Button-Klick, echter Tastaturweg, echter
-  Export), nicht die isolierte Bibliotheksfunktion — entsprechend sind die in
-  `tabelle-loeschen-code.md` Abschnitt 2 als „empirisch verifiziert" bezeichneten Befunde hier
-  als **Vorhersage für nach dem Bau**, nicht als bereits bestehende Testabdeckung zu lesen.
+  mehreren Stellen (Abschnitt 2.1-2.5), dass ein Großteil des gewünschten Verhaltens „bereits heute
+  automatisch durch `prosemirror-tables`/ProseMirror selbst korrekt" sei. Das mag für die
+  **Bibliothek** `deleteTable` zutreffen — es trifft **nicht** auf das Produkt zu, solange
+  `commands.ts` keinen eigenen `deleteTable`/`canDeleteTable` exportiert, kein Toolbar-Button
+  existiert und kein Keymap-Eintrag gebunden ist. Dieser Plan testet ausschließlich den
+  **Produkt**-Zustand (echter Button-Klick, echter Tastaturweg, echter Export), nicht die isolierte
+  Bibliotheksfunktion — entsprechend sind die im Codeplan als „empirisch verifiziert" bezeichneten
+  Befunde hier als **Vorhersage für nach dem Bau**, nicht als bereits bestehende Testabdeckung zu
+  lesen.
 
 ---
 
-## 1. Ausgangslage: Code-Audit vor Testerstellung
+## 1. Ausgangslage: Code-Audit vor Testerstellung (neu verifiziert 2026-07-05)
 
 Geprüft wurden die tatsächlichen Dateien im Repo (nicht nur die Beschreibung in
 `tabelle-loeschen-code.md`): `src/formats/shared/schema.ts`,
 `src/formats/shared/editor/{commands.ts,Toolbar.tsx,WordEditor.tsx}`,
-`src/formats/docx/{reader.ts,writer.ts}`, `src/formats/odt/{reader.ts,writer.ts}`, beide
-`__tests__/roundtrip.test.ts`, `src/formats/odt/__tests__/external-fixtures.test.ts`,
-`tests/e2e/{docx,odt,selection-regression,lifecycle}.spec.ts`, `playwright.config.ts`,
-`package.json`, sowie das Vorhandensein aller in `tabelle-loeschen-req.md` Abschnitt 4.2
-genannten Fixture-Dateien per `ls`.
+`src/formats/docx/{reader.ts,writer.ts}`, `src/formats/odt/{reader.ts,writer.ts,imageCollector.ts}`,
+beide `__tests__/roundtrip.test.ts`, `odt/__tests__/external-validation.test.ts`,
+`tests/e2e/*.spec.ts` (Verzeichnis-Listing), `tests/e2e/fixtures.ts`, `playwright.config.ts`,
+`package.json`, sowie das Vorhandensein aller in `tabelle-loeschen-req.md` Abschnitt 4.2 genannten
+Fixture-Dateien per `ls`.
 
-| # | Verdachtspunkt / Codeplan-Aussage | Tatsächlicher Code-Stand (verifiziert) | QA-Konsequenz |
+| # | Verdachtspunkt / Codeplan-Aussage | Tatsächlicher Code-Stand (verifiziert 2026-07-05) | QA-Konsequenz |
 |---|---|---|---|
-| 1 | `commands.ts` hat keinen `deleteTable`/`canDeleteTable` (req Abschnitt 5.1, code Abschnitt 1) | **Bestätigt.** Datei (`src/formats/shared/editor/commands.ts`, 108 Zeilen) exportiert `isInTable` (Re-Export), `setAlign`, `isAlignActive`, `setHeading`, `toggleList`, `liftFromList`, `insertImage`, `insertTable`, `applyMarkColor`, `clearMarkColor` — kein `deleteTable`, kein `canDeleteTable`, kein Import von `prosemirror-tables`' `deleteTable`. | Jeder Test in `tableCommands.test.ts`, der `deleteTable`/`canDeleteTable` aus `../commands` importiert, **muss** heute mit `SyntaxError`/`undefined is not a function` fehlschlagen (kein TS-Compile-Gate in Vitest, siehe `vite.config.ts` — Vitest führt `.ts` direkt über esbuild aus, ein fehlender Named Export fällt erst beim Aufruf zur Laufzeit auf, nicht beim Import selbst, da JS-Module fehlende Exports als `undefined` binden) |
-| 2 | Kein zweiter Toolbar-Button für Löschen (req Abschnitt 5.2) | **Bestätigt.** `Toolbar.tsx` (Zeile 228-239) enthält im Tabellen-Bereich ausschließlich den Einfüge-Button (`title="Tabelle einfügen"`, `aria-pressed={isInTable(view.state)}`, `onMouseDown → insertTable(2, 2)`), danach direkt das Bild-Label (Zeile 241-244). Kein zweiter Button. | Jeder E2E-Test, der `page.getByTitle('Tabelle löschen')`/`page.getByRole('button', { name: 'Tabelle löschen' })` erwartet, **muss** heute mit Timeout/„element not found" fehlschlagen |
-| 3 | Kein Kontextmenü (req Abschnitt 5.3) | **Bestätigt**, projektweite Suche nach `contextmenu`/`onContextMenu` liefert 0 Treffer außerhalb von `node_modules`. | Kein Test nötig (Nice-to-have, bewusst nicht im Scope, siehe `tabelle-loeschen-code.md` Abschnitt 3.5) |
-| 4 | Keine Tastenkombination fürs Löschen (req Abschnitt 5.4) | **Bestätigt für einen dedizierten Eintrag.** `WordEditor.tsx` Zeile 71-79 bindet nur `Mod-z/y/Shift-z`, `Enter` (`splitListItem`), `Mod-b/i/u`; Zeile 80 zusätzlich `keymap(baseKeymap)`. Kein `Mod-Alt-Backspace`, keine sonstige Tabellen-Lösch-Bindung. | Jeder E2E-Test für `Mod-Alt-Backspace` **muss** heute RED sein (Dokument bleibt unverändert) |
-| 5 | Boundary-Backspace (zweimal Backspace direkt nach einer Tabelle) entfernt die Tabelle bereits heute „automatisch", ganz ohne neuen Code (code Abschnitt 2.4) | **Geprüft und bestätigt als tatsächlich zutreffend** — dies ist der **einzige** Teil des gesamten Feature-Umfangs, der schon heute im Produkt funktioniert, weil er ausschließlich aus bereits aktivem Bibliothekscode (`baseKeymap`, `tableEditing()`) folgt, ohne dass irgendein neuer Projekt-Code existieren muss: `keymap(baseKeymap)` ist bereits aktiv (`WordEditor.tsx:80`), `table`/`table_cell` werden von `tableNodes()` ohne `selectable: false` erzeugt (`schema.ts:106`). | **Einziger heute schon GREEN-fähiger E2E-Testfall** dieses gesamten Plans (Abschnitt 5.2, Testfall 13) — muss trotzdem tatsächlich ausgeführt und nicht nur behauptet werden, siehe Abschnitt 3 |
-| 6 | `deleteTable` aus `prosemirror-tables` existiert und verhält sich wie in code Abschnitt 2.1/2.2 beschrieben | **Bestätigt durch eigene Prüfung** des tatsächlich installierten Pakets: `node_modules/prosemirror-tables/package.json` → Version `1.8.5` (identisch zu `package.json`s `^1.8.5`); `node_modules/prosemirror-tables/dist/index.js` exportiert eine Funktion `deleteTable(state, dispatch)`, deren Quelltext exakt der im Codeplan zitierten Schleife (`$pos.depth` abwärts, erster `tableRole == "table"`-Treffer) entspricht. | Dieses Bibliotheksverhalten wird **nicht separat gegen `prosemirror-tables` selbst** getestet (das wäre ein Test der Fremdbibliothek, nicht des Produkts) — es fließt ausschließlich über die noch zu bauende `commands.ts`-Funktion in die Tests dieses Plans ein, siehe Abschnitt 0 |
-| 7 | `odt/writer.ts:88`: `colCount = rows[0]?.content?.length ?? 1` ignoriert `colspan` (code Abschnitt 6.2) | **Bestätigt.** Zeile 88 lautet exakt `const colCount = rows[0]?.content?.length ?? 1`; die Zellschleife (Zeile 92-105) erzeugt zwar `table:number-columns-spanned`/`table:number-rows-spanned`-Attribute, aber **nirgends** ein `<table:covered-table-cell/>` (projektweite Suche nach `covered` in `src/formats/odt/` → 0 Treffer). | Bestätigt einen **bereits vor diesem Feature bestehenden** ODT-Bug, der für Rundreise-Tests mit mehrzeiligem `rowspan` in einer **überlebenden** Tabelle relevant wird (Abschnitt 4.4, `test.todo`) |
-| 8 | `odt/reader.ts` liest `covered-table-cell` nicht (code Abschnitt 6.2) | **Bestätigt.** `elementToBlocks`, Fall `table` (Zeile 189-203), iteriert ausschließlich über `table:table-cell`-Kindelemente; `covered-table-cell` wird nicht behandelt. | Gleicher Blocker wie Punkt 7 — dokumentiert, nicht in diesem Feature zu beheben |
-| 9 | DOCX-Reader hat einen Tiefen-Schutz `MAX_TABLE_NESTING_DEPTH = 25` für verschachtelte Tabellen (code Abschnitt 7.5) | **Bestätigt.** `docx/reader.ts:208` `const MAX_TABLE_NESTING_DEPTH = 25`; `parseTable` (Zeile 210) verwendet ihn in Zeile 239 (`if (depth < MAX_TABLE_NESTING_DEPTH)`), referenziert für `deep-table-cell.docx`. | Fixture-Test für `deep-table-cell.docx` prüft entsprechend nur Absturzfreiheit über den vollen Zyklus, nicht Vollständigkeit jeder Verschachtelungsebene (Abschnitt 4.6) |
-| 10 | Keine Fußnoten-Unterstützung im DOCX-Pfad (req Abschnitt 4.2, code Abschnitt 5) | **Bestätigt.** `grep -ri footnote src/formats/docx/*.ts` → 0 Treffer. | `table_footnotes.docx`-Testfall prüft nur „kein Crash / keine kaputte XML-Struktur nach Löschen+Export", **nicht** Fußnotenverwaltung (bereits in `tabelle-loeschen-code.md` Abschnitt 5 als bewusst außerhalb des Scopes dokumentiert) |
-| 11 | `ImageCollector` wird in beiden Writern pro Aufruf neu instanziiert (req Abschnitt 5.7, code Abschnitt 2.6/5/6.1) | **Bestätigt.** `docx/writer.ts:223` `const images = new ImageCollector()` innerhalb der Export-Funktion; `odt/writer.ts:185` analog. Beide Instanzen werden ausschließlich während des jeweils aktuellen Baum-Durchlaufs befüllt. | Bild-Aufräum-Tests (Abschnitt 4.4/4.6) sind reine **Bestätigungstests** einer bereits strukturell garantierten Eigenschaft — aber weiterhin Pflicht laut Anforderung, „nachgewiesen, nicht nur plausibel" |
-| 12 | `tests/e2e/large-document-import.spec.ts`, auf die `odt/__tests__/external-fixtures.test.ts:16` verweist, existiert nicht (code Abschnitt 9, Punkt 4) | **Bestätigt.** `Glob tests/e2e/*` liefert genau vier Dateien: `lifecycle.spec.ts`, `odt.spec.ts`, `docx.spec.ts`, `selection-regression.spec.ts`. Kein `large-document-import.spec.ts`. | Dieser Plan verweist an keiner Stelle auf diese nicht existierende Datei als „bereits abgedeckt" — Performance-/Großtabellen-Fälle werden in Abschnitt 5.2 explizit selbst mit echten E2E-Tests abgedeckt (Testfall 5/6) |
-| 13 | Alle ~40 in `tabelle-loeschen-req.md` Abschnitt 4.2 gelisteten Fixture-Dateien existieren | **Bestätigt**, alle 34 ODT- und 6 DOCX-Dateien per `ls`/Bash-Schleife einzeln geprüft (Abschnitt 6) — keine Datei fehlt, keine wurde unbesehen übernommen | Fixture-Testliste in Abschnitt 4.6/5.2 kann 1:1 aus der Anforderung übernommen werden |
-| 14 | Keine der in diesem Plan vorgeschlagenen neuen Testdateien existiert bereits | **Bestätigt** per `Glob`: `tableCommands.test.ts`, `tableDelete.crossFormat.test.ts`, `tableDelete.fixtures.test.ts` (beide Formate), `table-delete.spec.ts` sind allesamt neue Pfade. | Dieser Plan beschreibt vollständig neue Testabdeckung, siehe Abschnitt 4/5 |
+| 1 | `commands.ts` hat keinen `deleteTable`/`canDeleteTable` (req 5.1, code 1) | **Bestätigt.** Datei (`src/formats/shared/editor/commands.ts`, **167 Zeilen**) exportiert `isInTable` (Re-Export, Z. 6), `setAlign`/`isAlignActive`, `setHeading`, `toggleList`/`liftFromList`, `insertImage`, `insertHardBreak` (Z. 83), `insertTable` (Z. 92-102), `applyMarkColor`/`clearMarkColor`, `canCut`/`cutSelection` (Z. 126-166) — **kein** `deleteTable`, **kein** `canDeleteTable`, **kein** Import von `prosemirror-tables`' `deleteTable`. | Jeder Test, der `deleteTable`/`canDeleteTable` aus `../commands` importiert, schlägt heute zur **Laufzeit** fehl (`TypeError: deleteTable is not a function`). Vitest führt `.ts` über esbuild ohne Typecheck-Gate aus — ein fehlender Named Export bindet als `undefined` und fällt erst beim Aufruf auf, nicht beim Import. |
+| 2 | Kein zweiter Toolbar-Button fürs Löschen (req 5.2) | **Bestätigt.** `Toolbar.tsx` (298 Z.) enthält im Tabellen-Bereich nur den Einfüge-Button `Z. 277-289` (`title`/`aria-label="Tabelle einfügen"`, `aria-pressed={isInTable(view.state)}`, `onMouseDown → insertTable(2,2)`), danach direkt das Bild-Label `Z. 291-294`. **Kein** Lösch-Button. **Korrektur ggü. 1. Fassung:** der Einfüge-Button hat heute ein `aria-label` (Z. 280). | Jeder E2E-Test, der `getByRole('button', { name: 'Tabelle löschen' })`/`getByTitle('Tabelle löschen')` erwartet, schlägt heute mit Timeout/„element not found" fehl. |
+| 3 | Kein Kontextmenü (req 5.3) | **Bestätigt.** Suche nach `contextmenu`/`onContextMenu`: 0 Treffer im Produktcode; `WordEditor.tsx:~110` dokumentiert die bewusste Abwesenheit. | Kein Test nötig (Nice-to-have, bewusst außer Scope, code 3.5). |
+| 4 | Keine Tastenkombination fürs Löschen (req 5.4) | **Bestätigt für einen dedizierten Eintrag.** `WordEditor.tsx` `keymap({...})` `Z. 77-99` bindet `Mod-z`(85), `Mod-y`(86), `Mod-Shift-z`(87), `Enter`(88), `Shift-Enter`(89), `Mod-b`(90), `Mod-i`(91), `Mod-u`(92), `Shift-Delete`(98); danach `keymap(baseKeymap)`(100), `columnResizing()`(101), `tableEditing()`(102). **Kein** `Mod-Alt-Backspace`, keine sonstige Tabellen-Lösch-Bindung. | Jeder E2E-Test für `Mod-Alt-Backspace` ist heute RED (Dokument unverändert). |
+| 5 | Boundary-Backspace (zweimal Backspace direkt nach einer Tabelle) entfernt die Tabelle bereits heute ohne neuen Code (code 2.4) | **Geprüft und bestätigt.** Der **einzige** Teil des Feature-Umfangs, der schon heute funktioniert, weil er nur aus aktivem Bibliothekscode folgt: `keymap(baseKeymap)` ist aktiv (`WordEditor.tsx:100`), `table`/`table_cell` werden von `tableNodes()` (`schema.ts:154`) ohne `selectable: false` erzeugt. | **Einziger heute schon GREEN-fähiger** E2E-Testfall (Abschnitt 5.2 Block „Undo/Redo & Grenzfälle", boundary-Backspace) — muss trotzdem tatsächlich ausgeführt werden. |
+| 6 | `deleteTable` aus `prosemirror-tables` existiert und verhält sich wie code 2.1/2.2 beschreibt | **Bestätigt** über das installierte Paket `prosemirror-tables@1.8.5` (identisch zu `package.json`s `^1.8.5`): `deleteTable(state, dispatch)` läuft `$pos.depth` abwärts, nimmt den ersten `tableRole == "table"`-Treffer. | Wird **nicht** separat gegen die Fremdbibliothek getestet, sondern ausschließlich über die noch zu bauende `commands.ts`-Wrapper-Funktion (Abschnitt 0). |
+| 7 | **KORREKTUR:** ODT ignoriert `colspan` / emittiert kein `covered-table-cell` (frühere Behauptung) | **Widerlegt — bereits implementiert.** `odt/writer.ts:115-116` berechnet `colCount` als **Summe der `colspan`-Werte** der ersten Zeile; `odt/writer.ts:137` und `:161` emittieren `<table:covered-table-cell/>` für horizontale (`colspan`) **und** vertikale (`rowspan`) Merges (per-Grid-`pending`-Tracker). Grüne Tests: `odt/__tests__/roundtrip.test.ts:275`/`:310`. | **Kein `test.todo`, kein Blocker.** Rundreise-Tests mit einer **überlebenden** rowspan-Tabelle dürfen voll auf Struktur prüfen (Abschnitt 4.4). |
+| 8 | **KORREKTUR:** ODT-Reader liest `covered-table-cell` nicht (frühere Behauptung) | **Widerlegt.** `odt/reader.ts` (Fall `table`) liest `number-columns-spanned`/`number-rows-spanned` und überspringt `covered-table-cell` bewusst — ergibt exakt das ProseMirror-Tabellenmodell. | Gleiche Konsequenz wie Punkt 7 — kein offener Blocker. |
+| 9 | DOCX-Reader hat Tiefen-Schutz `MAX_TABLE_NESTING_DEPTH = 25` (code 7.5) | **Bestätigt.** `docx/reader.ts:309` `const MAX_TABLE_NESTING_DEPTH = 25`, benutzt in `Z. 340`. | Fixture-Test für `deep-table-cell.docx` prüft nur Absturzfreiheit über den vollen Zyklus, nicht Vollständigkeit jeder Verschachtelungsebene (Abschnitt 4.6). |
+| 10 | Keine Fußnoten-Unterstützung im DOCX-Pfad (req 4.2, code 5) | **Bestätigt.** Keine Fußnoten-Repräsentation im Reader/Writer. | `table_footnotes.docx`-Test prüft nur „kein Crash / keine kaputte XML-Struktur nach Löschen+Export", **nicht** Fußnotenverwaltung (bewusst außer Scope, code 5). |
+| 11 | `ImageCollector` wird pro Export neu instanziiert (req 5.7, code 2.6/5/6.1) | **Bestätigt.** `docx/writer.ts:253` `const images = new ImageCollector()`; `odt/writer.ts:262` analog (dazu `new TextStyleRegistry()` je Aufruf, Z. 261/268). Beide nur beim Ablaufen des zum Exportzeitpunkt aktuellen (reduzierten) Baums befüllt. | Bild-/Stil-Aufräum-Tests (Abschnitt 4.4/4.6) sind **Bestätigungstests** einer strukturell garantierten Eigenschaft — laut Anforderung dennoch Pflicht („nachgewiesen, nicht nur plausibel"). |
+| 12 | **KORREKTUR:** `tests/e2e/large-document-import.spec.ts` existiert nicht (frühere Behauptung) | **Widerlegt.** Die Datei existiert; `tests/e2e/` enthält aktuell **17** Spec-Dateien (u. a. `large-document-import.spec.ts`, `large-document-export.spec.ts`, `clipboard*.spec.ts`, `cut.spec.ts`, `save-export-lifecycle.spec.ts`). | Dieser Plan verlässt sich an **keiner** Stelle auf eine angeblich fehlende Datei; Performance-/Großtabellen-Fälle werden in Abschnitt 5.2 selbst mit echten E2E-Tests abgedeckt. |
+| 13 | Alle in req 4.2 gelisteten Fixture-Dateien existieren | **Bestätigt**, alle ODT- und DOCX-Dateien per `ls` einzeln geprüft (Abschnitt 6). | Fixture-Testliste (Abschnitt 4.6/5.2) kann 1:1 aus der Anforderung übernommen werden. |
+| 14 | Keine der vorgeschlagenen neuen Testdateien existiert bereits | **Bestätigt** per `Glob`: alle sind neue Pfade. | Dieser Plan beschreibt vollständig neue Abdeckung, siehe Abschnitt 4/5. |
 
-Zusätzlich verifiziert, **bereits korrekt und unverändert von diesem Feature betroffen** (kein Fix
-nötig, nur zukünftige Testabdeckung relevant):
+Zusätzlich verifiziert, **bereits korrekt und unverändert von diesem Feature betroffen**:
 
-- `schema.ts:7` `doc: { content: 'block+' }` und `schema.ts:106`
-  `tableNodes({ tableGroup: 'block', cellContent: 'block+', cellAttributes: {} })` — exakt wie in
-  Anforderung/Codeplan beschrieben, keine Abweichung.
-- `docx/__tests__/roundtrip.test.ts:173-249` (`describe('DOCX round trip: tables', ...)`) und
-  `odt/__tests__/roundtrip.test.ts:162-211` (analog) — beide prüfen ausschließlich das **Anlegen**
-  von Tabellen (2×2 einfach, `colspan`-Merge, `rowspan`-Merge), **kein** Test ruft ein
-  Lösch-Kommando auf oder prüft den Zustand danach.
-- `tests/e2e/selection-regression.spec.ts:34-50` enthält bereits einen Tabellen-Test
-  („same regression inside a table cell"), der **exakt** das für Grenzfall 9/Testfall 4 dieses
-  Plans benötigte Interaktionsmuster (Zelle A tippen+formatieren → Klick in Zelle B) vorführt,
-  aber **ohne** anschließende Lösch-Aktion — bestätigt `tabelle-loeschen-req.md` Abschnitt 5,
-  Punkt 9 wortgleich.
+- `schema.ts:14` `doc: { content: 'block+' }` und `schema.ts:154`
+  `...tableNodes({ tableGroup: 'block', cellContent: 'block+', cellAttributes: {} })`; `wordSchema`
+  bei `Z. 198`. Exakt wie Anforderung/Codeplan.
+- `docx/__tests__/roundtrip.test.ts` `describe('DOCX round trip: tables', ...)` bei **Z. 229** und
+  `odt/__tests__/roundtrip.test.ts` `describe('ODT round trip: tables', ...)` bei **Z. 219** — beide
+  prüfen nur das **Anlegen** von Tabellen (2×2, `colspan`-Merge, `rowspan`-Merge); **kein** Test ruft
+  ein Lösch-Kommando auf oder prüft den Zustand danach.
+- `tests/e2e/selection-regression.spec.ts:43-59` enthält bereits einen Tabellen-Test
+  („same regression inside a table cell"), der **exakt** das für Grenzfall 9/Testfall 4 benötigte
+  Muster (Zelle A tippen+`Fett` → Klick in Zelle B) vorführt, aber **ohne** anschließende
+  Lösch-Aktion.
 - `playwright.config.ts` — `testDir: tests/e2e`, drei Projekte (Desktop Chrome, Mobile/Pixel 7,
-  Tablet/iPad Mini), `webServer` baut+startet automatisch — keine Konfigurationsänderung für
-  diesen Plan nötig.
+  Tablet/iPad Mini), `webServer` baut+startet automatisch. Keine Konfigurationsänderung nötig.
+- `tests/e2e/fixtures.ts` exportiert `test` (dismisst die Datenschutz-Overlay „verstanden" und
+  navigiert automatisch auf `/`, sammelt zusätzlich `pageerror`/console-errors) sowie `expect`,
+  `docxCard`, `odtCard`. Dieser Plan nutzt diese Fixture, um „kein Absturz" mit abzudecken.
 
-**Konsequenz für diesen Testplan:** Anders als bei den meisten bisher geprüften Schwesterfeatures
-(z. B. „Liste aufheben", wo nur einzelne Bugs offen waren) ist hier die **überwältigende
-Mehrheit** der neuen Tests heute RED, weil das Feature schlicht noch nicht existiert. Jeder Test
-in diesem Plan ist trotzdem so geschrieben, dass er **nach** Umsetzung von
-`tabelle-loeschen-code.md` ohne weitere Änderung grün werden soll — die Erwartung „RED heute,
-GREEN nach Bau" wird pro Testblock explizit vermerkt (Abschnitte 4.7 und 5.3), damit ein
-QA-Lauf vor Fertigstellung nicht fälschlich als „Feature kaputt" statt „Feature noch nicht gebaut"
-gelesen wird.
+**Konsequenz für diesen Testplan:** Die **überwältigende Mehrheit** der neuen Tests ist heute RED,
+weil das Feature schlicht noch nicht existiert. Jeder Test ist so geschrieben, dass er **nach**
+Umsetzung von `tabelle-loeschen-code.md` ohne weitere Änderung grün wird — die Erwartung „RED heute,
+GREEN nach Bau" wird pro Block explizit vermerkt (Abschnitte 4.7 und 5.3), damit ein QA-Lauf vor
+Fertigstellung nicht als „Feature kaputt" statt „Feature noch nicht gebaut" fehlgelesen wird.
 
 ---
 
@@ -110,55 +134,58 @@ gelesen wird.
 
 | Ebene | Werkzeug | Befehl | Konfiguration |
 |---|---|---|---|
-| Unit | Vitest, Environment `jsdom`, `globals: true` | `npm test` / `npm run test:watch` | `vite.config.ts` — kein Typecheck-Plugin aktiv (wichtig für Abschnitt 1, Punkt 1: ein fehlender Named Export fällt erst als Laufzeit-Fehler auf, nicht als Build-Fehler) |
-| E2E | Playwright | `npm run test:e2e` / `npm run test:e2e:ui` | `playwright.config.ts` — `testDir: tests/e2e`, `webServer` baut automatisch (`npm run build && npm run preview -- --port 4173`); Projekte: Desktop Chrome, Mobile (Pixel 7), Tablet (iPad Mini) — alle drei Projekte laufen automatisch, kein `test.describe.configure` nötig |
+| Unit | Vitest, Environment `jsdom`, `globals: true` | `npm test` / `npm run test:watch` | `vite.config.ts` — **kein** Typecheck-Plugin aktiv (relevant für Abschnitt 1 Punkt 1: fehlender Named Export = Laufzeitfehler, kein Build-Fehler) |
+| E2E | Playwright | `npm run test:e2e` / `npm run test:e2e:ui` | `playwright.config.ts` — `testDir: tests/e2e`, `webServer` baut automatisch (`npm run build && npm run preview`); Projekte: Desktop Chrome, Mobile (Pixel 7), Tablet (iPad Mini) — alle drei laufen automatisch, kein `test.describe.configure` nötig |
 
-Alle neuen/erweiterten Testdateien in diesem Plan fügen sich ohne Konfigurationsänderung in die
-bestehende Suite ein.
+Alle neuen/erweiterten Testdateien fügen sich ohne Konfigurationsänderung in die bestehende Suite ein.
 
 ---
 
 ## 3. Traceability-Matrix — Anforderung → Testartefakt
 
-### 3.1 Testfälle (`tabelle-loeschen-req.md` Abschnitt 6)
+### 3.1 Testfälle (`tabelle-loeschen-req.md` Abschnitt 7)
 
 | Testfall | Ebene | Testartefakt | Erwartung heute |
 |---|---|---|---|
 | 1 (Button-Zustand nur in Tabelle aktiv) | E2E | `table-delete.spec.ts` „Testfall 1" | RED (Button existiert nicht) |
 | 2 (Klick entfernt komplette Tabelle) | E2E | `table-delete.spec.ts` „Testfall 2" | RED |
-| 3 (Entf/Backspace leert nur Zellinhalt) | E2E | `table-delete.spec.ts` „Testfall 3" | **GREEN erwartet bereits heute** — reines `tableEditing()`-Verhalten, unabhängig vom neuen Feature (Abschnitt 1, Zusatzverifikation) |
-| 4 (Tastaturweg liefert dasselbe Ergebnis wie Button) | E2E | `table-delete.spec.ts` „Testfall 12" | RED |
-| 5 (Cursor-Ziel deterministisch, Editor sofort bedienbar) | Unit + E2E | `tableCommands.test.ts` + `table-delete.spec.ts` „Testfall 6/7" | RED |
-| 6 (Undo/Redo bit-genau, mehrere Zyklen) | Unit + E2E | `tableCommands.test.ts` + `table-delete.spec.ts` „Testfall 10" | RED |
-| 7 (verschachtelte Tabelle, beide Richtungen) | Unit + E2E | `tableCommands.test.ts` + `table-delete.spec.ts` „Testfall 9" | RED |
-| 8 (Bild-/Listen-Aufräumen im Export) | Unit (Rundreise) + E2E | Abschnitt 4.4 Punkt 2/7, `table-delete.spec.ts` „Testfall 14/15" | RED |
-| 9 (Selection-Sync-Regression) | E2E | `table-delete.spec.ts` „Testfall 4" — **Pflichttest** | RED |
-| 10 (Grenzfälle 1-16) | Unit + E2E | Abschnitt 3.2 unten | überwiegend RED, siehe dort |
-| 11 (Rundreise DOCX+ODT, Editor-erzeugt, 4.1.1-4.1.8) | Unit | Abschnitt 4.4/4.5 | RED |
-| 12 (Import+Löschen+Rundreise je reale Fixture, 4.2) | Unit + E2E | Abschnitt 4.6 (alle Dateien) + `table-delete.spec.ts` „Testfall 16" (Teilmenge über echten Upload) | RED |
-| 13 (unabhängiger Parser-Validierung DOCX) | Unit | Abschnitt 4.4, `JSZip`/XML-String-Assertions direkt auf dem geschriebenen `document.xml`, nicht nur über den eigenen Reader | RED |
-| 14 (dito ODT) | Unit | Abschnitt 4.5, direkt auf `content.xml` | RED |
+| 3 (`CellSelection` Maus-Drag → ganze Tabelle) | Unit + E2E | `tableCommands.test.ts` + `table-delete.spec.ts` „CellSelection" | RED |
+| 4 (Entf/Backspace leert nur Zellinhalt) | E2E | `table-delete.spec.ts` „Testfall 3" | **GREEN erwartet bereits heute** — reines `tableEditing()`/`isolating`-Verhalten, unabhängig vom neuen Feature |
+| 5 (NodeSelection, kein stiller No-Op) | Unit + E2E | `tableCommands.test.ts` + `table-delete.spec.ts` „boundary-Backspace/NodeSelection" | RED |
+| 6 (Tastaturweg = Button) | E2E | `table-delete.spec.ts` „Mod-Alt-Backspace" | RED |
+| 7 (Cursor-Ziel deterministisch, Editor sofort bedienbar) | Unit + E2E | `tableCommands.test.ts` + `table-delete.spec.ts` „Grenzfall 1/4/5" | RED |
+| 8 (Undo/Redo bit-genau, mehrere Zyklen) | Unit + E2E | `tableCommands.test.ts` + `table-delete.spec.ts` „Undo/Redo" | RED |
+| 9 (verschachtelte Tabelle, beide Richtungen) | Unit + E2E | `tableCommands.test.ts` + `table-delete.spec.ts` „verschachtelt" | RED |
+| 10 (Bild-/Listen-Aufräumen im Export) | Unit (Rundreise) + E2E | Abschnitt 4.4/4.5 + `table-delete.spec.ts` „Export/Download" | RED |
+| 11 (Selection-Sync-Regression) | E2E | `table-delete.spec.ts` „Selection-Sync" — **Pflichttest** | RED |
+| 12 (Grenzfälle 1-18) | Unit + E2E | Abschnitt 3.2 unten | überwiegend RED, siehe dort |
+| 13 (Rundreise DOCX+ODT, Editor-erzeugt, 4.1.1-4.1.8) | Unit | Abschnitt 4.3/4.4/4.5 | RED |
+| 14 (Import+Löschen+Rundreise je reale Fixture, 4.2) | Unit + E2E | Abschnitt 4.6 (alle Dateien) + `table-delete.spec.ts` „Fixture-Teilmenge" | RED |
+| 15/16 (unabhängige Parser-Validierung DOCX/ODT) | Unit | Abschnitt 4.3/4.4 — `JSZip`/roher-XML-String-Assertions direkt auf `word/document.xml` bzw. `content.xml`, nicht nur über den eigenen Reader | RED |
+| 17 (Kernverhalten auf allen drei Projekten) | E2E | Abschnitt 5.2 läuft ohne Projekt-Einschränkung auf allen drei | RED |
 
 ### 3.2 Grenzfälle (`tabelle-loeschen-req.md` Abschnitt 3) → Testort
 
 | # | Kurzfassung | Testort | Erwartung heute |
 |---|---|---|---|
-| 1 | Tabelle = einziges Dokumentelement | `tableCommands.test.ts`, `table-delete.spec.ts` Testfall 6 | RED |
+| 1 | Tabelle = einziges Dokumentelement | `tableCommands.test.ts`, `table-delete.spec.ts` „Grenzfall 1" | RED |
 | 2 | 1×1-Tabelle | `tableCommands.test.ts` | RED |
-| 3 | Sehr große Tabelle, Performance | `tableCommands.test.ts` (synthetisch), `table-delete.spec.ts` Testfall 5 (`BigTable.odt`) | RED |
-| 4 | Tabelle am Dokumentanfang | `tableCommands.test.ts`, `table-delete.spec.ts` Testfall 7 | RED |
-| 5 | Tabelle am Dokumentende | `tableCommands.test.ts`, `table-delete.spec.ts` Testfall 7 | RED |
-| 6 | Zwei aufeinanderfolgende Tabellen | `tableCommands.test.ts`, `table-delete.spec.ts` Testfall 8 | RED |
-| 7 | Verschachtelte Tabelle, beide Richtungen | `tableCommands.test.ts`, `table-delete.spec.ts` Testfall 9, Fixtures `subTables*.odt` (Abschnitt 4.6) | RED |
-| 8 | Bereits gemergte/gelöschte Spalten (Fremddatei) | Fixtures `table-column-delete-with-merge*.odt` (Abschnitt 4.6) | RED |
-| 9 | Selection-Sync-Regressionsmuster | `table-delete.spec.ts` Testfall 4 (**Pflicht**) | RED |
-| 10 | Löschen unmittelbar nach Einfügen | `tableCommands.test.ts`, `table-delete.spec.ts` Testfall 5 | RED |
-| 11 | Mehrfaches Undo/Redo | `tableCommands.test.ts`, `table-delete.spec.ts` Testfall 10 | RED |
+| 3 | Sehr große Tabelle, Performance | `tableCommands.test.ts` (synthetisch), `table-delete.spec.ts` „BigTable.odt" | RED |
+| 4 | Tabelle am Dokumentanfang | `tableCommands.test.ts`, `table-delete.spec.ts` „Grenzfall 4/5" | RED |
+| 5 | Tabelle am Dokumentende | `tableCommands.test.ts`, `table-delete.spec.ts` „Grenzfall 4/5" | RED |
+| 6 | Zwei aufeinanderfolgende Tabellen | `tableCommands.test.ts`, `table-delete.spec.ts` „Grenzfall 6" | RED |
+| 7 | Verschachtelte Tabelle, beide Richtungen | `tableCommands.test.ts`, `table-delete.spec.ts` „verschachtelt", Fixtures `subTables*.odt` (4.6) | RED |
+| 8 | Bereits gemergte/gelöschte Spalten (Fremddatei) | Fixtures `table-column-delete-with-merge*.odt` (4.6) | RED |
+| 9 | Selection-Sync-Regressionsmuster | `table-delete.spec.ts` „Selection-Sync" (**Pflicht**) | RED |
+| 10 | Löschen unmittelbar nach Einfügen | `tableCommands.test.ts`, `table-delete.spec.ts` „Grenzfall 10" | RED |
+| 11 | Mehrfaches Undo/Redo | `tableCommands.test.ts`, `table-delete.spec.ts` „Undo/Redo" | RED |
 | 12 | Mehrere Absätze/gemischte Formatierung in Zelle | `tableCommands.test.ts` | RED |
-| 13 | Löschen während Bild-/Fremdauswahl außerhalb der Tabelle | `tableCommands.test.ts` (`canDeleteTable`), `table-delete.spec.ts` Testfall 11 | RED |
-| 14 | Bild in Zelle löschen, danach exportieren | Abschnitt 4.4 Punkt 2/7, `table-delete.spec.ts` Testfall 14 | RED |
-| 15 | Rundreise mit Format-Wechsel (Cross-Format) | `tableDelete.crossFormat.test.ts` | RED |
-| 16 | Reale Fremddatei: Rundreise ohne Löschen unbeeinträchtigt | Abschnitt 4.6, Schritt 1 jeder Fixture (bestehender `readOdt`/`readDocx`-Import bereits heute GREEN, siehe `external-fixtures.test.ts`) | **Import-Teil bereits GREEN**, Lösch-Teil RED |
+| 13 | Klick außerhalb (Bild/Fremdauswahl) | `tableCommands.test.ts` (`canDeleteTable`), `table-delete.spec.ts` „Grenzfall 13" | RED |
+| 14 | Ganze Tabelle als NodeSelection | `tableCommands.test.ts`, `table-delete.spec.ts` „boundary-Backspace" | RED |
+| 15 | Bild in Zelle löschen, exportieren | Abschnitt 4.3/4.4, `table-delete.spec.ts` „Export/Download" | RED |
+| 16 | Rundreise mit Format-Wechsel (Cross-Format) | `tableDelete.crossFormat.test.ts` | RED |
+| 17 | Reale Fremddatei: Rundreise ohne Löschen unbeeinträchtigt | Abschnitt 4.6, Schritt (a) jeder Fixture (`readOdt`/`readDocx`-Import bereits heute GREEN) | **Import-Teil GREEN**, Lösch-Teil RED |
+| 18 | Mobile/Touch | Abschnitt 5.2 läuft auf allen drei Projekten inkl. Mobile/Tablet | RED |
 
 ---
 
@@ -166,21 +193,21 @@ bestehende Suite ein.
 
 ### 4.1 Bestandsaufnahme
 
-Vorhanden: `src/formats/docx/__tests__/roundtrip.test.ts`
-(`describe('DOCX round trip: tables', ...)`, Zeile 173-249) und
-`src/formats/odt/__tests__/roundtrip.test.ts` (`describe('ODT round trip: tables', ...)`, Zeile
-162-211) — beide prüfen ausschließlich das **Anlegen** von Tabellen (2×2 mit Text, `colspan`-Merge,
-`rowspan`-Merge über zwei Zeilen). **Keiner** ruft ein Lösch-Kommando auf oder prüft den Zustand
-**nach** einer Löschung. Fehlt vollständig: jeder Test der eigentlichen Editor-Transformation
-selbst (`tableCommands.test.ts` existiert nicht), jede Rundreise für den Zustand „Tabelle
-gelöscht", jede Fixture-getriebene Prüfung.
+Vorhanden: `src/formats/docx/__tests__/roundtrip.test.ts` (`describe('DOCX round trip: tables', ...)`,
+**Z. 229**) und `src/formats/odt/__tests__/roundtrip.test.ts`
+(`describe('ODT round trip: tables', ...)`, **Z. 219**) — beide prüfen ausschließlich das **Anlegen**
+von Tabellen (2×2, `colspan`-Merge, `rowspan`-Merge über zwei Zeilen, inkl. der grünen
+`covered-table-cell`-Tests bei `odt/...roundtrip.test.ts:275`/`:310`). **Keiner** ruft ein
+Lösch-Kommando auf oder prüft den Zustand **nach** einer Löschung. Fehlt vollständig: jeder Test der
+eigentlichen Editor-Transformation (`tableCommands.test.ts` existiert nicht), jede Rundreise für den
+Zustand „Tabelle gelöscht", jede Fixture-getriebene Prüfung.
 
 ### 4.2 Neu: `src/formats/shared/editor/__tests__/tableCommands.test.ts`
 
 Reine Logik-Tests ohne Browser/DOM — konstruiert `EditorState` direkt aus `wordSchema` und prüft
-`deleteTable`/`canDeleteTable` isoliert gegen jeden in Anforderungsabschnitt 2/3 beschriebenen
-Fall. Positionen werden über einen robusten Text-Such-Helfer ermittelt (nicht über hartkodierte
-`nodeSize`-Arithmetik — bleibt bei künftigen Schemaänderungen korrekt):
+`deleteTable`/`canDeleteTable` isoliert gegen jeden in Anforderungsabschnitt 2/3 beschriebenen Fall.
+Positionen werden über einen robusten Text-Such-Helfer ermittelt (nicht über hartkodierte
+`nodeSize`-Arithmetik):
 
 ```ts
 import { EditorState, TextSelection, NodeSelection } from 'prosemirror-state'
@@ -233,14 +260,21 @@ function cursorIn(state: EditorState, text: string): EditorState {
 
 function applyDeleteTable(state: EditorState): { result: EditorState; ran: boolean } {
   let result = state
-  let ran = false
-  ran = deleteTable()(state, (tr) => {
+  const ran = deleteTable()(state, (tr) => {
     result = state.apply(tr)
   })
   return { result, ran }
 }
 
-describe('deleteTable (Anforderung Abschnitt 2.1 -- Grundverhalten, erwartet RED bis tabelle-loeschen-code.md Abschnitt 4.1 umgesetzt ist)', () => {
+function countDescendantTables(d: PMNode): number {
+  let count = 0
+  d.descendants((node) => {
+    if (node.type.name === 'table') count++
+  })
+  return count
+}
+
+describe('deleteTable (Anforderung 2.1 -- Grundverhalten, erwartet RED bis tabelle-loeschen-code.md 4.1 umgesetzt ist)', () => {
   it('cursor in any cell removes the whole table, not just the current row/cell', () => {
     let state = stateFor(doc(table(row(cell(para('A1')), cell(para('B1'))), row(cell(para('A2')), cell(para('B2'))))))
     state = cursorIn(state, 'B1')
@@ -250,12 +284,25 @@ describe('deleteTable (Anforderung Abschnitt 2.1 -- Grundverhalten, erwartet RED
     expect(result.doc.textContent).toBe('')
   })
 
-  it('surrounding paragraphs before and after the table survive untouched (Abschnitt 2.1)', () => {
+  it('surrounding paragraphs before and after the table survive untouched (2.1)', () => {
     let state = stateFor(doc(para('Davor'), table(row(cell(para('A1')))), para('Danach')))
     state = cursorIn(state, 'A1')
     const { result } = applyDeleteTable(state)
     expect(result.doc.content.content.map((n) => n.type.name)).toEqual(['paragraph', 'paragraph'])
     expect(result.doc.textContent).toBe('DavorDanach')
+  })
+
+  it('a CellSelection over multiple cells removes the whole table, not only the marked cells (2.1)', () => {
+    // Import lazily to keep the top-of-file import list focused on the product API.
+    const { CellSelection } = require('prosemirror-tables')
+    let state = stateFor(doc(table(row(cell(para('A1')), cell(para('B1'))), row(cell(para('A2')), cell(para('B2'))))))
+    const aPos = findTextPos(state.doc, 'A1')
+    const bPos = findTextPos(state.doc, 'B2')
+    const sel = CellSelection.create(state.doc, state.doc.resolve(aPos).before(-1), state.doc.resolve(bPos).before(-1))
+    state = state.apply(state.tr.setSelection(sel))
+    const { result, ran } = applyDeleteTable(state)
+    expect(ran).toBe(true)
+    expect(countDescendantTables(result.doc)).toBe(0)
   })
 
   it('table is the sole document element -> exactly one empty paragraph remains, doc stays valid (Grenzfall 1)', () => {
@@ -303,7 +350,7 @@ describe('deleteTable (Anforderung Abschnitt 2.1 -- Grundverhalten, erwartet RED
     expect(remaining!.textContent).toBe('T2A')
   })
 
-  it('nested table: cursor in the inner table removes ONLY the inner table (Abschnitt 2.5/Grenzfall 7)', () => {
+  it('nested table: cursor in the inner table removes ONLY the inner table (2.6/Grenzfall 7)', () => {
     const inner = table(row(cell(para('inner-a')), cell(para('inner-b'))))
     let state = stateFor(
       doc(table(row(cell(para('outer-a1'), inner), cell(para('outer-b1'))), row(cell(para('outer-a2')), cell(para('outer-b2'))))),
@@ -312,14 +359,11 @@ describe('deleteTable (Anforderung Abschnitt 2.1 -- Grundverhalten, erwartet RED
     const { result } = applyDeleteTable(state)
     const outer = result.doc.content.content[0]
     expect(outer.type.name).toBe('table')
-    // Outer table keeps BOTH rows and all its own cells; only the cell that held the
-    // inner table now contains an empty paragraph instead.
     expect(outer.textContent).toBe('outer-a1outer-b1outer-a2outer-b2')
-    const tableCount = countDescendantTables(result.doc)
-    expect(tableCount).toBe(1)
+    expect(countDescendantTables(result.doc)).toBe(1)
   })
 
-  it('nested table: cursor in an outer cell outside the inner table removes the ENTIRE outer table, inner included (Abschnitt 2.5/Grenzfall 7)', () => {
+  it('nested table: cursor in an outer cell outside the inner table removes the ENTIRE outer table, inner included (2.6/Grenzfall 7)', () => {
     const inner = table(row(cell(para('inner-a'))))
     let state = stateFor(doc(table(row(cell(para('outer-a1'), inner), cell(para('outer-b1'))))))
     state = cursorIn(state, 'outer-b1')
@@ -328,7 +372,7 @@ describe('deleteTable (Anforderung Abschnitt 2.1 -- Grundverhalten, erwartet RED
     expect(countDescendantTables(result.doc)).toBe(0)
   })
 
-  it('a colspan/rowspan-merged table deletes fully with no special handling required (Abschnitt 2.6)', () => {
+  it('a colspan/rowspan-merged table deletes fully with no special handling required (2.7)', () => {
     const bigCell = wordSchema.nodes.table_cell.create({ colspan: 2, rowspan: 1, colwidth: null }, para('Merged'))
     let state = stateFor(doc(table(row(bigCell))))
     state = cursorIn(state, 'Merged')
@@ -356,20 +400,18 @@ describe('deleteTable (Anforderung Abschnitt 2.1 -- Grundverhalten, erwartet RED
     insertTable(2, 2)(state, (tr) => {
       afterInsert = state.apply(tr)
     })
-    const inTable = cursorIn(afterInsert, '')
-    // insertTable produces empty cells; select the first cell directly by position instead.
-    const firstCellPos = afterInsert.doc.content.firstChild!.type.name === 'table' ? 2 : 0
+    // insertTable produces empty cells; put the cursor into the first cell by position.
+    const firstCellInnerPos = afterInsert.doc.content.firstChild!.type.name === 'table' ? 3 : 1
     const withCursor = afterInsert.apply(
-      afterInsert.tr.setSelection(TextSelection.near(afterInsert.doc.resolve(firstCellPos + 1))),
+      afterInsert.tr.setSelection(TextSelection.near(afterInsert.doc.resolve(firstCellInnerPos))),
     )
     const { ran } = applyDeleteTable(withCursor)
     expect(ran).toBe(true)
   })
 
-  it('a NodeSelection directly on the table node (post boundary-Backspace state) is still deleted -- regression guard for the prosemirror-tables fallthrough (Abschnitt 2.2 der Anforderung, Konsistenzpflicht)', () => {
+  it('a NodeSelection directly on the table node (post boundary-Backspace state) is still deleted -- regression guard for the prosemirror-tables fallthrough (2.3/2.9)', () => {
     let state = stateFor(doc(table(row(cell(para('X')))), para('Danach')))
-    const tablePos = 0
-    state = state.apply(state.tr.setSelection(NodeSelection.create(state.doc, tablePos)))
+    state = state.apply(state.tr.setSelection(NodeSelection.create(state.doc, 0)))
     expect(state.selection).toBeInstanceOf(NodeSelection)
     const { result, ran } = applyDeleteTable(state)
     expect(ran).toBe(true)
@@ -387,11 +429,11 @@ describe('deleteTable (Anforderung Abschnitt 2.1 -- Grundverhalten, erwartet RED
     const elapsedMs = performance.now() - start
     expect(ran).toBe(true)
     expect(result.doc.content.content.map((n) => n.type.name)).toEqual(['paragraph'])
-    expect(elapsedMs).toBeLessThan(500) // generous bound; real perf is confirmed against BigTable.odt via E2E
+    expect(elapsedMs).toBeLessThan(500) // generous bound; real perf confirmed against BigTable.odt via E2E
   })
 })
 
-describe('canDeleteTable (Abschnitt 1 Zeile 50 der Anforderung, Grenzfall 13 -- erwartet RED bis Abschnitt 4.1 des Codeplans umgesetzt ist)', () => {
+describe('canDeleteTable (Anforderung Abschnitt 1, Grenzfall 13 -- erwartet RED bis 4.1 umgesetzt ist)', () => {
   it('is false outside any table', () => {
     const state = stateFor(doc(para('normal')))
     expect(canDeleteTable(state)).toBe(false)
@@ -423,7 +465,7 @@ describe('canDeleteTable (Abschnitt 1 Zeile 50 der Anforderung, Grenzfall 13 -- 
   })
 })
 
-describe('Undo/Redo of deleteTable (Abschnitt 2.4, Grenzfall 11 -- mehrere Zyklen, erwartet RED bis Abschnitt 4.1 des Codeplans umgesetzt ist)', () => {
+describe('Undo/Redo of deleteTable (2.5, Grenzfall 11 -- mehrere Zyklen, erwartet RED bis 4.1 umgesetzt ist)', () => {
   it('restores the exact table (rows, cells, formatting) across 3 delete/undo/redo cycles', () => {
     const boldText = wordSchema.text('Zelle', [wordSchema.marks.strong.create()])
     const original = doc(table(row(cell(wordSchema.nodes.paragraph.create({ align: 'left' }, boldText)), cell(para('B1')))))
@@ -465,29 +507,20 @@ describe('Undo/Redo of deleteTable (Abschnitt 2.4, Grenzfall 11 -- mehrere Zykle
     expect(redone.doc.content.content.map((n) => n.type.name)).toEqual(['paragraph'])
   })
 })
-
-function countDescendantTables(doc: PMNode): number {
-  let count = 0
-  doc.descendants((node) => {
-    if (node.type.name === 'table') count++
-  })
-  return count
-}
 ```
 
-**Erwartung heute:** Jeder Test in dieser Datei importiert `deleteTable`/`canDeleteTable` aus
-`../commands` — beide Namen existieren im heutigen Code nicht (Abschnitt 1, Punkt 1). Jeder
-`describe`-Block schlägt daher mit `TypeError: deleteTable is not a function` bzw.
-`canDeleteTable is not a function` fehl. **Erwartet GREEN, sobald `tabelle-loeschen-code.md`
-Abschnitt 4.1 umgesetzt ist**, ohne Änderung an diesem Testcode.
+**Erwartung heute:** Jeder Test importiert `deleteTable`/`canDeleteTable` aus `../commands` — beide
+Namen existieren im heutigen Code nicht (Abschnitt 1 Punkt 1). Jeder `describe`-Block schlägt mit
+`TypeError: deleteTable is not a function` bzw. `canDeleteTable is not a function` fehl. **GREEN,
+sobald `tabelle-loeschen-code.md` Abschnitt 4.1 umgesetzt ist**, ohne Änderung an diesem Testcode.
 
 ### 4.3 Erweiterung: `src/formats/docx/__tests__/roundtrip.test.ts`
 
-Neuer `describe`-Block nach dem bestehenden `'DOCX round trip: tables'`-Block (Zeile 173-249),
-der **den echten Befehl** anwendet (nicht nur fertige JSON-Strukturen direkt konstruieren) —
-Ablauf: `EditorState` mit Tabelle(n) aufbauen (per `wordSchema.nodeFromJSON`) → `deleteTable()`
-anwenden → `state.doc.toJSON()` in `WordDocumentContent.body` einsetzen → `writeDocx` → `readDocx`
-→ Struktur/Text sowie das rohe `word/document.xml` prüfen:
+Neuer `describe`-Block nach dem bestehenden `'DOCX round trip: tables'`-Block (**Z. 229**), der
+**den echten Befehl** anwendet (nicht nur fertige JSON-Strukturen konstruiert) — Ablauf: `EditorState`
+mit Tabelle(n) aufbauen (per `wordSchema.nodeFromJSON`) → `deleteTable()` anwenden →
+`state.doc.toJSON()` in `WordDocumentContent.body` → `writeDocx` → `readDocx` → Struktur/Text **sowie
+das rohe `word/document.xml`** prüfen (unabhängige Parser-Validierung, req Testfall 15):
 
 ```ts
 import { EditorState, TextSelection } from 'prosemirror-state'
@@ -516,16 +549,11 @@ function deleteFirstTable(bodyJson: unknown): unknown {
   return result.doc.toJSON()
 }
 
-describe('DOCX round trip: tabelle löschen (erwartet RED bis tabelle-loeschen-code.md Abschnitt 4.1 umgesetzt ist)', () => {
+describe('DOCX round trip: tabelle löschen (erwartet RED bis tabelle-loeschen-code.md 4.1 umgesetzt ist)', () => {
   it('simple 2x2 table with a paragraph before/after, deleted immediately -> re-import shows only the two paragraphs, no <w:tbl> left (Rundreise 4.1.1)', async () => {
     const original = doc([
       paragraph('Davor'),
-      {
-        type: 'table',
-        content: [
-          { type: 'table_row', content: [{ type: 'table_cell', attrs: { colspan: 1, rowspan: 1 }, content: [paragraph('A1')] }] },
-        ],
-      },
+      { type: 'table', content: [{ type: 'table_row', content: [{ type: 'table_cell', attrs: { colspan: 1, rowspan: 1 }, content: [paragraph('A1')] }] }] },
       paragraph('Danach'),
     ])
     const deletedBody = deleteFirstTable(original.body)
@@ -539,7 +567,7 @@ describe('DOCX round trip: tabelle löschen (erwartet RED bis tabelle-loeschen-c
     expect(types).toEqual(['paragraph', 'paragraph'])
   })
 
-  it('table with text, formatting, image, and a nested list, then deleted -> re-import shows neither table nor cell content, surrounding text unchanged, no orphaned image in word/media/ (Rundreise 4.1.3, Grenzfall 14)', async () => {
+  it('table with text, formatting, image, and a nested list, then deleted -> no orphaned image in word/media/, surrounding text unchanged (Rundreise 4.1.3, Grenzfall 15)', async () => {
     const original = doc([
       paragraph('Davor'),
       {
@@ -573,20 +601,13 @@ describe('DOCX round trip: tabelle löschen (erwartet RED bis tabelle-loeschen-c
     expect(documentXml).not.toContain('Punkt')
 
     const result = await readDocx(blob)
-    const types = (result.body as any).content.map((n: any) => n.type)
-    expect(types).toEqual(['paragraph', 'paragraph'])
+    expect((result.body as any).content.map((n: any) => n.type)).toEqual(['paragraph', 'paragraph'])
   })
 
   it('two tables, only one deleted -> the surviving table is bit-identical (Rundreise 4.1.5)', async () => {
-    const survivingTable = {
-      type: 'table',
-      content: [{ type: 'table_row', content: [{ type: 'table_cell', attrs: { colspan: 1, rowspan: 1 }, content: [paragraph('Bleibt')] }] }],
-    }
+    const survivingTable = { type: 'table', content: [{ type: 'table_row', content: [{ type: 'table_cell', attrs: { colspan: 1, rowspan: 1 }, content: [paragraph('Bleibt')] }] }] }
     const original = doc([
-      {
-        type: 'table',
-        content: [{ type: 'table_row', content: [{ type: 'table_cell', attrs: { colspan: 1, rowspan: 1 }, content: [paragraph('Weg')] }] }],
-      },
+      { type: 'table', content: [{ type: 'table_row', content: [{ type: 'table_cell', attrs: { colspan: 1, rowspan: 1 }, content: [paragraph('Weg')] }] }] },
       survivingTable,
     ])
     const deletedBody = deleteFirstTable(original.body)
@@ -605,16 +626,9 @@ describe('DOCX round trip: tabelle löschen (erwartet RED bis tabelle-loeschen-c
           {
             type: 'table_row',
             content: [
-              {
-                type: 'table_cell',
-                attrs: { colspan: 1, rowspan: 1 },
-                content: [
-                  {
-                    type: 'table',
-                    content: [{ type: 'table_row', content: [{ type: 'table_cell', attrs: { colspan: 1, rowspan: 1 }, content: [paragraph('Innen')] }] }],
-                  },
-                ],
-              },
+              { type: 'table_cell', attrs: { colspan: 1, rowspan: 1 }, content: [
+                { type: 'table', content: [{ type: 'table_row', content: [{ type: 'table_cell', attrs: { colspan: 1, rowspan: 1 }, content: [paragraph('Innen')] }] }] },
+              ] },
             ],
           },
         ],
@@ -623,8 +637,7 @@ describe('DOCX round trip: tabelle löschen (erwartet RED bis tabelle-loeschen-c
     ])
     const deletedBody = deleteFirstTable(original.body)
     const result = await roundTrip({ ...original, body: deletedBody as any })
-    const types = (result.body as any).content.map((n: any) => n.type)
-    expect(types).toEqual(['paragraph', 'paragraph'])
+    expect((result.body as any).content.map((n: any) => n.type)).toEqual(['paragraph', 'paragraph'])
     expect((result.body as any).content.map((n: any) => n.content?.[0]?.text)).toEqual(['Davor', 'Danach'])
   })
 
@@ -636,16 +649,9 @@ describe('DOCX round trip: tabelle löschen (erwartet RED bis tabelle-loeschen-c
           {
             type: 'table_row',
             content: [
-              {
-                type: 'table_cell',
-                attrs: { colspan: 1, rowspan: 1 },
-                content: [
-                  {
-                    type: 'table',
-                    content: [{ type: 'table_row', content: [{ type: 'table_cell', attrs: { colspan: 1, rowspan: 1 }, content: [paragraph('Innen')] }] }],
-                  },
-                ],
-              },
+              { type: 'table_cell', attrs: { colspan: 1, rowspan: 1 }, content: [
+                { type: 'table', content: [{ type: 'table_row', content: [{ type: 'table_cell', attrs: { colspan: 1, rowspan: 1 }, content: [paragraph('Innen')] }] }] },
+              ] },
               { type: 'table_cell', attrs: { colspan: 1, rowspan: 1 }, content: [paragraph('Andere Zelle')] },
             ],
           },
@@ -669,22 +675,17 @@ describe('DOCX round trip: tabelle löschen (erwartet RED bis tabelle-loeschen-c
     expect(outer.type).toBe('table')
     expect(outer.content[0].content).toHaveLength(2)
     expect(outer.content[0].content[1].content[0].content[0].text).toBe('Andere Zelle')
-    // First cell no longer contains a nested table.
     expect(outer.content[0].content[0].content.some((n: any) => n.type === 'table')).toBe(false)
   })
 
-  it('table_footnotes.docx-like minimal document with a table and a footnote reference in the surrounding text -> deleting the table, export/reimport does not crash and the reference text survives as-is (Abschnitt 5 des Codeplans -- known footnote-support limitation, NOT re-tested here)', async () => {
+  it('minimal document with a table and a footnote-like reference in the surrounding text -> deleting the table, export/reimport does not crash and the reference text survives as-is (code 5 -- known footnote-support limitation, NOT re-tested here)', async () => {
     const original = doc([
       paragraph('Text mit Fußnotenverweis 1'),
-      {
-        type: 'table',
-        content: [{ type: 'table_row', content: [{ type: 'table_cell', attrs: { colspan: 1, rowspan: 1 }, content: [paragraph('Tabelleninhalt')] }] }],
-      },
+      { type: 'table', content: [{ type: 'table_row', content: [{ type: 'table_cell', attrs: { colspan: 1, rowspan: 1 }, content: [paragraph('Tabelleninhalt')] }] }] },
     ])
     const deletedBody = deleteFirstTable(original.body)
     const result = await roundTrip({ ...original, body: deletedBody as any })
-    const types = (result.body as any).content.map((n: any) => n.type)
-    expect(types).toEqual(['paragraph'])
+    expect((result.body as any).content.map((n: any) => n.type)).toEqual(['paragraph'])
     expect((result.body as any).content[0].content[0].text).toBe('Text mit Fußnotenverweis 1')
   })
 })
@@ -692,53 +693,35 @@ describe('DOCX round trip: tabelle löschen (erwartet RED bis tabelle-loeschen-c
 
 ### 4.4 Erweiterung: `src/formats/odt/__tests__/roundtrip.test.ts`
 
-Analog zu 4.3, im bestehenden `describe('ODT round trip: tables', ...)`-Kontext (Zeile 162-211),
-Testfälle 1-6 wortgleich für ODT (`writeOdt`/`readOdt`). Zusätzlich zwei ODT-spezifische Fälle:
+Analog 4.3, im bestehenden `describe('ODT round trip: tables', ...)`-Kontext (**Z. 219**),
+Testfälle 1-6 wortgleich für ODT (`writeOdt`/`readOdt`), mit Assertions gegen `content.xml` statt
+`word/document.xml`. **Korrektur ggü. 1. Fassung:** Bilder liegen unter **`Pictures/`**
+(`odt/imageCollector.ts:22`), **nicht** im ZIP-Wurzelverzeichnis. Zusätzlich drei ODT-spezifische
+Fälle — inklusive des früher fälschlich als `test.todo`-„Blocker" geführten rowspan-Falls, der
+**jetzt ein echter, grün zu erwartender Test** ist (`covered-table-cell` ist implementiert, Abschnitt
+1 Punkt 7):
 
 ```ts
-describe('ODT round trip: tabelle löschen (erwartet RED bis tabelle-loeschen-code.md Abschnitt 4.1 umgesetzt ist)', () => {
-  // Testfälle 1-6: identisch zur DOCX-Variante (Abschnitt 4.3 dieses Plans), gegen writeOdt/readOdt,
-  // mit Assertions gegen content.xml statt word/document.xml und gegen Dateien im ZIP-Wurzelverzeichnis
-  // statt word/media/ (siehe writer.ts:206 -- ODT legt Bilder ohne Pictures/-Unterordner ab).
+describe('ODT round trip: tabelle löschen (erwartet RED bis tabelle-loeschen-code.md 4.1 umgesetzt ist)', () => {
+  // Testfälle 1-6: identisch zur DOCX-Variante (Abschnitt 4.3), gegen writeOdt/readOdt,
+  // mit Assertions gegen content.xml statt word/document.xml und gegen Pictures/ statt word/media/.
 
-  it('image in a cell of a deleted table leaves no leftover picture file in the ODT zip root and no orphaned manifest:file-entry (Grenzfall 14, ODT-Teil)', async () => {
+  it('image in a cell of a deleted table leaves no leftover picture file under Pictures/ and no orphaned manifest:file-entry (Grenzfall 15, ODT-Teil)', async () => {
     const original = doc([
-      {
-        type: 'table',
-        content: [
-          {
-            type: 'table_row',
-            content: [{ type: 'table_cell', attrs: { colspan: 1, rowspan: 1 }, content: [{ type: 'image', attrs: { src: TINY_PNG, alt: 'x' } }] }],
-          },
-        ],
-      },
+      { type: 'table', content: [{ type: 'table_row', content: [{ type: 'table_cell', attrs: { colspan: 1, rowspan: 1 }, content: [{ type: 'image', attrs: { src: TINY_PNG, alt: 'x' } }] }] }] },
     ])
     const deletedBody = deleteFirstTable(original.body)
     const blob = await writeOdt({ ...original, body: deletedBody as any })
     const zip = await JSZip.loadAsync(blob)
-    const pictureFiles = Object.keys(zip.files).filter((name) => /\.(png|jpe?g|gif)$/i.test(name))
+    const pictureFiles = Object.keys(zip.files).filter((name) => name.startsWith('Pictures/'))
     expect(pictureFiles).toHaveLength(0)
     const manifestXml = await zip.file('META-INF/manifest.xml')!.async('text')
     expect(manifestXml.match(/manifest:media-type="image\//g) ?? []).toHaveLength(0)
   })
 
-  it('list in a cell of a deleted table leaves no <text:list> instance, though the static list style defs remain (Abschnitt 2.6 der Anforderung)', async () => {
+  it('list in a cell of a deleted table leaves no <text:list> instance, though the static list style defs remain (2.7)', async () => {
     const original = doc([
-      {
-        type: 'table',
-        content: [
-          {
-            type: 'table_row',
-            content: [
-              {
-                type: 'table_cell',
-                attrs: { colspan: 1, rowspan: 1 },
-                content: [{ type: 'bullet_list', content: [{ type: 'list_item', content: [paragraph('Punkt')] }] }],
-              },
-            ],
-          },
-        ],
-      },
+      { type: 'table', content: [{ type: 'table_row', content: [{ type: 'table_cell', attrs: { colspan: 1, rowspan: 1 }, content: [{ type: 'bullet_list', content: [{ type: 'list_item', content: [paragraph('Punkt')] }] }] }] }] },
     ])
     const deletedBody = deleteFirstTable(original.body)
     const blob = await writeOdt({ ...original, body: deletedBody as any })
@@ -747,25 +730,49 @@ describe('ODT round trip: tabelle löschen (erwartet RED bis tabelle-loeschen-co
     expect(contentXml).not.toContain('<text:list')
   })
 
-  test.todo(
-    'known, documented blocker: two tables where the SURVIVING one has a multi-row rowspan cell -- red until odt/writer.ts emits <table:covered-table-cell> (see tabelle-loeschen-code.md Abschnitt 6.2, zeile-loeschen-code.md Abschnitt 5.2, spalte-loeschen-code.md Abschnitt 3.7-3.8) -- NOT to be fixed by this feature',
-  )
+  it('two tables where the SURVIVING one has a multi-row rowspan cell: the deleted one is gone, the survivor keeps its rowspan intact after reimport (Rundreise 4.1.5 mit Merge -- covered-table-cell ist implementiert)', async () => {
+    const survivor = {
+      type: 'table',
+      content: [
+        { type: 'table_row', content: [
+          { type: 'table_cell', attrs: { colspan: 1, rowspan: 2 }, content: [paragraph('Hoch')] },
+          { type: 'table_cell', attrs: { colspan: 1, rowspan: 1 }, content: [paragraph('R1')] },
+        ] },
+        { type: 'table_row', content: [
+          { type: 'table_cell', attrs: { colspan: 1, rowspan: 1 }, content: [paragraph('R2')] },
+        ] },
+      ],
+    }
+    const original = doc([
+      { type: 'table', content: [{ type: 'table_row', content: [{ type: 'table_cell', attrs: { colspan: 1, rowspan: 1 }, content: [paragraph('Weg')] }] }] },
+      survivor,
+    ])
+    const deletedBody = deleteFirstTable(original.body)
+    const result = await roundTrip({ ...original, body: deletedBody as any })
+    const tables = (result.body as any).content.filter((n: any) => n.type === 'table')
+    expect(tables).toHaveLength(1)
+    // The surviving table keeps its rowspan-2 cell (covered-table-cell round-trips correctly).
+    const firstCell = tables[0].content[0].content[0]
+    expect(firstCell.attrs.rowspan).toBe(2)
+    expect(firstCell.content[0].content[0].text).toBe('Hoch')
+  })
 })
 ```
 
 ### 4.5 Neu: `src/formats/shared/editor/__tests__/tableDelete.crossFormat.test.ts`
 
-Deckt Rundreise 4.1.8 sowie Grenzfall 15 (Abschnitt 4.1/3 der Anforderung):
+Deckt Rundreise 4.1.8 sowie Grenzfall 16 (Cross-Format nach dem Löschen):
 
 ```ts
 import { EditorState, TextSelection } from 'prosemirror-state'
 import { wordSchema } from '../../schema'
 import { deleteTable } from '../commands'
-import { writeOdt, readOdt } from '../../../odt/writer'
-import { readOdt as readOdtDoc } from '../../../odt/reader'
-import { writeDocx, readDocx } from '../../../docx/writer'
-// (import paths adapted to the project's actual module boundaries; writer/reader re-exports
-// used identically to the existing roundtrip.test.ts files)
+import { writeOdt } from '../../../odt/writer'
+import { readOdt } from '../../../odt/reader'
+import { writeDocx } from '../../../docx/writer'
+import { readDocx } from '../../../docx/reader'
+// (import paths adapted to the project's actual module boundaries; reader/writer used identically
+// to the existing roundtrip.test.ts files)
 
 function docWithTableDeleted(bodyJson: unknown) {
   const docNode = wordSchema.nodeFromJSON(bodyJson as any)
@@ -783,60 +790,42 @@ function docWithTableDeleted(bodyJson: unknown) {
   return result.doc.toJSON()
 }
 
-describe('Cross-Format Rundreise nach Tabelle löschen (Rundreise 4.1.8, Grenzfall 15 -- erwartet RED bis tabelle-loeschen-code.md Abschnitt 4.1 umgesetzt ist)', () => {
+const base = (tableCellText: string) => ({
+  body: {
+    type: 'doc',
+    content: [
+      { type: 'paragraph', attrs: { align: 'left' }, content: [{ type: 'text', text: 'Davor' }] },
+      { type: 'table', content: [{ type: 'table_row', content: [{ type: 'table_cell', attrs: { colspan: 1, rowspan: 1 }, content: [{ type: 'paragraph', attrs: { align: 'left' }, content: [{ type: 'text', text: tableCellText }] }] }] }] },
+      { type: 'paragraph', attrs: { align: 'left' }, content: [{ type: 'text', text: 'Danach' }] },
+    ],
+  },
+  header: null,
+  footer: null,
+  meta: { title: '' },
+})
+
+describe('Cross-Format Rundreise nach Tabelle löschen (Rundreise 4.1.8, Grenzfall 16 -- erwartet RED bis 4.1 umgesetzt ist)', () => {
   it('editor-created table deleted -> ODT export -> reimport -> DOCX export -> reimport: table stays gone, surrounding text survives both conversions', async () => {
-    const original = {
-      body: {
-        type: 'doc',
-        content: [
-          { type: 'paragraph', attrs: { align: 'left' }, content: [{ type: 'text', text: 'Davor' }] },
-          {
-            type: 'table',
-            content: [{ type: 'table_row', content: [{ type: 'table_cell', attrs: { colspan: 1, rowspan: 1 }, content: [{ type: 'paragraph', attrs: { align: 'left' }, content: [{ type: 'text', text: 'Weg' }] }] }] }],
-          },
-          { type: 'paragraph', attrs: { align: 'left' }, content: [{ type: 'text', text: 'Danach' }] },
-        ],
-      },
-      header: null,
-      footer: null,
-      meta: { title: '' },
-    }
+    const original = base('Weg')
     const deletedBody = docWithTableDeleted(original.body)
-    const asOdtBlob = await writeOdt({ ...original, body: deletedBody as any })
-    const afterOdt = await readOdtDoc(asOdtBlob)
-    const asDocxBlob = await writeDocx(afterOdt)
-    const afterDocx = await readDocx(asDocxBlob)
-    const types = (afterDocx.body as any).content.map((n: any) => n.type)
-    expect(types).toEqual(['paragraph', 'paragraph'])
+    const asOdt = await writeOdt({ ...original, body: deletedBody as any })
+    const afterOdt = await readOdt(asOdt)
+    const asDocx = await writeDocx(afterOdt)
+    const afterDocx = await readDocx(asDocx)
+    expect((afterDocx.body as any).content.map((n: any) => n.type)).toEqual(['paragraph', 'paragraph'])
     expect((afterDocx.body as any).content.map((n: any) => n.content?.[0]?.text)).toEqual(['Davor', 'Danach'])
     expect(JSON.stringify(afterDocx.body)).not.toContain('"table"')
   })
 
-  it('reverse direction: DOCX -> ODT (Grenzfall 15 wortgleich)', async () => {
-    const original = {
-      body: {
-        type: 'doc',
-        content: [
-          { type: 'paragraph', attrs: { align: 'left' }, content: [{ type: 'text', text: 'Vor der Tabelle' }] },
-          {
-            type: 'table',
-            content: [{ type: 'table_row', content: [{ type: 'table_cell', attrs: { colspan: 1, rowspan: 1 }, content: [{ type: 'paragraph', attrs: { align: 'left' }, content: [{ type: 'text', text: 'X' }] }] }] }],
-          },
-          { type: 'paragraph', attrs: { align: 'left' }, content: [{ type: 'text', text: 'Nach der Tabelle' }] },
-        ],
-      },
-      header: null,
-      footer: null,
-      meta: { title: '' },
-    }
-    const asDocxBlob = await writeDocx(original)
-    const imported = await readDocx(asDocxBlob)
+  it('reverse direction: DOCX -> ODT after deletion keeps the table gone and surrounding text intact', async () => {
+    const original = base('X')
+    const asDocx = await writeDocx(original)
+    const imported = await readDocx(asDocx)
     const deletedBody = docWithTableDeleted(imported.body)
-    const asOdtBlob = await writeOdt({ ...imported, body: deletedBody as any })
-    const afterOdt = await readOdtDoc(asOdtBlob)
-    const types = (afterOdt.body as any).content.map((n: any) => n.type)
-    expect(types).toEqual(['paragraph', 'paragraph'])
-    expect((afterOdt.body as any).content.map((n: any) => n.content?.[0]?.text)).toEqual(['Vor der Tabelle', 'Nach der Tabelle'])
+    const asOdt = await writeOdt({ ...imported, body: deletedBody as any })
+    const afterOdt = await readOdt(asOdt)
+    expect((afterOdt.body as any).content.map((n: any) => n.type)).toEqual(['paragraph', 'paragraph'])
+    expect((afterOdt.body as any).content.map((n: any) => n.content?.[0]?.text)).toEqual(['Davor', 'Danach'])
   })
 })
 ```
@@ -844,24 +833,19 @@ describe('Cross-Format Rundreise nach Tabelle löschen (Rundreise 4.1.8, Grenzfa
 ### 4.6 Neu: Fixture-getriebene Tests für **alle** in Abschnitt 4.2 der Anforderung gelisteten Dateien
 
 Zwei neue Dateien, `src/formats/docx/__tests__/tableDelete.fixtures.test.ts` und
-`src/formats/odt/__tests__/tableDelete.fixtures.test.ts`, im selben Lade-Stil wie das bereits
-vorhandene `external-fixtures.test.ts` (`readFileSync` gegen
-`tests/fixtures/external/{docx,odt}`), aber mit einem zusätzlichen Schritt: statt nur zu
-importieren, wird für jede gelistete Datei
+`src/formats/odt/__tests__/tableDelete.fixtures.test.ts`, im Lade-Stil des bestehenden
+`external-fixtures.test.ts` (`readFileSync` gegen `tests/fixtures/external/{docx,odt}`), je Datei ein
+eigenes `it(...)`. Ablauf pro Datei: (1) `readOdt`/`readDocx`, (2) `EditorState` via
+`wordSchema.nodeFromJSON`, (3) erste `table`-Node lokalisieren, Cursor per `TextSelection.near` in
+deren erste Textposition, (4) **echten** `deleteTable()`-Befehl anwenden, (5) `writeOdt`/`writeDocx`
+→ `readOdt`/`readDocx`, (6) Assertions: (a) kein Absturz in 1-5, (b) reimportiertes Dokument enthält
+**eine Tabelle weniger** als das Original, (c) der Text außerhalb von Tabellen ist zwischen
+Original-Import und Nach-Löschen-Reimport **identisch**.
 
-1. `readOdt`/`readDocx` aufgerufen (Ist-Zustand, bereits heute GREEN — siehe Abschnitt 1, Punkt 16
-   der Traceability-Matrix),
-2. eine `EditorState` mit `wordSchema.nodeFromJSON(doc.body)` aufgebaut,
-3. die **erste** im Dokument gefundene `table`-Node lokalisiert
-   (`state.doc.descendants(...)`), Cursor per `TextSelection.near` in deren erste Textposition
-   gesetzt,
-4. der **echte, exportierte** `deleteTable()`-Befehl angewendet (dieselbe Funktion, die auch der
-   Toolbar-Button aufruft),
-5. `writeOdt`/`writeDocx` → `readOdt`/`readDocx` erneut aufgerufen,
-6. Assertions: (a) kein Absturz in Schritt 1-5, (b) das reimportierte Dokument enthält **eine
-   Tabelle weniger** als das Original (Zählung über `descendants`), (c) der restliche
-   Text-Inhalt (alle `text`-Knoten außerhalb von Tabellen, verkettet in Dokumentreihenfolge) ist
-   zwischen Original-Import und Nach-Löschen-Reimport **identisch**.
+> **Korrektur ggü. 1. Fassung:** Der frühere `KNOWN_ROWSPAN_EXPORT_BLOCKER`-Ausschluss der
+> Text-Assertion für vier Fixtures ist **ersatzlos entfernt** — er stützte sich auf den inzwischen
+> widerlegten „ODT emittiert kein covered-table-cell"-Befund (Abschnitt 1 Punkt 7). Assertion (c)
+> gilt jetzt für **alle** Fixtures.
 
 ```ts
 import { readFileSync } from 'node:fs'
@@ -878,10 +862,7 @@ function nonTableText(bodyJson: unknown): string {
   const docNode = wordSchema.nodeFromJSON(bodyJson as any)
   let out = ''
   function walk(node: any, insideTable: boolean) {
-    if (node.type.name === 'table') {
-      node.forEach((child: any) => walk(child, true))
-      return
-    }
+    if (node.type.name === 'table') { node.forEach((child: any) => walk(child, true)); return }
     if (!insideTable && node.isText) out += node.text
     node.forEach((child: any) => walk(child, insideTable))
   }
@@ -892,9 +873,7 @@ function nonTableText(bodyJson: unknown): string {
 function countTables(bodyJson: unknown): number {
   const docNode = wordSchema.nodeFromJSON(bodyJson as any)
   let count = 0
-  docNode.descendants((node: any) => {
-    if (node.type.name === 'table') count++
-  })
+  docNode.descendants((node: any) => { if (node.type.name === 'table') count++ })
   return count
 }
 
@@ -909,9 +888,7 @@ async function importDeleteFirstTableExportReimport(fixtureName: string) {
   docNode.descendants((node, p) => {
     if (pos === -1 && node.type.name === 'table') {
       let firstTextPos = -1
-      node.descendants((inner: any, innerPos: number) => {
-        if (firstTextPos === -1 && inner.isText) firstTextPos = innerPos
-      })
+      node.descendants((inner: any, innerPos: number) => { if (firstTextPos === -1 && inner.isText) firstTextPos = innerPos })
       pos = p + 1 + Math.max(firstTextPos, 0)
       return false
     }
@@ -920,18 +897,15 @@ async function importDeleteFirstTableExportReimport(fixtureName: string) {
   const state = EditorState.create({ doc: docNode, schema: wordSchema })
   const withCursor = state.apply(state.tr.setSelection(TextSelection.near(state.doc.resolve(pos))))
   let afterDelete = withCursor
-  const ran = deleteTable()(withCursor, (tr) => {
-    afterDelete = withCursor.apply(tr)
-  })
+  const ran = deleteTable()(withCursor, (tr) => { afterDelete = withCursor.apply(tr) })
 
   const blob = await writeOdt({ ...original, body: afterDelete.doc.toJSON() as any })
   const reimported = await readOdt(blob)
-
   return { ran, originalTableCount, originalNonTableText, reimported }
 }
 
 // Exact fixture list from tabelle-loeschen-req.md Abschnitt 4.2, verified to exist via `ls`
-// before writing this file (see Abschnitt 6 of tabelle-loeschen-qa.md).
+// before writing this file (see Abschnitt 6 of this plan).
 const ODT_FIXTURES = [
   'BigTable.odt', 'crazyTable.odt',
   'subTables.odt', 'subTables2.odt', 'subTables3-nested.odt', 'subTables3-onlyOneColumn.odt',
@@ -949,21 +923,13 @@ const ODT_FIXTURES = [
   'doc_heading_table.odt', 'empty4table.odt',
 ]
 
-// Known blocker documented in tabelle-loeschen-code.md Abschnitt 6.2: fixtures with an
-// unusual/merged column structure that a SURVIVING table might still expose after deletion.
-// These fixtures are asserted only on (a)/(b)/(c) above, never on ODF-schema-validity of any
-// surviving table's XML (see tabelle-loeschen-qa.md Abschnitt 1, Punkte 7/8).
-const KNOWN_ROWSPAN_EXPORT_BLOCKER = new Set(['BigTable.odt', 'crazyTable.odt', 'table-column-delete-with-merge.odt', 'table-column-delete-with-merge-2-times.odt'])
-
-describe('ODT: Tabelle löschen gegen reale Fixture-Dateien (Anforderung Abschnitt 4.2/6 Testfall 12 -- jede Datei ein eigener Test, erwartet RED bis tabelle-loeschen-code.md Abschnitt 4.1 umgesetzt ist)', () => {
+describe('ODT: Tabelle löschen gegen reale Fixture-Dateien (req 4.2 Testfall 14 -- jede Datei ein eigener Test, erwartet RED bis 4.1 umgesetzt ist)', () => {
   for (const fixtureName of ODT_FIXTURES) {
     it(`imports, deletes the contained table via the real command, exports and reimports "${fixtureName}" with the table gone and surrounding text intact`, async () => {
       const { ran, originalTableCount, originalNonTableText, reimported } = await importDeleteFirstTableExportReimport(fixtureName)
       expect(ran).toBe(true)
       expect(countTables(reimported.body)).toBe(originalTableCount - 1)
-      if (!KNOWN_ROWSPAN_EXPORT_BLOCKER.has(fixtureName)) {
-        expect(nonTableText(reimported.body)).toBe(originalNonTableText)
-      }
+      expect(nonTableText(reimported.body)).toBe(originalNonTableText)
     }, 20_000)
   }
 })
@@ -979,121 +945,127 @@ const DOCX_FIXTURES = [
 ]
 ```
 
-Für `deep-table-cell.docx` gilt zusätzlich: Der bestehende Reader-Schutz
-`MAX_TABLE_NESTING_DEPTH = 25` (`docx/reader.ts:208`) bedeutet, dass „die erste gefundene Tabelle"
-ggf. bereits auf einer der oberen Verschachtelungsebenen landet — für diesen Testzweck ausreichend
-(Absturzfreiheit über den vollen Lösch-Export-Reimport-Zyklus, nicht Vollständigkeit jeder
-Verschachtelungsebene, siehe Abschnitt 1, Punkt 9). Für `table_footnotes.docx` gilt: Assertion (c)
-prüft ausschließlich Textgleichheit außerhalb von Tabellen; eine Fußnotenverwaltung existiert im
-Reader nicht (Abschnitt 1, Punkt 10) und wird hier **nicht** simuliert.
+Für `deep-table-cell.docx`: der Reader-Schutz `MAX_TABLE_NESTING_DEPTH = 25` (`docx/reader.ts:309`)
+bedeutet, dass „die erste gefundene Tabelle" ggf. bereits auf einer oberen Verschachtelungsebene
+landet — für diesen Testzweck ausreichend (Absturzfreiheit über den vollen Zyklus, nicht
+Vollständigkeit jeder Ebene, Abschnitt 1 Punkt 9). Für `table_footnotes.docx`: Assertion (c) prüft
+nur Textgleichheit außerhalb von Tabellen; eine Fußnotenverwaltung existiert im Reader nicht
+(Abschnitt 1 Punkt 10) und wird **nicht** simuliert.
 
 ### 4.7 Erwartete Ergebnisse heute (vor Umsetzung von `tabelle-loeschen-code.md`)
 
 | Testdatei | Erwartung heute | Grund |
 |---|---|---|
-| `tableCommands.test.ts` (alle `describe`-Blöcke) | **RED** (`TypeError: deleteTable is not a function` / `canDeleteTable is not a function`) | Abschnitt 1, Punkt 1 |
-| `docx/__tests__/roundtrip.test.ts` — neuer Block „tabelle löschen" | **RED**, gleicher Grund (importiert `deleteTable` aus `commands.ts`) | dito |
-| `odt/__tests__/roundtrip.test.ts` — neuer Block „tabelle löschen" | **RED**, dito | dito |
-| `tableDelete.crossFormat.test.ts` | **RED**, dito | dito |
-| `docx/__tests__/tableDelete.fixtures.test.ts` (alle 6 Fixtures) | **RED**, dito (der `readDocx`-Teil selbst wäre GREEN, aber `deleteTable()` bricht den Testlauf vorher ab) | dito |
-| `odt/__tests__/tableDelete.fixtures.test.ts` (alle 34 Fixtures) | **RED**, dito | dito |
+| `tableCommands.test.ts` (alle Blöcke) | **RED** (`TypeError: deleteTable/canDeleteTable is not a function`) | Abschnitt 1 Punkt 1 |
+| `docx/__tests__/roundtrip.test.ts` — neuer Block „tabelle löschen" | **RED** (importiert `deleteTable`) | dito |
+| `odt/__tests__/roundtrip.test.ts` — neuer Block „tabelle löschen" | **RED** | dito |
+| `tableDelete.crossFormat.test.ts` | **RED** | dito |
+| `docx/__tests__/tableDelete.fixtures.test.ts` (6 Fixtures) | **RED** (`readDocx` selbst wäre GREEN, aber `deleteTable()` bricht vorher ab) | dito |
+| `odt/__tests__/tableDelete.fixtures.test.ts` (34 Fixtures) | **RED** | dito |
 
-Nach Umsetzung von `tabelle-loeschen-code.md` Abschnitt 4.1 (Ergänzung von `deleteTable`/
-`canDeleteTable` in `commands.ts`) müssen **alle** Tests in Abschnitt 4 ohne Änderung an diesem
-Testcode grün werden — mit der einen dokumentierten Ausnahme `test.todo` in Abschnitt 4.4 (ODT
-`covered-table-cell`-Blocker, siehe Abschnitt 1, Punkte 7/8).
+Nach Umsetzung von `tabelle-loeschen-code.md` Abschnitt 4.1 müssen **alle** Tests in Abschnitt 4 ohne
+Änderung an diesem Testcode grün werden — **ohne** verbleibenden `test.todo` (der frühere
+ODT-`covered-table-cell`-Vorbehalt ist gegenstandslos, Abschnitt 1 Punkt 7).
 
 ---
 
 ## 5. Teil B — Echte Playwright-Browser-Tests
 
-### 5.1 Prinzipien für „echte" E2E-Tests in diesem Plan
+### 5.1 Prinzipien für „echte" E2E-Tests + Determinismus
 
-Nicht zulässig für diese Testebene: `readDocx`/`writeDocx`/`readOdt`/`writeOdt`/`deleteTable`
-direkt aufrufen, ProseMirror-`EditorState`/`Command`s direkt konstruieren, oder Assertions
-ausschließlich auf dem internen Dokumentmodell statt auf dem tatsächlich gerenderten DOM/der
-tatsächlich heruntergeladenen Datei. Verbindlich für jeden Test in diesem Abschnitt:
+Nicht zulässig für diese Ebene: `readDocx`/`writeDocx`/`readOdt`/`writeOdt`/`deleteTable` direkt
+aufrufen, ProseMirror-`EditorState`/`Command`s direkt konstruieren, oder Assertions ausschließlich auf
+dem internen Dokumentmodell statt auf dem gerenderten DOM / der heruntergeladenen Datei. Verbindlich:
 
-1. **Klicks** über `page.getByTitle(...)`/`page.getByRole(...)`/Zell-Locators
-   (`page.locator('.ProseMirror td')`), nie `page.evaluate(() => command(...))` als Ersatz für
-   einen Klick.
-2. **Tippen** über `page.keyboard.type(...)`/`page.keyboard.press(...)`, nie direktes Setzen von
-   `editor.textContent`.
+1. **Klicks** über `getByTitle(...)`/`getByRole(...)`/Zell-Locators (`page.locator('.ProseMirror td')`),
+   nie `page.evaluate(() => command(...))` als Ersatz für einen Klick.
+2. **Tippen** über `page.keyboard.type(...)`/`press(...)`, nie direktes Setzen von `textContent`.
 3. **Datei-Upload** über `input.setInputFiles({ name, mimeType, buffer })` auf den echten
-   `<input type="file">` der Seite (`docxCard(page).locator('input[type="file"]')` bzw. das
-   ODT-Pendant) — bereits etabliertes Muster aus `docx.spec.ts`/`odt.spec.ts`.
-4. **Export/Download** über `page.waitForEvent('download')`, gefolgt von `download.path()` und
-   echtem `fs.readFile` + `JSZip.loadAsync` auf die **tatsächlich vom Browser geschriebene
-   Datei** — Assertions laufen gegen den rohen XML-String aus dieser Datei, **nicht** gegen den
-   Rückgabewert eines erneuten `readDocx`/`readOdt`-Aufrufs.
-5. **Locators für den neuen Button** ausschließlich `page.getByTitle('Tabelle löschen')`
-   (verlässlich, unabhängig von Accessible-Name-Berechnung — siehe Beobachtung unten) — **nicht**
-   Annahmen über den bestehenden „⊞ Tabelle"-Einfüge-Button, dessen Markup sich laut
-   `tabelle-einfuegen-code.md` unabhängig ändern könnte.
+   `<input type="file">` der jeweiligen Karte (`odtCard(page).locator('input[type="file"]')` bzw.
+   `docxCard(page)`) — etabliertes Muster aus `odt.spec.ts:81`/`docx.spec.ts`.
+4. **Export/Download** über `page.waitForEvent('download')`, gefolgt von `download.path()` und echtem
+   `fs.readFile` + `JSZip.loadAsync` auf die **tatsächlich vom Browser geschriebene Datei** —
+   Assertions laufen gegen den rohen XML-String, **nicht** gegen den Rückgabewert eines erneuten
+   `readDocx`/`readOdt`.
+5. **Locator für den neuen Button:** `getByTitle('Tabelle löschen')` **oder**
+   `getByRole('button', { name: 'Tabelle löschen' })` — beide sind zuverlässig, sofern
+   `tabelle-loeschen-code.md` Abschnitt 4.3 wie geplant **sowohl** `title` **als auch** `aria-label`
+   setzt. Nie am Nachbar-Button „Tabelle einfügen" verankern.
 
-**Beobachtung aus dem Code-Audit (Abschnitt 1), relevant für Locator-Wahl:** Der bestehende
-Einfüge-Button hat `title="Tabelle einfügen"`, aber **kein** `aria-label` — sein sichtbarer
-Text-Inhalt „⊞ Tabelle" bestimmt daher die berechnete Accessible Name, nicht der `title`
-(ARIA-Namensberechnung: Inhalt schlägt `title`, sobald der Button eigenen sichtbaren Text hat).
-`tests/e2e/selection-regression.spec.ts:37` verwendet trotzdem
-`page.getByRole('button', { name: 'Tabelle einfügen' })` — das ist ein bereits vor diesem Feature
-bestehendes, unabhängiges Locator-Risiko in einer fremden Testdatei (nicht Gegenstand dieses
-Plans, wird hier nur dokumentiert, damit die neuen Tests **nicht** dasselbe Muster für den neuen
-Button übernehmen). Dieser Plan verankert seine eigenen Locators daher konsequent an
-`getByTitle('Tabelle löschen')`, das unabhängig vom sichtbaren Textinhalt zuverlässig matcht,
-sofern `tabelle-loeschen-code.md` Abschnitt 4.3 wie geplant sowohl `title` als auch `aria-label`
-setzt.
+**Determinismus (Selektions-Sync — Pflicht, sonst Flakiness):** Der Editor lernt einen nativen,
+tastatur- oder klickgetriebenen Cursorwechsel teils erst über das **asynchrone**
+`selectionchange`-Event (siehe `WordEditor.tsx` `reconcileSelectionOnClick` und den ausführlichen
+Kommentar in `selection-regression.spec.ts:26-34`). Ohne menschliche Reaktionspause kann eine
+sofort folgende Playwright-Aktion die noch nicht eingespielte Selektion „überholen". Regeln für **alle**
+Tests hier:
+
+- **Nach einem Klick in eine Zelle, bevor der Lösch-Button geklickt wird:** deterministisch auf den
+  daraus folgenden Button-Zustand warten — `await expect(page.getByTitle('Tabelle löschen')).toBeEnabled()`.
+  Das ist ein Web-First-Assert, der garantiert, dass `canDeleteTable(view.state)` die neue Selektion
+  bereits sieht (kein willkürliches Sleep).
+- **Nach einem tastaturgetriebenen Cursorwechsel** (`End`, `Home`, `ControlOrMeta+End`), bevor eine
+  davon abhängige Folge-Taste gedrückt wird: `await page.waitForTimeout(50)` — exakt das im Repo
+  bereits etablierte Muster (`selection-regression.spec.ts:34/72/103`), mit gleicher Begründung.
+- **Nie** `press()`/`type()` unmittelbar an einen repositionierenden Klick/Cursorwechsel anketten,
+  ohne einen der beiden obigen Wartepunkte.
+
+**Bild-`<input>`-Locator (Korrektur ggü. 1. Fassung):** Der Bild-Upload-`<input accept="image/*">`
+liegt in der **Toolbar** (`Toolbar.tsx:293`), **nicht** innerhalb von `.ProseMirror`. Locator daher
+**seitenbezogen**: `page.locator('input[type="file"][accept="image/*"]')` — nicht `editor.locator(...)`.
 
 ### 5.2 Neu: `tests/e2e/table-delete.spec.ts`
 
+Nutzt die Projekt-Fixture `tests/e2e/fixtures.ts` (`test` dismisst die Datenschutz-Overlay
+automatisch und navigiert auf `/`; sammelt zusätzlich `pageerror`/console-errors → „kein Absturz"
+wird kostenlos mitgeprüft). Läuft ohne Projekt-Einschränkung auf **allen drei**
+`playwright.config.ts`-Projekten (Desktop Chrome, Mobile/Pixel 7, Tablet/iPad Mini) — erfüllt
+req Testfall 17/Grenzfall 18.
+
 ```ts
-import { test, expect } from '@playwright/test'
+import { test, expect, odtCard, docxCard } from './fixtures'
 import JSZip from 'jszip'
 import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 
-function odtCard(page: import('@playwright/test').Page) {
-  return page.locator('div.rounded-lg', { has: page.getByRole('heading', { name: 'OpenDocument Text (.odt)' }) })
-}
-function docxCard(page: import('@playwright/test').Page) {
-  return page.locator('div.rounded-lg', { has: page.getByRole('heading', { name: 'Word-Dokument (.docx)' }) })
-}
+const TINY_PNG = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII='
+
 async function uploadFixture(card: ReturnType<typeof odtCard>, relativePath: string, mimeType: string) {
-  const buffer = await readFile(join(__dirname, '..', 'fixtures', 'external', relativePath))
+  const buffer = await readFile(join(__dirname, 'fixtures', 'external', relativePath))
   await card.locator('input[type="file"]').setInputFiles({ name: relativePath.split('/').pop()!, mimeType, buffer })
 }
 
-test.describe('Tabelle löschen — Grundverhalten & Toolbar (Testfälle 1/2/5, Grenzfälle 1/2/4/5/6/10)', () => {
+const del = (page: import('@playwright/test').Page) => page.getByTitle('Tabelle löschen')
+
+test.describe('Tabelle löschen — Grundverhalten & Toolbar (Testfälle 1/2/3, Grenzfälle 1/4/5/6/10)', () => {
   test.beforeEach(async ({ page }) => {
-    await page.goto('/')
-    await page.getByRole('button', { name: /verstanden/i }).click()
+    // fixtures.ts already dismissed the banner and navigated to '/'.
     await odtCard(page).getByRole('button', { name: 'Neu erstellen' }).click()
   })
 
-  test('Testfall 1: Button ist deaktiviert außerhalb einer Tabelle, aktiv sobald der Cursor in einer Zelle steht', async ({ page }) => {
+  test('Testfall 1: Button disabled außerhalb einer Tabelle, aktiv sobald der Cursor in einer Zelle steht', async ({ page }) => {
     const editor = page.locator('.ProseMirror')
     await editor.click()
     await page.keyboard.type('normaler Absatz')
-    await expect(page.getByTitle('Tabelle löschen')).toBeDisabled()
+    await expect(del(page)).toBeDisabled()
 
     await page.getByRole('button', { name: 'Tabelle einfügen' }).click()
     await page.locator('.ProseMirror td').first().click()
-    await expect(page.getByTitle('Tabelle löschen')).toBeEnabled()
+    await expect(del(page)).toBeEnabled() // deterministic proof the selection synced into the table
   })
 
-  test('Testfall 2: Klick auf "Tabelle löschen" entfernt die komplette Tabelle inkl. Inhalt, egal in welcher Zelle der Cursor stand', async ({ page }) => {
+  test('Testfall 2: Klick entfernt die komplette Tabelle inkl. Inhalt, egal in welcher Zelle der Cursor stand', async ({ page }) => {
     const editor = page.locator('.ProseMirror')
     await editor.click()
     await page.getByRole('button', { name: 'Tabelle einfügen' }).click()
-    const cells = page.locator('.ProseMirror td')
-    await cells.nth(2).click() // not cell 0 -- proves the action targets the whole table
+    await page.locator('.ProseMirror td').nth(2).click() // not cell 0 -- proves the whole table is targeted
     await page.keyboard.type('Inhalt')
-    await page.getByTitle('Tabelle löschen').click()
+    await expect(del(page)).toBeEnabled()
+    await del(page).click()
     await expect(editor.locator('table')).toHaveCount(0)
     await expect(editor).not.toContainText('Inhalt')
   })
 
-  test('Testfall 3 / Abschnitt 2.2: Entf auf markiertem Zellinhalt leert nur den Inhalt, Tabellenstruktur bleibt', async ({ page }) => {
+  test('Testfall 3 / Abschnitt 2.2: Entf auf markiertem Zellinhalt leert nur den Inhalt, Struktur bleibt (GREEN bereits heute)', async ({ page }) => {
     const editor = page.locator('.ProseMirror')
     await editor.click()
     await page.getByRole('button', { name: 'Tabelle einfügen' }).click()
@@ -1106,70 +1078,71 @@ test.describe('Tabelle löschen — Grundverhalten & Toolbar (Testfälle 1/2/5, 
     await expect(editor).not.toContainText('Text')
   })
 
-  test('Grenzfall 10: Löschen unmittelbar nach dem Einfügen (kein Klick dazwischen) funktioniert', async ({ page }) => {
+  test('Grenzfall 10: Löschen unmittelbar nach dem Einfügen (kein Klick dazwischen)', async ({ page }) => {
     const editor = page.locator('.ProseMirror')
     await editor.click()
     await page.getByRole('button', { name: 'Tabelle einfügen' }).click()
-    await page.getByTitle('Tabelle löschen').click()
+    await expect(del(page)).toBeEnabled()
+    await del(page).click()
     await expect(editor.locator('table')).toHaveCount(0)
     await page.keyboard.type('geht weiter')
     await expect(editor).toContainText('geht weiter')
   })
 
-  test('Grenzfall 1: Tabelle als einziges Dokumentelement löschen -> Editor bleibt sofort bedienbar', async ({ page }) => {
+  test('Grenzfall 1: Tabelle als einziges Dokumentelement löschen -> Editor sofort bedienbar', async ({ page }) => {
     const editor = page.locator('.ProseMirror')
     await editor.click()
     await page.getByRole('button', { name: 'Tabelle einfügen' }).click()
     await page.locator('.ProseMirror td').first().click()
-    await page.getByTitle('Tabelle löschen').click()
+    await expect(del(page)).toBeEnabled()
+    await del(page).click()
     await expect(editor.locator('table')).toHaveCount(0)
     await editor.click()
     await page.keyboard.type('weiter tippen ohne Absturz')
     await expect(editor).toContainText('weiter tippen ohne Absturz')
   })
 
-  test('Grenzfall 4/5: Tabelle am Dokumentanfang und am Dokumentende — Cursor landet deterministisch im jeweiligen Nachbarabsatz', async ({ page }) => {
+  test('Grenzfall 4/5: Tabelle am Dokumentanfang mit Folgeabsatz — Cursor landet deterministisch im Nachbarabsatz', async ({ page }) => {
     const editor = page.locator('.ProseMirror')
     await editor.click()
     await page.getByRole('button', { name: 'Tabelle einfügen' }).click() // table at doc start
     await page.keyboard.press('ControlOrMeta+End')
+    await page.waitForTimeout(50) // keyboard caret move -> let selectionchange land before typing
     await page.keyboard.type('Danach')
     await page.locator('.ProseMirror td').first().click()
-    await page.getByTitle('Tabelle löschen').click()
+    await expect(del(page)).toBeEnabled()
+    await del(page).click()
     await expect(editor.locator('table')).toHaveCount(0)
     await page.keyboard.type('X')
     await expect(editor).toContainText('XDanach')
   })
 
-  test('Grenzfall 6: Zwei aufeinanderfolgende Tabellen ohne trennenden Absatz — nur die per Cursor ausgewählte verschwindet', async ({ page }) => {
+  test('Grenzfall 6: Zwei aufeinanderfolgende Tabellen — nur die per Cursor ausgewählte verschwindet', async ({ page }) => {
     const editor = page.locator('.ProseMirror')
     await editor.click()
     await page.getByRole('button', { name: 'Tabelle einfügen' }).click()
     await page.locator('.ProseMirror td').last().click()
     await page.getByRole('button', { name: 'Tabelle einfügen' }).click()
     await expect(editor.locator('table')).toHaveCount(2)
-    const firstTableCell = editor.locator('table').first().locator('td').first()
-    await firstTableCell.click()
+    await editor.locator('table').first().locator('td').first().click()
     await page.keyboard.type('T1')
-    const secondTableCell = editor.locator('table').nth(1).locator('td').first()
-    await secondTableCell.click()
+    await editor.locator('table').nth(1).locator('td').first().click()
     await page.keyboard.type('T2')
     await editor.locator('table').first().locator('td').first().click()
-    await page.getByTitle('Tabelle löschen').click()
+    await expect(del(page)).toBeEnabled()
+    await del(page).click()
     await expect(editor.locator('table')).toHaveCount(1)
     await expect(editor).toContainText('T2')
     await expect(editor).not.toContainText('T1')
   })
 })
 
-test.describe('Tabelle löschen — Pflicht-Regressionstest Selection-Sync (Testfall 9/Grenzfall 9)', () => {
+test.describe('Tabelle löschen — Pflicht-Regressionstest Selection-Sync (Testfall 11/Grenzfall 9)', () => {
   test.beforeEach(async ({ page }) => {
-    await page.goto('/')
-    await page.getByRole('button', { name: /verstanden/i }).click()
     await odtCard(page).getByRole('button', { name: 'Neu erstellen' }).click()
   })
 
-  test('type in one cell, click into a different cell, immediately delete the table -> table fully removed, no crash, no wrong target', async ({ page }) => {
+  test('type in one cell, click into a DIFFERENT cell, immediately delete -> table fully removed, no crash, no wrong target', async ({ page }) => {
     const editor = page.locator('.ProseMirror')
     await editor.click()
     await page.getByRole('button', { name: 'Tabelle einfügen' }).click()
@@ -1178,44 +1151,29 @@ test.describe('Tabelle löschen — Pflicht-Regressionstest Selection-Sync (Test
     await page.keyboard.type('Zelle eins')
     await page.keyboard.press('ControlOrMeta+a')
     await page.getByTitle('Fett').click()
-    await cells.nth(1).click() // reposition cursor into a DIFFERENT cell -- exact regression pattern
-    await page.getByTitle('Tabelle löschen').click()
+    await cells.nth(1).click() // reposition into a DIFFERENT cell -- exact regression pattern
+    await expect(del(page)).toBeEnabled() // wait for the async selection sync to land before deleting
+    await del(page).click()
     await expect(editor.locator('table')).toHaveCount(0)
     await expect(editor).not.toContainText('Zelle eins')
   })
-
-  test('same pattern with two tables present -- only the targeted one is removed, the other is untouched', async ({ page }) => {
-    const editor = page.locator('.ProseMirror')
-    await editor.click()
-    await page.getByRole('button', { name: 'Tabelle einfügen' }).click()
-    await page.locator('.ProseMirror td').first().click()
-    await page.keyboard.type('Zelle A')
-    await page.keyboard.press('ControlOrMeta+a')
-    await page.getByTitle('Fett').click()
-    await editor.locator('table').first().locator('td').nth(1).click() // reposition inside the SAME table
-    await page.keyboard.press('End')
-    await page.getByTitle('Tabelle löschen').click()
-    await expect(editor.locator('table')).toHaveCount(0)
-  })
 })
 
-test.describe('Tabelle löschen — verschachtelte Tabellen (Testfall 7/Grenzfall 7)', () => {
+test.describe('Tabelle löschen — verschachtelte Tabellen (Testfall 9/Grenzfall 7)', () => {
   test.beforeEach(async ({ page }) => {
-    await page.goto('/')
-    await page.getByRole('button', { name: /verstanden/i }).click()
     await odtCard(page).getByRole('button', { name: 'Neu erstellen' }).click()
   })
 
-  test('cursor in the inner table removes only the inner table; outer table with its other cells remains', async ({ page }) => {
+  test('cursor in the inner table removes only the inner table; the outer table remains', async ({ page }) => {
     const editor = page.locator('.ProseMirror')
     await editor.click()
     await page.getByRole('button', { name: 'Tabelle einfügen' }).click()
-    const outerCells = editor.locator('table').first().locator('> tbody > tr > td, > tr > td')
-    await outerCells.first().click()
-    await page.getByRole('button', { name: 'Tabelle einfügen' }).click() // inserts a nested table inside the first cell
+    await editor.locator('table').first().locator('td').first().click()
+    await page.getByRole('button', { name: 'Tabelle einfügen' }).click() // nested table inside the first cell
     await expect(editor.locator('table')).toHaveCount(2)
-    editor.locator('table').nth(1).locator('td').first().click()
-    await page.getByTitle('Tabelle löschen').click()
+    await editor.locator('table').nth(1).locator('td').first().click()
+    await expect(del(page)).toBeEnabled()
+    await del(page).click()
     await expect(editor.locator('table')).toHaveCount(1)
   })
 
@@ -1227,15 +1185,14 @@ test.describe('Tabelle löschen — verschachtelte Tabellen (Testfall 7/Grenzfal
     await outerCells.first().click()
     await page.getByRole('button', { name: 'Tabelle einfügen' }).click()
     await outerCells.nth(1).click() // a cell of the OUTER table, not inside the inner one
-    await page.getByTitle('Tabelle löschen').click()
+    await expect(del(page)).toBeEnabled()
+    await del(page).click()
     await expect(editor.locator('table')).toHaveCount(0)
   })
 })
 
-test.describe('Tabelle löschen — Undo/Redo & Grenzfall-Abdeckung (Testfall 6, Grenzfälle 11/13)', () => {
+test.describe('Tabelle löschen — Undo/Redo, Tastaturweg & Grenzfälle (Testfälle 6/8, Grenzfälle 11/13/14)', () => {
   test.beforeEach(async ({ page }) => {
-    await page.goto('/')
-    await page.getByRole('button', { name: /verstanden/i }).click()
     await odtCard(page).getByRole('button', { name: 'Neu erstellen' }).click()
   })
 
@@ -1246,168 +1203,155 @@ test.describe('Tabelle löschen — Undo/Redo & Grenzfall-Abdeckung (Testfall 6,
     await page.locator('.ProseMirror td').first().click()
     await page.keyboard.type('Ursprung')
     await page.locator('.ProseMirror td').first().click()
+    await expect(del(page)).toBeEnabled()
 
     for (let cycle = 0; cycle < 3; cycle++) {
-      await page.getByTitle('Tabelle löschen').click()
+      await del(page).click()
       await expect(editor.locator('table')).toHaveCount(0)
       await page.keyboard.press('ControlOrMeta+z')
       await expect(editor.locator('table')).toHaveCount(1)
       await expect(editor).toContainText('Ursprung')
+      await editor.locator('table').first().locator('td').first().click()
+      await expect(del(page)).toBeEnabled()
     }
-    await page.keyboard.press('ControlOrMeta+z')
+    await del(page).click()
     await expect(editor.locator('table')).toHaveCount(0)
     await page.keyboard.press('ControlOrMeta+y')
     await expect(editor.locator('table')).toHaveCount(1)
   })
 
-  test('Grenzfall 13: cursor on an image directly before a table keeps the button disabled, click is a no-op', async ({ page }) => {
-    const editor = page.locator('.ProseMirror')
-    await editor.click()
-    const fs = await import('node:fs/promises')
-    const tinyPng = await fs.readFile(join(__dirname, '..', 'fixtures', 'tiny.png')).catch(() => null)
-    // Fallback: insert via the existing image input if a fixture isn't present.
-    await editor.locator('input[type="file"][accept="image/*"]').setInputFiles({
-      name: 'tiny.png',
-      mimeType: 'image/png',
-      buffer: tinyPng ?? Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=', 'base64'),
-    })
-    await page.getByRole('button', { name: 'Tabelle einfügen' }).click()
-    await editor.locator('img').click() // select the image node, NOT a table cell
-    await expect(page.getByTitle('Tabelle löschen')).toBeDisabled()
-    const tableCountBefore = await editor.locator('table').count()
-    await page.getByTitle('Tabelle löschen').click({ force: true })
-    await expect(editor.locator('table')).toHaveCount(tableCountBefore)
-  })
-
-  test('Mod-Alt-Backspace with the cursor anywhere in the table gives the identical result to the button click', async ({ page }) => {
+  test('Testfall 6 / Mod-Alt-Backspace mit Cursor irgendwo in der Tabelle == Button-Klick', async ({ page }) => {
     const editor = page.locator('.ProseMirror')
     await editor.click()
     await page.getByRole('button', { name: 'Tabelle einfügen' }).click()
     await page.locator('.ProseMirror td').nth(2).click()
+    await expect(del(page)).toBeEnabled()
     await page.keyboard.press('ControlOrMeta+Alt+Backspace')
     await expect(editor.locator('table')).toHaveCount(0)
   })
 
-  test('documented pre-existing boundary-Backspace path: two Backspaces right after a table select then remove it (no new code, regression-only)', async ({ page }) => {
+  test('Grenzfall 14 (bereits heute GREEN): documented boundary-Backspace — two Backspaces right after a table select then remove it', async ({ page }) => {
     const editor = page.locator('.ProseMirror')
     await editor.click()
     await page.getByRole('button', { name: 'Tabelle einfügen' }).click()
     await page.keyboard.press('ControlOrMeta+End')
+    await page.waitForTimeout(50)
     await page.keyboard.press('Enter')
     await page.keyboard.type('nach der Tabelle')
     await page.keyboard.press('Home')
+    await page.waitForTimeout(50) // keyboard caret move -> let selectionchange land before Backspace
     await page.keyboard.press('Backspace') // first press: selects the whole table as a NodeSelection
     await page.keyboard.press('Backspace') // second press: removes it
     await expect(editor.locator('table')).toHaveCount(0)
     await expect(editor).toContainText('nach der Tabelle')
   })
+
+  test('Grenzfall 13: cursor on an image directly before a table keeps the button disabled; a forced click is a no-op', async ({ page }) => {
+    const editor = page.locator('.ProseMirror')
+    await editor.click()
+    await page.locator('input[type="file"][accept="image/*"]').setInputFiles({
+      name: 'tiny.png', mimeType: 'image/png', buffer: Buffer.from(TINY_PNG, 'base64'),
+    })
+    await page.getByRole('button', { name: 'Tabelle einfügen' }).click()
+    await editor.locator('img').click() // select the image node, NOT a table cell
+    await expect(del(page)).toBeDisabled()
+    const tableCountBefore = await editor.locator('table').count()
+    await del(page).click({ force: true })
+    await expect(editor.locator('table')).toHaveCount(tableCountBefore)
+  })
 })
 
-test.describe('Tabelle löschen — Export/Download (Testfall 8/14/15, Grenzfall 14)', () => {
-  test.beforeEach(async ({ page }) => {
-    await page.goto('/')
-    await page.getByRole('button', { name: /verstanden/i }).click()
-  })
-
-  test('DOCX: delete a table with an image in a cell, export via real download -> reimport shows no table, no orphaned image in word/media/', async ({ page }) => {
+test.describe('Tabelle löschen — Export/Download der echten Datei (Testfälle 10/14/15)', () => {
+  test('DOCX: delete a table with an image in a cell, export via real download -> no table, no orphaned image in word/media/', async ({ page }) => {
     await docxCard(page).getByRole('button', { name: 'Neu erstellen' }).click()
     const editor = page.locator('.ProseMirror')
     await editor.click()
     await page.getByRole('button', { name: 'Tabelle einfügen' }).click()
     await page.locator('.ProseMirror td').first().click()
-    await editor.locator('input[type="file"][accept="image/*"]').setInputFiles({
-      name: 'tiny.png',
-      mimeType: 'image/png',
-      buffer: Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=', 'base64'),
+    await page.locator('input[type="file"][accept="image/*"]').setInputFiles({
+      name: 'tiny.png', mimeType: 'image/png', buffer: Buffer.from(TINY_PNG, 'base64'),
     })
     await page.locator('.ProseMirror td').first().click()
-    await page.getByTitle('Tabelle löschen').click()
+    await expect(del(page)).toBeEnabled()
+    await del(page).click()
     await expect(editor.locator('table')).toHaveCount(0)
 
     const downloadPromise = page.waitForEvent('download')
     await page.getByRole('button', { name: 'Exportieren' }).click()
     const download = await downloadPromise
-    const exportedBuffer = await readFile((await download.path())!)
-    const zip = await JSZip.loadAsync(exportedBuffer)
+    const zip = await JSZip.loadAsync(await readFile((await download.path())!))
     const documentXml = await zip.file('word/document.xml')!.async('text')
     expect(documentXml).not.toContain('<w:tbl>')
-    const mediaFiles = Object.keys(zip.files).filter((name) => name.startsWith('word/media/'))
-    expect(mediaFiles).toHaveLength(0)
+    expect(Object.keys(zip.files).filter((n) => n.startsWith('word/media/'))).toHaveLength(0)
   })
 
-  test('ODT: same scenario over a real download', async ({ page }) => {
+  test('ODT: same scenario over a real download -> no table XML, no leftover file under Pictures/', async ({ page }) => {
     await odtCard(page).getByRole('button', { name: 'Neu erstellen' }).click()
     const editor = page.locator('.ProseMirror')
     await editor.click()
     await page.getByRole('button', { name: 'Tabelle einfügen' }).click()
     await page.locator('.ProseMirror td').first().click()
-    await editor.locator('input[type="file"][accept="image/*"]').setInputFiles({
-      name: 'tiny.png',
-      mimeType: 'image/png',
-      buffer: Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=', 'base64'),
+    await page.locator('input[type="file"][accept="image/*"]').setInputFiles({
+      name: 'tiny.png', mimeType: 'image/png', buffer: Buffer.from(TINY_PNG, 'base64'),
     })
     await page.locator('.ProseMirror td').first().click()
-    await page.getByTitle('Tabelle löschen').click()
+    await expect(del(page)).toBeEnabled()
+    await del(page).click()
 
     const downloadPromise = page.waitForEvent('download')
     await page.getByRole('button', { name: 'Exportieren' }).click()
     const download = await downloadPromise
-    const exportedBuffer = await readFile((await download.path())!)
-    const zip = await JSZip.loadAsync(exportedBuffer)
-    const contentXml = await zip.file('content.xml')!.async('text')
-    expect(contentXml).not.toContain('<table:table')
-    const pictureFiles = Object.keys(zip.files).filter((name) => /\.(png|jpe?g)$/i.test(name))
-    expect(pictureFiles).toHaveLength(0)
+    const zip = await JSZip.loadAsync(await readFile((await download.path())!))
+    expect(await zip.file('content.xml')!.async('text')).not.toContain('<table:table')
+    expect(Object.keys(zip.files).filter((n) => n.startsWith('Pictures/'))).toHaveLength(0)
   })
 })
 
-test.describe('Tabelle löschen — repräsentative Fixture-Teilmenge über echten Upload (Testfall 12/16)', () => {
-  test.beforeEach(async ({ page }) => {
-    await page.goto('/')
-    await page.getByRole('button', { name: /verstanden/i }).click()
-  })
-
+test.describe('Tabelle löschen — repräsentative Fixture-Teilmenge über echten Upload (Testfall 14)', () => {
   test('simple-table.odt: upload, delete the visible first table, export, verify no table XML remains', async ({ page }) => {
     await uploadFixture(odtCard(page), 'odt/simple-table.odt', 'application/vnd.oasis.opendocument.text')
     const editor = page.locator('.ProseMirror')
     await expect(editor.locator('table')).toHaveCount(1)
     await editor.locator('table').first().locator('td').first().click()
-    await page.getByTitle('Tabelle löschen').click()
+    await expect(del(page)).toBeEnabled()
+    await del(page).click()
     await expect(editor.locator('table')).toHaveCount(0)
     const downloadPromise = page.waitForEvent('download')
     await page.getByRole('button', { name: 'Exportieren' }).click()
-    const exportedBuffer = await readFile((await (await downloadPromise).path())!)
-    const zip = await JSZip.loadAsync(exportedBuffer)
+    const zip = await JSZip.loadAsync(await readFile((await (await downloadPromise).path())!))
     expect(await zip.file('content.xml')!.async('text')).not.toContain('<table:table')
   })
 
-  test('BigTable.odt: upload, delete the large table without a visible freeze, export cleanly', async ({ page }) => {
+  test('BigTable.odt: upload, delete the large table without a visible freeze, export cleanly (Grenzfall 3)', async ({ page }) => {
     await uploadFixture(odtCard(page), 'odt/BigTable.odt', 'application/vnd.oasis.opendocument.text')
     const editor = page.locator('.ProseMirror')
     await expect(editor.locator('table').first()).toBeVisible({ timeout: 10_000 })
     await editor.locator('table').first().locator('td').first().click()
+    await expect(del(page)).toBeEnabled()
     const start = Date.now()
-    await page.getByTitle('Tabelle löschen').click()
+    await del(page).click()
     await expect(editor.locator('table')).toHaveCount(0, { timeout: 5_000 })
     expect(Date.now() - start).toBeLessThan(5_000)
   })
 
-  test('subTables3-nested.odt: nested table fixture -- delete the first table found, no crash', async ({ page }) => {
+  test('subTables3-nested.odt: nested table fixture -- delete the first table found, one fewer table remains', async ({ page }) => {
     await uploadFixture(odtCard(page), 'odt/subTables3-nested.odt', 'application/vnd.oasis.opendocument.text')
     const editor = page.locator('.ProseMirror')
     await expect(editor.locator('table').first()).toBeVisible()
-    const tableCountBefore = await editor.locator('table').count()
+    const before = await editor.locator('table').count()
     await editor.locator('table').first().locator('td').first().click()
-    await page.getByTitle('Tabelle löschen').click()
-    await expect(editor.locator('table')).toHaveCount(tableCountBefore - 1)
+    await expect(del(page)).toBeEnabled()
+    await del(page).click()
+    await expect(editor.locator('table')).toHaveCount(before - 1)
   })
 
-  test('table-column-delete-with-merge.odt: exotic merge structure -- delete without crashing', async ({ page }) => {
+  test('table-column-delete-with-merge.odt: exotic merge structure -- delete without crashing (Grenzfall 8)', async ({ page }) => {
     await uploadFixture(odtCard(page), 'odt/table-column-delete-with-merge.odt', 'application/vnd.oasis.opendocument.text')
     const editor = page.locator('.ProseMirror')
     await expect(editor.locator('table').first()).toBeVisible()
     await editor.locator('table').first().locator('td').first().click()
-    await page.getByTitle('Tabelle löschen').click()
+    await expect(del(page)).toBeEnabled()
+    await del(page).click()
     await expect(editor.locator('table')).toHaveCount(0)
   })
 
@@ -1416,11 +1360,11 @@ test.describe('Tabelle löschen — repräsentative Fixture-Teilmenge über echt
     const editor = page.locator('.ProseMirror')
     await expect(editor.locator('table').first()).toBeVisible()
     await editor.locator('table').first().locator('td').first().click()
-    await page.getByTitle('Tabelle löschen').click()
+    await expect(del(page)).toBeEnabled()
+    await del(page).click()
     const downloadPromise = page.waitForEvent('download')
     await page.getByRole('button', { name: 'Exportieren' }).click()
-    const exportedBuffer = await readFile((await (await downloadPromise).path())!)
-    const zip = await JSZip.loadAsync(exportedBuffer)
+    const zip = await JSZip.loadAsync(await readFile((await (await downloadPromise).path())!))
     expect(await zip.file('word/document.xml')!.async('text')).not.toContain('<w:tbl>')
   })
 
@@ -1429,12 +1373,12 @@ test.describe('Tabelle löschen — repräsentative Fixture-Teilmenge über echt
     const editor = page.locator('.ProseMirror')
     await expect(editor.locator('table').first()).toBeVisible()
     await editor.locator('table').first().locator('td').first().click()
-    await page.getByTitle('Tabelle löschen').click()
+    await expect(del(page)).toBeEnabled()
+    await del(page).click()
     const downloadPromise = page.waitForEvent('download')
     await page.getByRole('button', { name: 'Exportieren' }).click()
-    const exportedBuffer = await readFile((await (await downloadPromise).path())!)
-    // A corrupt zip throws on load -- this alone is the primary assertion for this fixture.
-    const zip = await JSZip.loadAsync(exportedBuffer)
+    // A corrupt zip throws on load -- surviving load + no <w:tbl> is the assertion for this fixture.
+    const zip = await JSZip.loadAsync(await readFile((await (await downloadPromise).path())!))
     expect(await zip.file('word/document.xml')!.async('text')).not.toContain('<w:tbl>')
   })
 })
@@ -1444,82 +1388,85 @@ test.describe('Tabelle löschen — repräsentative Fixture-Teilmenge über echt
 
 | Test | Erwartung heute | Grund |
 |---|---|---|
-| Alle Tests, die `page.getByTitle('Tabelle löschen')` referenzieren | **RED** (Timeout: Element existiert nicht) | Abschnitt 1, Punkt 2 |
-| „documented pre-existing boundary-Backspace path" | **Einziger GREEN-fähiger E2E-Test bereits heute** | Abschnitt 1, Punkt 5 — reiner Bibliothekscode, kein neuer Button/Command nötig |
-| Testfall 3 (Entf/Backspace leert nur Zellinhalt) | **GREEN bereits heute** | Abschnitt 1, Zusatzverifikation — `tableEditing()`/`isolating: true` sind bereits aktiv |
-| Alle übrigen Tests in Abschnitt 5.2 | **RED** | Button/Keymap-Eintrag fehlen vollständig |
+| Alle Tests, die `getByTitle('Tabelle löschen')` referenzieren | **RED** (Timeout: Element existiert nicht) | Abschnitt 1 Punkt 2 |
+| „boundary-Backspace" (Grenzfall 14) | **Einziger heute GREEN-fähiger** E2E-Test | Abschnitt 1 Punkt 5 — reiner Bibliothekscode, kein neuer Button/Command nötig |
+| Testfall 3 (Entf/Backspace leert nur Zellinhalt) | **GREEN bereits heute** | `tableEditing()`/`isolating: true` bereits aktiv |
+| Alle übrigen Tests in 5.2 | **RED** | Button/Keymap-Eintrag fehlen vollständig |
 
-Nach Umsetzung von `tabelle-loeschen-code.md` müssen **alle** Tests in Abschnitt 5.2 ohne Änderung
-grün werden.
+Nach Umsetzung von `tabelle-loeschen-code.md` müssen **alle** Tests in 5.2 ohne Änderung grün werden,
+auf **allen drei** Playwright-Projekten.
 
 ---
 
 ## 6. Fixture-Existenzprüfung (vor Testerstellung durchgeführt)
 
-Alle in `tabelle-loeschen-req.md` Abschnitt 4.2 gelisteten Dateien wurden per Bash-Schleife
-(`[ -f "tests/fixtures/external/{odt,docx}/$f" ]`) einzeln geprüft — **alle 34 ODT- und 6
-DOCX-Dateien vorhanden**, keine Datei fehlt:
+Alle in `tabelle-loeschen-req.md` Abschnitt 4.2 gelisteten Dateien wurden per `ls`/Bash-Schleife
+gegen `tests/fixtures/external/{odt,docx}` einzeln geprüft — **alle 34 ODT- und 6 DOCX-Dateien
+vorhanden**, keine fehlt:
 
-ODT: `BigTable.odt`, `crazyTable.odt`, `subTables.odt`, `subTables2.odt`,
-`subTables3-nested.odt`, `subTables3-onlyOneColumn.odt`, `subTables4.odt`,
-`table-within-textBox-within-frame.odt`, `table-column-delete-with-merge.odt`,
-`table-column-delete-with-merge-2-times.odt`, `tableRowDeletionTest.odt`, `tableOps.odt`,
-`tableCoveredContent.odt`, `OOStyledTable.odt`, `coloredTable_MSO15.odt`,
-`TableFunkyBackground.odt`, `feature_attributes_tables.odt`,
+ODT: `BigTable.odt`, `crazyTable.odt`, `subTables.odt`, `subTables2.odt`, `subTables3-nested.odt`,
+`subTables3-onlyOneColumn.odt`, `subTables4.odt`, `table-within-textBox-within-frame.odt`,
+`table-column-delete-with-merge.odt`, `table-column-delete-with-merge-2-times.odt`,
+`tableRowDeletionTest.odt`, `tableOps.odt`, `tableCoveredContent.odt`, `OOStyledTable.odt`,
+`coloredTable_MSO15.odt`, `TableFunkyBackground.odt`, `feature_attributes_tables.odt`,
 `feature_attributes_tables-backgroundTableOnly.odt`,
 `feature_attributes_tables-backgroundTableOnly-AO341.odt`,
 `feature_attributes_tables_FunnyTable_With_xmlid.odt`, `feature_attributes_tables_SMALL.odt`,
 `table_1x3_paragraph_background-MSO2013-LO3_6.odt`, `TableWidth.odt`, `tableNotFullWidth.odt`,
 `simple-table.odt`, `simpleTable.odt`, `simple_table.odt`, `simple-table-with-lists.odt`,
-`listsInTable.odt`, `table.odt`, `table_simple.odt`, `TestTextTable.odt`,
-`doc_heading_table.odt`, `empty4table.odt`.
+`listsInTable.odt`, `table.odt`, `table_simple.odt`, `TestTextTable.odt`, `doc_heading_table.odt`,
+`empty4table.odt`.
 
 DOCX: `TestTableCellAlign.docx`, `TestTableColumns.docx`, `deep-table-cell.docx`,
 `table-alignment.docx`, `table-indent.docx`, `table_footnotes.docx`.
 
 ---
 
-## 7. Bekannte Blocker / bewusst nicht in diesem Feature zu beheben
+## 7. Bekannte Einschränkungen / bewusst nicht in diesem Feature zu beheben
 
-Diese Punkte werden dokumentiert, damit ein RED-Testergebnis korrekt zugeordnet werden kann, sind
-aber **nicht** Teil des Umsetzungsauftrags für „Tabelle löschen" selbst (übereinstimmend mit
-`tabelle-loeschen-code.md` Abschnitt 6.2/9/11):
+Dokumentiert, damit ein RED/übersprungenes Ergebnis korrekt zugeordnet wird — **nicht** Teil des
+Umsetzungsauftrags für „Tabelle löschen":
 
-1. **ODT `covered-table-cell` fehlt** (`odt/writer.ts:88`, kein Emit; `odt/reader.ts:189-203`,
-   kein Read) — betrifft nur Rundreise-Tests, bei denen eine **überlebende** Tabelle selbst einen
-   mehrzeiligen `rowspan` hat. In diesem Plan als `test.todo` (Abschnitt 4.4) markiert, in den
-   Fixture-Tests (Abschnitt 4.6) durch gezielten Ausschluss der XML-Validitätsprüfung für die
-   betroffenen vier Fixtures dokumentiert, nicht stillschweigend übersprungen.
-2. **Keine Fußnoten-Unterstützung im DOCX-Pfad** — `table_footnotes.docx`-Tests prüfen
-   ausschließlich Absturzfreiheit/Zip-Validität, keine Fußnotenverwaltung.
-3. **`tests/e2e/large-document-import.spec.ts` existiert nicht**, obwohl beide
-   `external-fixtures.test.ts`-Dateien darauf verweisen — unabhängiger, bereits vor diesem Feature
-   bestehender Dokumentationsfehler; dieser Plan verlässt sich an keiner Stelle auf diese Datei.
-4. **Integrationsrisiko zwischen den drei parallelen Tabellen-Feature-Plänen**
-   (`tabelle-loeschen`, `zeile-loeschen`, `spalte-loeschen`) bezüglich Toolbar-Architektur
-   (`Toolbar.tsx` vs. `TableToolbar.tsx`) und Modul-Ort (`commands.ts` vs. `tableCommands.ts`) —
-   dokumentiert in `tabelle-loeschen-code.md` Abschnitt 9. Dieser Testplan verankert seine
-   Locators bewusst nur an `aria-label`/`title="Tabelle löschen"`, nicht an einer Annahme über
-   Dateistruktur, und bleibt damit unabhängig davon funktionsfähig, wie die Integration diese
-   Frage löst.
+1. **Keine Fußnoten-Unterstützung im DOCX-Pfad** — `table_footnotes.docx`-Tests prüfen ausschließlich
+   Absturzfreiheit/Zip-Validität, keine Fußnotenverwaltung (`tabelle-loeschen-code.md` Abschnitt 5).
+2. **Integrationsrisiko zwischen den drei parallelen Tabellen-Feature-Plänen** (`tabelle-loeschen`,
+   `zeile-loeschen`, `spalte-loeschen`) bezüglich Toolbar-Architektur (`Toolbar.tsx` vs.
+   `TableToolbar.tsx`) und Modul-Ort (`commands.ts` vs. `tableCommands.ts`) — dokumentiert in
+   `tabelle-loeschen-code.md` Abschnitt 9. Dieser Testplan verankert seine Locators bewusst nur an
+   `aria-label`/`title="Tabelle löschen"`, nicht an einer Annahme über die Dateistruktur, und bleibt
+   damit unabhängig davon funktionsfähig, wie die Integration diese Frage löst.
+3. **Track-Changes** (req 2.10) — Phase 3, nicht im aktuellen Scope; hier weder getestet noch
+   vorausgesetzt.
+
+> **Gestrichen ggü. der 1. Fassung:** Die früher hier gelisteten Blocker „ODT `covered-table-cell`
+> fehlt" und „`tests/e2e/large-document-import.spec.ts` existiert nicht" sind **beide widerlegt**
+> (Abschnitt 1 Punkte 7/8/12) und daher entfernt.
 
 ---
 
-## 8. Abnahmekriterien-Abgleich (Definition of Done, `tabelle-loeschen-req.md` Abschnitt 7)
+## 8. Abnahmekriterien-Abgleich (Definition of Done, `tabelle-loeschen-req.md` Abschnitt 9)
 
 | DoD-Punkt | Abgedeckt durch |
 |---|---|
-| Jeder Punkt aus Abschnitt 2 über echte Bedienung im Browser nachgewiesen | Abschnitt 5.2 (E2E), ergänzt um Unit-/Integrationstests (Abschnitt 4) für Rundreise-Strukturprüfungen |
-| Jeder Grenzfall aus Abschnitt 3 hat einen dauerhaften Test | Traceability-Matrix Abschnitt 3.2 |
-| Rundreise für beide Formate, alle gelisteten Fixture-Dateien | Abschnitt 4.6 (alle 40 Dateien einzeln), Abschnitt 5.2 (repräsentative Teilmenge über echten Upload/Download) |
-| Jeder Verdachtspunkt aus Abschnitt 5 der Anforderung eindeutig aufgelöst | Abschnitt 1 dieses Plans (Code-Audit-Tabelle) |
-| Kein stiller Fehlschlag | `canDeleteTable`/`disabled`-Button-Tests (Abschnitt 4.2, 5.2 Testfall 1/Grenzfall 13) |
-| Backlog-Statuswechsel erst nach Erfüllung aller obigen Punkte | Nicht Teil dieses QA-Plans — obliegt dem Backlog-Pflegeprozess nach grünen Tests |
+| 1 Echter, klickbarer Toolbar-Button entfernt Tabelle inkl. Inhalt | 5.2 „Grundverhalten" Testfall 1/2 |
+| 2 NodeSelection-auf-Tabelle-Pflichtfall (kein stiller No-Op) | 4.2 (`canDeleteTable`/`deleteTable`), 5.2 „boundary-Backspace"/„Mod-Alt-Backspace" |
+| 3 Abgrenzung „Struktur löschen" vs. „nur Zellinhalt leeren" | 5.2 Testfall 3 (Regression, GREEN bereits heute) |
+| 4 Sonderfall „einzige/letzte Tabelle" → Ersatz-Absatz | 4.2 (Grenzfall 1), 5.2 „Grenzfall 1" |
+| 5 Undo/Redo strukturell exakt, mehrere Zyklen | 4.2 (Undo/Redo), 5.2 „Undo/Redo 3 Zyklen" |
+| 6 Verschachtelte Tabellen, beide Richtungen | 4.2, 5.2 „verschachtelt" |
+| 7 Jeder Grenzfall aus Abschnitt 3 hat einen Test | Traceability-Matrix 3.2 |
+| 8 Selection-Sync-Regressionstest im Tabellenkontext | 5.2 „Selection-Sync" (Pflicht) |
+| 9 Rundreise beide Formate, alle Fixtures, unabhängiger Parser | 4.3/4.4/4.6 (roher `document.xml`/`content.xml` + alle 40 Fixtures) |
+| 10 Kernverhalten auf allen drei Playwright-Projekten | 5.2 (ohne Projekt-Einschränkung) |
+| 11 Jeder Verdachtspunkt aus req Abschnitt 5 eindeutig aufgelöst | Abschnitt 1 (Code-Audit-Tabelle) |
+| 12 Kein stiller Fehlschlag | 4.2 (`canDeleteTable`/`disabled`), 5.2 Testfall 1/Grenzfall 13 |
+| 13 Backlog-Statuswechsel erst nach Erfüllung aller Punkte | Nicht Teil dieses QA-Plans — Backlog-Pflegeprozess nach grünen Tests |
 
-**Zusammenfassender Hinweis an PO/Lead:** Solange `tabelle-loeschen-code.md` nicht umgesetzt ist,
-ist der korrekte, erwartete Zustand dieses gesamten Testplans „fast vollständig RED" — mit den
-beiden in Abschnitt 1/4.7/5.3 explizit benannten Ausnahmen (bereits aktives
-Boundary-Backspace-Verhalten, bereits aktives Entf/Backspace-auf-Zellinhalt-Verhalten). Ein
-QA-Lauf vor Fertigstellung des Features darf **nicht** als „Feature fehlerhaft" fehlinterpretiert
-werden — er bestätigt exakt das, was `tabelle-loeschen-req.md` Abschnitt 5 bereits selbst
-feststellt: das Feature ist zu 100 % ungebaut, nicht nur ungetestet.
+**Zusammenfassender Hinweis an PO/Lead:** Solange `tabelle-loeschen-code.md` nicht umgesetzt ist, ist
+der korrekte, erwartete Zustand dieses gesamten Testplans „fast vollständig RED" — mit den beiden
+explizit benannten Ausnahmen (bereits aktives Boundary-Backspace-Verhalten, bereits aktives
+Entf/Backspace-auf-Zellinhalt-Verhalten). Ein QA-Lauf vor Fertigstellung darf **nicht** als „Feature
+fehlerhaft" fehlinterpretiert werden — er bestätigt exakt, was `tabelle-loeschen-req.md` Abschnitt 5
+feststellt: das Feature ist zu 100 % ungebaut, nicht nur ungetestet. **Kein** verbleibender
+`test.todo` und **kein** offener ODT-Merge-Blocker (im Unterschied zur ersten, gegen veralteten Code
+geschriebenen Fassung dieses Plans).

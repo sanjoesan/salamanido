@@ -2,10 +2,28 @@
 
 Bezug: `E:\docs\specs\seitenlayout-ansicht-req.md` (Anforderung), `E:\docs\FEATURE-SPEC-DOCX-ODT.md`
 (Rahmenbedingungen, Abschnitte 2/8/9/15/18/19/20), `E:\docs\specs\FEATURE-BACKLOG.md` Abschnitt 8.1.
-Code-Stand geprüft am 2026-07-04 in `E:\docs` (kein Git-Repo; Datei-Inhalte direkt gelesen, alle
-Zeilenangaben unten gegen den tatsächlichen Dateiinhalt verifiziert, nicht aus der Anforderungsdatei
-übernommen — sie stimmen mit den dortigen Zeilenangaben überein, was bestätigt, dass beide Dateien
-gegen denselben Code-Stand geschrieben wurden).
+Code-Stand **re-verifiziert am 2026-07-05** in `E:\docs` (Git-Repo, Branch `main`; Datei-Inhalte direkt
+gelesen). Zeilenangaben sind **indikativ** — load-bearing ist jeweils der zitierte, exakte Code-String,
+gegen den ein Entwickler die Stelle re-verankern muss, nicht die Zeilennummer. Insbesondere
+`WordEditor.tsx` ist seit einem früheren Entwurf durch das „Ausschneiden"-Feature
+(`cutError`/`setCutError`, `useAutoDismiss`) um ca. 8 Zeilen auf **185 Zeilen** gewachsen; alle
+`WordEditor.tsx`-Referenzen unten wurden bei dieser Re-Verifikation auf diesen aktuellen Stand
+aktualisiert (frühere Fassungen dieser code.md nannten pre-growth-Zeilen wie 65/95/119–130/122/160–176,
+die nicht mehr stimmen).
+
+**WICHTIG — Korrektur eines früheren Entwurfs dieser Datei (analog zur Selbstkorrektur in der
+Anforderungsdatei Befund 4):** Ein früherer Entwurf dieser code.md behauptete an mehreren Stellen
+(alt: Abschnitt 0.1 Punkt 4, 0.3, 3.6, 3.7, 4.8), (a) der DOCX-Writer schreibe **kein**
+`w:pgSz`/`w:pgMar` und eine exportierte Datei falle in Word auf den Locale-Default zurück, (b) der
+ODT-Writer setze ein **hartkodiertes String-Literal** `<style:page-layout>`, und (c) die Datei
+`tests/e2e/large-document-import.spec.ts` **existiere nicht**. **Alle drei Behauptungen sind gegen den
+aktuellen Code überholt und wurden hier korrigiert:** `src/formats/docx/pageSetup.ts` existiert und
+liefert `defaultPageSetupXml()`; `src/formats/docx/writer.ts` Zeile 275 hängt es an
+(`sectPrExtra += defaultPageSetupXml()`); `src/formats/odt/writer.ts` Zeile 222 leitet die Geometrie
+über `mmToCm()` aus `pageGeometry.ts` **ab** (kein Literal); und
+`tests/e2e/large-document-import.spec.ts` existiert und misst DOCX- **und** ODT-Import-Performance.
+Diese Korrektur ist der wichtigste Einzelbefund der Re-Verifikation und unterstreicht, warum jeder Plan
+gegen den **aktuellen** Code laufen muss.
 
 Rolle dieses Dokuments: bestätigt den Codebefund aus `seitenlayout-ansicht-req.md` Abschnitt 0 mit
 exakten Zeilenreferenzen und ergänzt eigene Zusatzbefunde (Abschnitt 0), trifft die
@@ -27,36 +45,66 @@ Gegen den tatsächlichen Dateiinhalt geprüft — alle 14 Befunde aus der Anford
 
 1. Kein Umschalter zwischen Ansichtsmodi. `Toolbar.tsx` (248 Zeilen) hat keinen View-Umschalter;
    `WordEditor.tsx` rendert exakt einen Modus.
-2. `pageLayout.ts` (31 Zeilen): `PAGE_WIDTH_PX = 794` (Zeile 6), `PAGE_HEIGHT_PX = 1123` (Zeile 7),
-   `PAGE_MARGIN_PX = 94` (Zeile 8), `PAGE_SEPARATOR_PX = 32` (Zeile 10), `PAGE_GAP_PX` (Zeile 15),
-   `pageBackgroundStyle()` (Zeilen 22–30) — periodische CSS-`linear-gradient`-Bänderung mit fester
-   Pixel-Periode. `pagination.ts` (116 Zeilen): `computePageBreakIndices` (12–25),
+2. `pageLayout.ts` (32 Zeilen): `PAGE_WIDTH_PX = 794` (Zeile 7), `PAGE_HEIGHT_PX = 1123` (Zeile 8),
+   `PAGE_MARGIN_PX = 94` (Zeile 9), `PAGE_SEPARATOR_PX = 32` (Zeile 11), `PAGE_GAP_PX` (Zeile 16),
+   `pageBackgroundStyle()` (Zeilen 23–31) — periodische CSS-`linear-gradient`-Bänderung mit fester
+   Pixel-Periode. `pagination.ts` (115 Zeilen): `computePageBreakIndices` (12–25),
    `measureAndBuildDecorations` (33–63) misst reale DOM-Höhen unabhängig davon.
-3. `WordEditor.tsx` Zeilen 119–130: **ein** `containerRef`-Div in **einem** `shadow-lg`-Wrapper
-   (Zeile 126) — kein Schatten pro simulierter Seite.
-4. `docx/writer.ts`: `buildDocumentXml` (Zeilen 177–182) schreibt `sectPrExtra` (aufgebaut ab Zeile
-   231) ausschließlich mit `headerReference`/`footerReference` — kein `w:pgSz`/`w:pgMar`.
-   `docx/reader.ts` (391 Zeilen, vollständig gelesen): kein `pgSz`/`pgMar`-Handling. `odt/writer.ts`
-   Zeile 145: hartkodiertes `<style:page-layout>` mit `fo:margin="2.5cm" fo:page-width="21cm"
-   fo:page-height="29.7cm"`. `odt/reader.ts` Zeile 257 liest `style:master-page` nur für
-   `header`/`footer` (Zeilen 259–269), nie `fo:page-width`/`fo:page-height`/`fo:margin*`.
-5. `WordEditor.tsx` rendert ausschließlich `doc.content.body` (Zeile 65); `header`/`footer` werden
-   nirgends dargestellt, bleiben aber beim Speichern erhalten (Zeile 95:
-   `{ ...doc.content, body: newState.doc.toJSON() }`).
+3. `WordEditor.tsx` Zeilen 168–184 (Ist-Stand): **ein** `containerRef`-Div (Zeile 180) in **einem**
+   `shadow-lg`-Wrapper (Zeile 178) — kein Schatten pro simulierter Seite.
+4. **(KORRIGIERT gegenüber früherem Entwurf — deckt sich jetzt mit Anforderungsdatei Befund 4.)**
+   Seitengeometrie wird beim Export **aktiv geschrieben**, aber beim Import **nie gelesen**:
+   - `src/formats/docx/pageSetup.ts` (14 Zeilen, neu): `defaultPageSetupXml()` erzeugt
+     `<w:pgSz w:w="11906" w:h="16838"/>` und
+     `<w:pgMar w:top="1417" w:right="1417" w:bottom="1417" w:left="1417" w:header="708" w:footer="708" w:gutter="0"/>`
+     — die Werte kommen über `mmToTwips()` aus **denselben** `pageGeometry.ts`-Konstanten wie die
+     Bildschirmsimulation (11906/16838 Twips = 210/297 mm = A4; 1417 Twips = 25 mm).
+   - `docx/writer.ts` Zeile 275: `sectPrExtra += defaultPageSetupXml()`; `buildDocumentXml`
+     (Zeilen 207–211) schreibt `<w:body>${bodyXml}<w:sectPr>${sectPrExtra}</w:sectPr></w:body>`. Der
+     DOCX-Export transportiert also **aktiv** A4/25 mm — **nicht** mehr „kein pgSz/pgMar", wie ein
+     früherer Entwurf fälschlich behauptete.
+   - `odt/writer.ts` Zeile 222: `<style:page-layout style:name="PL1"><style:page-layout-properties
+     fo:margin="${mmToCm(PAGE_MARGIN_MM)}" fo:page-width="${mmToCm(PAGE_WIDTH_MM)}"
+     fo:page-height="${mmToCm(PAGE_HEIGHT_MM)}"/></style:page-layout>` (Ergebnis:
+     `fo:margin="2.5cm" fo:page-width="21cm" fo:page-height="29.7cm"`) — über `mmToCm()` (Zeile 20)
+     aus `pageGeometry.ts` **abgeleitet**, **kein** Literal-String. `<style:master-page
+     style:name="Standard" style:page-layout-name="PL1">` (Zeile 226) referenziert diese Geometrie.
+   - **Die weiterhin gültige Lücke ist die Lese-Seite:** `docx/reader.ts` Zeile 507–512 liest `sectPr`
+     **ausschließlich** für `headerReference`/`footerReference`, **kein** `w:pgSz`/`w:pgMar` (per Grep
+     über die gesamte Datei bestätigt: null Treffer). `odt/reader.ts` Zeile 375–387 liest
+     `style:master-page` **nur** für `style:header`/`style:footer`, **nicht**
+     `fo:page-width`/`fo:page-height`/`fo:margin*`.
+   - **Konsequenz:** Bildschirm, DOCX-Export und ODT-Export sind **konsistent** auf A4/25 mm (alle drei
+     aus `pageGeometry.ts`), aber ein importiertes Dokument mit **abweichendem** Ursprungsformat
+     (US Letter/Legal, individuelle Ränder) wird als A4/25 mm angezeigt **und** beim Export **aktiv**
+     nach A4/25 mm überschrieben — Seitenformat-Informationsverlust (kein Textverlust), zu
+     dokumentieren, bis `seitenraender`/`seitenausrichtung`/`papierformat` gebaut sind.
+5. `WordEditor.tsx` seedet den State ausschließlich aus `doc.content.body` (Zeile 79) und rendert nur
+   diesen; `header`/`footer` (im Datenmodell vorhanden, `documentModel.ts` `WordDocumentContent.header`/
+   `.footer`) werden nirgends dargestellt, bleiben aber beim Speichern erhalten (Zeile 129:
+   `onChangeRef.current({ ...doc.content, body: newState.doc.toJSON() })`).
 6. Zwei unabhängige Berechnungen: `pageBackgroundStyle()` (feste Periode
    `PAGE_CONTENT_HEIGHT_PX + PAGE_GAP_PX`) vs. `measureAndBuildDecorations` (reale gemessene Höhen).
    Bestätigt als struktureller Drift — siehe Abschnitt 1.1 für die Root-Cause-Analyse mit konkreten
    Zahlenbeispielen.
 7. Kein `window`-`resize`-Listener in `createPaginationPlugin()` (Zeilen 88–104 des Ist-Standes).
 8. Kein `onload`-Reflow für Bilder.
-9. `PAGE_WIDTH_PX` fest, `WordEditor.tsx` Zeile 122 setzt `width: PAGE_WIDTH_PX` inline.
-10. `pageBackgroundStyle()` verwendet Literal `white` (Zeile 25), Scroll-Container
-    `bg-neutral-200 dark:bg-neutral-950` (Zeile 119) — kein In-App-Light/Dark-Umschalter.
+9. `PAGE_WIDTH_PX` fest, `WordEditor.tsx` Zeile 174 setzt `width: PAGE_WIDTH_PX` inline (im Wrapper-
+   `style`-Objekt Zeilen 173–177).
+10. `pageBackgroundStyle()` verwendet Literal `white` (`pageLayout.ts` Zeile 26), Scroll-Container
+    `bg-neutral-200 dark:bg-neutral-950` (`WordEditor.tsx` Zeile 171) — kein In-App-Light/Dark-Umschalter.
 11. `Toolbar.tsx` bestätigt: kein Zoom, kein Lineal, keine Seitenzahl-Anzeige, keine
     Mehrfach-Seiten-Nebeneinander-Ansicht, kein Formatierungszeichen-Toggle, kein Navigationsbereich.
 12. `pagination.test.ts` (51 Zeilen) deckt ausschließlich `computePageBreakIndices`/`computePageCount`
-    als reine Arithmetik ab. `tests/e2e/` enthält `lifecycle.spec.ts`, `odt.spec.ts`, `docx.spec.ts`,
-    `selection-regression.spec.ts` — keine Datei mit Bezug zu Seitenlayout/Paginierung.
+    als reine Arithmetik ab. `tests/e2e/` enthält aktuell **17** `*.spec.ts`-Dateien (verifiziert per
+    Verzeichnislisting 2026-07-05: `clipboard-roundtrip`, `clipboard`, `complex-import-fidelity`, `cut`,
+    `docx`, `export-error-handling`, `file-open-edge-cases`, `large-document-export`,
+    `large-document-import`, `lifecycle`, `network-isolation`, `new-document-qa`, `new-document`, `odt`,
+    `roundtrip-fidelity`, `save-export-lifecycle`, `selection-regression`) plus den gemeinsamen
+    Test-Harness `fixtures.ts` (mit `docxCard`/`odtCard`) und das `fixtures/`-Verzeichnis — **keine** davon
+    hat aktuell Bezug zu Seitenlayout/Paginierung. Neue E2E-Tests dieses Plans (Abschnitt 4.2–4.7/4.9) sind über
+    den bestehenden `./fixtures`-Harness (`test`, `docxCard`, `odtCard`) zu schreiben, nicht mit
+    hand-gerolltem `page.goto('/')`.
 13. Kein `@media print`, kein `window.print()` im gesamten Quellcode.
 14. `pagination.ts` Zeile 93: `view.dispatch(view.state.tr.setMeta(paginationKey, next))` — reine
     Meta-Transaktion, `tr.docChanged` bleibt `false`, `WordEditor.tsx` Zeile 94 prüft `tr.docChanged`
@@ -81,16 +129,18 @@ konkreter Beleg für Befund 2/3 aus der Anforderungsdatei (Ein-Schatten-für-den
 Streifen-statt-Blätter-Risiko) — nicht nur besteht das Risiko einer Zwei-Berechnungen-Diskrepanz, das
 zweite System (der Spacer) trägt aktuell **überhaupt nichts** zur sichtbaren Seitenoptik bei.
 
-### 0.3 Zusatzbefund B: ein bereits referenzierter, aber nie angelegter Performance-Test
+### 0.3 Zusatzbefund B (KORRIGIERT): der Performance-Test existiert bereits — offen ist nur der Paginierungs-Bezug
 
-`src/formats/docx/__tests__/external-fixtures.test.ts` Zeile 39 verweist auf
-`tests/e2e/large-document-import.spec.ts` als Ort für einen Performance-Test mit `bug65649.docx`
-(12 MB, ~16 000 Absätze, bereits im Repo unter `tests/fixtures/external/docx/`) — diese Datei
-**existiert nicht** (bestätigt: `tests/e2e/` enthält nur die vier in 0.1 Punkt 12 genannten Dateien).
-Anforderungsdatei Abschnitt 3.7 verlangt genau einen solchen Test („Performance bei langen
-Dokumenten … unter realistischer Dokumentgröße, nicht nur synthetischer Unit-Test-Last"). Dieser Plan
-legt diese Datei endlich an (Abschnitt 4.8) — schließt eine bereits im Code selbst angekündigte,
-bisher offene Lücke.
+Ein früherer Entwurf behauptete, `tests/e2e/large-document-import.spec.ts` **existiere nicht**. **Das
+ist überholt:** die Datei existiert und misst bereits die Import-Performance zweier realer
+Groß-Fixtures — DOCX (`bug65649.docx`, ~12 MB, ~16 000 Absätze) **und** ODT (`brokenList.odt`, 2,4 MB,
+~20 000 automatische Styles) — jeweils mit „Tab nicht eingefroren"-Beweis (`page.evaluate`) und einer
+harten 15-s-Obergrenze. Anforderungsdatei Abschnitt 3.7 („Performance bei langen Dokumenten … unter
+realistischer Dokumentgröße") ist damit auf der **Import**-Ebene bereits abgedeckt. **Offen bleibt nur
+der Paginierungs-spezifische Aspekt:** dass nach dem Import eines mehrseitigen Groß-Dokuments die
+`rAF`-Neumessung/`computePageBreakIndices`-Neuberechnung nicht zu spürbarem Tipp-Lag führt und
+`data-page-count` einen plausiblen Wert > 1 trägt. Dieser Plan **erweitert** die bestehende Datei um
+genau diese Zusatz-Assertion (Abschnitt 4.8) statt eine neue anzulegen.
 
 ### 0.4 Zusatzbefund C: `paginationKey` ist modul-privat — blockiert die von Abschnitt 5.1/6 der
 Anforderungsdatei verlangte Rundreise-Regressionstest
@@ -117,6 +167,47 @@ manueller Umbrüche). Damit beide Pläne unabhängig von der Umsetzungsreihenfol
 dieser Plan bewusst so entworfen, dass er **orthogonal** zum anderen bleibt (siehe Abschnitt 1.4) —
 wer auch immer zuletzt landet, muss nur die in 1.4 benannten drei Berührungspunkte manuell mergen,
 nicht die Architektur neu entwerfen.
+
+### 0.6 Zusatzbefund E (KRITISCH, neu in dieser Re-Verifikation): die Höhenmessung misst `view.dom.children` **inklusive der bereits gerenderten Spacer-Widgets**
+
+`pagination.ts` Zeile 35 (Ist-Stand): `const children = Array.from(dom.children)` mit `dom = view.dom`
+(das contenteditable `.ProseMirror`-Content-Element). ProseMirror rendert Block-Widget-Decorations —
+und genau das sind die `page-break-spacer`-Divs (`Decoration.widget(offset, …, { side: -1 })` an einer
+Top-Level-Position, Zeilen 46–57 Ist-Stand) — als **direkte Geschwister** der Block-DOM-Knoten, also als
+eigene Einträge in `view.dom.children`.
+
+- Beim **ersten** Messlauf (Init-`rAF`, `state.init` liefert `DecorationSet.empty`) ist das unkritisch:
+  `children` enthält nur echte Blöcke.
+- Sobald aber der erste Durchlauf Spacer eingefügt hat, enthält **jeder folgende** `update`-getriggerte
+  Messlauf die Spacer als **zusätzliche** `children`-Einträge.
+
+Daraus folgen zwei Fehler ab dem zweiten Durchlauf:
+1. **Index-Versatz.** `computePageBreakIndices(heights, …)` liefert Indizes in die (jetzt
+   spacer-**enthaltende**) `children`-Reihenfolge, während die Decoration-Platzierung über
+   `view.state.doc.forEach((_node, offset, index) => …)` (Zeile 43 Ist-Stand) gegen den
+   **Dokument-Knoten**-Index `index` matcht. Widgets sind **keine** Dokument-Knoten und zählen dort nicht
+   mit — die beiden Indexräume laufen also auseinander, sobald ein Spacer im DOM steht.
+2. **Verfälschte Höhensummen.** Die ~`PAGE_GAP_PX` (220px, plus künftig der Filler aus 1.1) hohen
+   Spacer-Einträge fließen als Pseudo-„Blöcke" in `heights` ein und verschieben `computePageBreakIndices`/
+   `computePageCount` **und** das in Abschnitt 3.2 neu eingeführte `computeFillerBeforeBreaks`.
+
+Das ist eine **plausible, bislang weder in der Anforderungsdatei (Befund 6 nennt nur die Unabhängigkeit
+Hintergrundraster vs. Spacer) noch in einem früheren Entwurf dieser code.md benannte Mit-Ursache** des
+beobachteten Drifts: nicht nur „zwei unabhängige Berechnungen", sondern eine echte **Fehlmessung** nach
+dem ersten Durchlauf. Dass das bestehende `pagination.test.ts` das nicht aufdeckt, ist erwartbar — es
+testet ausschließlich reine Arithmetik, **nie** das DOM-Zusammenspiel (genau die in Befund 12 beklagte
+Testlücke).
+
+**Status:** aus dem Code hergeleitet, **in-Browser noch zu bestätigen**. **Der Fix ist jedoch unabhängig
+vom Bestätigungsergebnis gefahrlos** und wird deshalb defensiv in Abschnitt 3.2 mitgebaut: vor dem Messen
+alle `.page-break-spacer` aus `children` herausfiltern. Führt ProseMirror die Spacer (wie erwartet) als
+`view.dom.children`, behebt der Filter den Index-Versatz **strukturell** — jeder Messlauf misst dann
+wieder nur echte Blöcke und ist **idempotent** zum ersten. Führt ProseMirror sie wider Erwarten nicht als
+direkte Kinder, ist der Filter ein folgenloser No-op. **Dieser Filter ist Voraussetzung dafür, dass der
+Filler-Fix aus Abschnitt 1.1 überhaupt gegen korrekte `heights` rechnet** — ohne ihn füllte
+`computeFillerBeforeBreaks` gegen verfälschte Höhen auf und würde den Drift eher verschlimmern als
+beheben. Verifikationshaken: neuer E2E-Assert, dass die Spacer-Anzahl nach mehreren `update`-Zyklen
+stabil bleibt (Abschnitt 4.2, Konsistenz `pageCount === spacerCount + 1` auch nach fortgesetztem Tippen).
 
 ---
 
@@ -156,6 +247,12 @@ weil der reale Inhalt jetzt selbst auf die exakt erwartete Höhe gebracht wird.
 ist `cumulative` beim Umbruch bereits `300` → `filler = max(0, 300-300) = 0` — **kein** zusätzlicher
 Filler, Verhalten bytegleich zum Ist-Zustand für diesen Fall. Nur wenn eine Seite **nicht** exakt
 gefüllt ist, wird jetzt korrekterweise aufgefüllt.
+
+**Harte Abhängigkeit von Zusatzbefund E (Abschnitt 0.6):** Dieser Filler-Fix rechnet nur dann korrekt,
+wenn `heights` **ausschließlich** echte Blockhöhen enthält. Solange die Messung `view.dom.children`
+inklusive der bereits gerenderten `.page-break-spacer`-Widgets liest, füllt `computeFillerBeforeBreaks`
+gegen verfälschte Höhen auf und verschlimmert den Drift. Der in Abschnitt 3.2c ergänzte Klassen-Filter ist
+deshalb **kein optionaler Zusatz, sondern Bestandteil** dieses Root-Cause-Fixes.
 
 ### 1.2 Periodisches CSS-Hintergrundraster ersetzen durch deterministische Pro-Seite-„Blatt"-Elemente
 
@@ -315,8 +412,9 @@ Abschnitt 1.4 dargelegt, unabhängig kombinierbar.
 
 ### 3.1 `src/formats/shared/editor/pageLayout.ts`
 
-Entfernen: `pageBackgroundStyle()` (Zeilen 22–30, Ist-Stand) — ersetzt durch die in Abschnitt 3.3
-beschriebenen deterministischen Pro-Seite-Helfer. Neuer Inhalt (Konstanten aus Zeilen 1–15 bleiben
+Entfernen: `pageBackgroundStyle()` (Zeilen 23–31, Ist-Stand) samt dem nun ungenutzten
+`import type { CSSProperties } from 'react'` (Zeile 1) — ersetzt durch die in Abschnitt 3.3
+beschriebenen deterministischen Pro-Seite-Helfer. Neuer Inhalt (Konstanten aus Zeilen 4–16 bleiben
 unverändert bestehen):
 
 ```ts
@@ -407,7 +505,16 @@ Zeilen 33–63 Ist-Stand):
 ```ts
 function buildPaginationState(view: EditorView): PaginationState {
   const dom = view.dom
-  const children = Array.from(dom.children) as HTMLElement[]
+  // Zusatzbefund E (Abschnitt 0.6): exclude already-rendered spacer widgets from the
+  // measurement. ProseMirror renders block widget decorations as direct children of view.dom,
+  // so on every recompute AFTER the first, `dom.children` would otherwise contain the
+  // `.page-break-spacer` divs and (a) inflate the height sums and (b) desync the DOM-child index
+  // used by computePageBreakIndices from the document-node index used for placement below.
+  // Filtering by the class makes each recompute measure only real blocks and idempotent to the
+  // first pass — and is a harmless no-op should PM ever not surface widgets as direct children.
+  const children = (Array.from(dom.children) as HTMLElement[]).filter(
+    (el) => !el.classList.contains('page-break-spacer'),
+  )
   const heights = children.map((el) => el.getBoundingClientRect().height)
   const breakIndices = computePageBreakIndices(heights, PAGE_CONTENT_HEIGHT_PX)
   const pageCount = computePageCount(heights, PAGE_CONTENT_HEIGHT_PX)
@@ -552,7 +659,7 @@ kein Blocker") praktisch kostenlos, da `pageCount` für die Blattpositionierung 
 
 ### 3.4 `src/formats/shared/editor/WordEditor.tsx`
 
-**Imports** (ersetzt Zeile 13 Ist-Stand):
+**Imports** (ersetzt Zeilen 14–15 Ist-Stand):
 
 ```ts
 import { createPaginationPlugin, paginationKey } from './pagination'
@@ -560,21 +667,28 @@ import { PAGE_WIDTH_PX, PAGE_MARGIN_PX, totalStackHeightPx } from './pageLayout'
 import { PageSheets } from './PageSheets'
 ```
 
-(`pageBackgroundStyle` entfällt, siehe 3.1.)
+(`pageBackgroundStyle` entfällt, siehe 3.1; `paginationKey` wird durch 3.2a exportierbar.)
 
 **Seitenzahl-Ableitung** — neue Zeile vor dem `return` (analog zum bestehenden Muster
-`viewRef.current && <Toolbar .../>`, Zeile 118 Ist-Stand):
+`viewRef.current && <Toolbar .../>`, Zeile 170 Ist-Stand):
 
 ```ts
 const pageCount = viewRef.current ? paginationKey.getState(viewRef.current.state)?.pageCount ?? 1 : 1
 ```
 
-**Render-Block** (ersetzt Zeilen 116–133 Ist-Stand):
+**Render-Block** (ersetzt Zeilen 168–184 Ist-Stand). **Wichtig:** der bestehende `Toolbar`-Aufruf
+übergibt inzwischen `cutError` **und** `setCutError` (Ist-Stand Zeile 170:
+`{viewRef.current && <Toolbar view={viewRef.current} cutError={cutError} setCutError={setCutError} />}`)
+— diese Props **dürfen nicht** verloren gehen (sie tragen die „Ausschneiden"-Fehleranzeige, siehe
+`specs/ausschneiden-code.md`). Der bestehende `cutError`-State (Zeile 71) und der `useAutoDismiss`-Aufruf
+(Zeile 74, Funktion Zeilen 57–63 Ist-Stand) bleiben unverändert:
 
 ```tsx
 return (
   <div className="flex flex-col h-full">
-    {viewRef.current && <Toolbar view={viewRef.current} />}
+    {viewRef.current && (
+      <Toolbar view={viewRef.current} cutError={cutError} setCutError={setCutError} />
+    )}
     {/* Single, hard-wired rendering mode, internally named "Seitenlayoutansicht" — no
         Weblayout/Entwurf/Gliederung/Lesemodus alternative exists yet (all "fehlt" in
         FEATURE-BACKLOG.md 8.1). `data-view-mode` gives tests and any future switcher UI a
@@ -590,9 +704,10 @@ return (
         <div style={{ position: 'relative', zIndex: 1, padding: `${PAGE_MARGIN_PX}px` }}>
           {/* header/footer intentionally not rendered here — no UI exists yet to create
               them (FEATURE-SPEC-DOCX-ODT.md Abschnitt 9 / specs/kopfzeile-bearbeiten-req.md);
-              content is preserved unedited on save (see dispatchTransaction below), but stays
-              invisible in this view until that feature lands. Known, documented gap — not a
-              silent omission (seitenlayout-ansicht-req.md Element 5). */}
+              content is preserved unedited on save (see dispatchTransaction, Zeile 129
+              Ist-Stand: `{ ...doc.content, body: newState.doc.toJSON() }`), but stays invisible
+              in this view until that feature lands. Known, documented gap — not a silent
+              omission (seitenlayout-ansicht-req.md Element 5). */}
           <div ref={containerRef} className="word-editor-surface outline-none" />
         </div>
       </div>
@@ -601,10 +716,14 @@ return (
 )
 ```
 
-Keine Änderung an `plugins: [...]` (Zeilen 69–86 Ist-Stand, `createPaginationPlugin()` bleibt
-eingehängt), an `dispatchTransaction` (Zeilen 91–98) oder an `reconcileSelectionOnClick`
-(Zeilen 42–53) — alle drei bleiben durch diesen Plan unberührt, da rein additiv auf der
-Darstellungsebene.
+Keine Änderung an `plugins: [...]` (Zeilen 83–114 Ist-Stand, `createPaginationPlugin()` bleibt
+eingehängt, Zeile 113), an `dispatchTransaction` (Zeilen 125–132, `if (tr.docChanged)`-Guard Zeile 128
+unverändert) oder an `reconcileSelectionOnClick` (Zeilen 43–50) — alle drei bleiben durch diesen Plan
+unberührt, da rein additiv auf der Darstellungsebene. **Hinweis:** `pageCount` wird bei jedem
+`forceRender` (bereits vorhanden, ausgelöst u. a. am Ende von `dispatchTransaction`, Zeile 131
+Ist-Stand) neu aus dem Plugin-State gelesen — es ist kein zusätzlicher Re-Render-Mechanismus nötig,
+weil jede den Umbruch verändernde Paginierungs-Transaktion ohnehin über `dispatchTransaction` läuft und
+dort `forceRender` auslöst.
 
 ### 3.5 `src/index.css`
 
@@ -612,48 +731,54 @@ Keine zwingende Änderung — die neue Optik entsteht vollständig über Tailwin
 `PageSheets.tsx` (`shadow-lg`, `bg-white`) und Inline-Styles. `.page-break-spacer` (Zeilen 69–71
 Ist-Stand) bleibt unverändert (Höhe weiterhin per Inline-Style gesetzt, jetzt inklusive Filler).
 
-### 3.6 `src/formats/docx/writer.ts` / `src/formats/docx/reader.ts`
+### 3.6 `src/formats/docx/writer.ts` / `src/formats/docx/reader.ts` / `src/formats/docx/pageSetup.ts`
 
-**Keine Verhaltensänderung** — nur Dokumentations-Kommentare (Anforderung 3.1, Abschnitt 1.5):
+**Keine Verhaltensänderung** — nur Dokumentations-Kommentare (Anforderung 3.1, Abschnitt 1.5). Die
+Kommentare müssen den **tatsächlichen** (korrigierten) Sachverhalt festhalten: Geometrie wird
+**geschrieben**, aber **nicht gelesen** — nicht den überholten „wird nie geschrieben"-Stand.
 
-`writer.ts`, direkt oberhalb von `buildDocumentXml` (Zeile 177 Ist-Stand):
+`writer.ts`, direkt oberhalb von `sectPrExtra += defaultPageSetupXml()` (Zeile 275 Ist-Stand):
 
 ```ts
-// NOTE: `sectPrExtra` (built below) never includes `<w:pgSz>`/`<w:pgMar>` — page size and
-// margins are not sourced from the editor's page-layout view (src/formats/shared/editor/
-// pageLayout.ts), which itself only ever assumes A4/25mm. A file exported from here falls
-// back to Word's own locale default page size when opened, not to A4. See
-// specs/seitenlayout-ansicht-req.md Befund 4 and specs/FEATURE-BACKLOG.md `papierformat`/
-// `seitenraender` (currently "fehlt").
+// NOTE: `<w:pgSz>`/`<w:pgMar>` are ACTIVELY written here from the fixed pageGeometry.ts
+// constants (A4/25mm) via defaultPageSetupXml() — screen simulation, DOCX and ODT export are
+// therefore consistent. But this geometry is fixed, not read from the document: docx/reader.ts
+// never parses an incoming w:pgSz/w:pgMar (see below), so a non-A4 source is normalized to
+// A4/25mm on both display and re-export. See specs/seitenlayout-ansicht-req.md Befund 4 /
+// specs/FEATURE-BACKLOG.md `papierformat`/`seitenraender` (currently "fehlt").
 ```
 
-`reader.ts`, direkt oberhalb der `sectPr`-Auswertung (Zeile 350 Ist-Stand):
+`pageSetup.ts` trägt bereits einen kurzen Kommentar; er ist um den Hinweis „fixe Annahme, nicht aus dem
+Dokument gelesen — Reader parst pgSz/pgMar nicht" zu ergänzen (analog zum obigen).
+
+`reader.ts`, direkt oberhalb der `sectPr`-Auswertung (Zeile 507 Ist-Stand):
 
 ```ts
 // NOTE: only headerReference/footerReference are read from sectPr here — w:pgSz/w:pgMar are
-// not parsed, so an imported document's actual page size/margins are silently discarded; the
-// page-layout view always renders A4/25mm regardless. See
-// specs/seitenlayout-ansicht-req.md Befund 4.
+// NOT parsed, so an imported document's actual page size/margins are silently discarded and
+// the export (docx/pageSetup.ts) re-writes the fixed A4/25mm geometry regardless. Page-format
+// information loss (not text loss). See specs/seitenlayout-ansicht-req.md Befund 4.
 ```
 
 ### 3.7 `src/formats/odt/writer.ts` / `src/formats/odt/reader.ts`
 
-`writer.ts`, direkt oberhalb der hartkodierten `style:page-layout` in `buildStylesXml` (Zeile 145
-Ist-Stand):
+`writer.ts`, direkt oberhalb der `style:page-layout` in `buildStylesXml` (Zeile 222 Ist-Stand):
 
 ```ts
-// NOTE: hardcoded for every document — not derived from any in-app page-format/margin
-// setting (none exists). See specs/seitenlayout-ansicht-req.md Befund 4 /
+// NOTE: fo:margin/fo:page-width/fo:page-height are DERIVED from pageGeometry.ts via mmToCm()
+// (not a hardcoded literal), giving A4/25mm consistent with the DOCX export and the screen
+// simulation. But this geometry is fixed, not read from the document: odt/reader.ts never
+// parses fo:page-*/fo:margin* (see below). See specs/seitenlayout-ansicht-req.md Befund 4 /
 // specs/FEATURE-BACKLOG.md `papierformat`/`seitenraender` (currently "fehlt").
 ```
 
-`reader.ts`, direkt oberhalb der `masterPage`-Auswertung (Zeile 257 Ist-Stand):
+`reader.ts`, direkt oberhalb der `masterPage`-Auswertung (Zeile 375 Ist-Stand):
 
 ```ts
-// NOTE: only style:header/style:footer are read from the referenced style:page-layout here —
-// fo:page-width/fo:page-height/fo:margin* are not parsed, so an imported document's actual
-// page format is silently discarded; the page-layout view always renders A4/25mm regardless.
-// See specs/seitenlayout-ansicht-req.md Befund 4.
+// NOTE: only style:header/style:footer are read from the referenced style:master-page here —
+// the associated style:page-layout's fo:page-width/fo:page-height/fo:margin* are NOT parsed,
+// so an imported document's actual page format is silently discarded and the export re-writes
+// the fixed A4/25mm geometry regardless. See specs/seitenlayout-ansicht-req.md Befund 4.
 ```
 
 ### 3.8 `src/formats/shared/editor/Toolbar.tsx`
@@ -680,6 +805,7 @@ Anforderung Abschnitt 6 Punkt 1 verlangt). Neu:
 ```ts
 import { computeFillerBeforeBreaks, paginationKey } from '../pagination'
 import { EditorState } from 'prosemirror-state'
+import { DecorationSet } from 'prosemirror-view'
 import { wordSchema } from '../../schema'
 
 describe('computeFillerBeforeBreaks', () => {
@@ -692,9 +818,9 @@ describe('computeFillerBeforeBreaks', () => {
   })
 
   it('computes independent fillers for multiple pages', () => {
-    // page 1: [200,200] -> break at 2 with cumulative 200 before it -> filler 100
-    // page 2 (reset): [200] then break at 3 with cumulative 200 -> filler 100
-    expect(computeFillerBeforeBreaks([200, 200, 200, 200], 300, [2])).toEqual([100])
+    // computePageBreakIndices([200,200,200,200], 300) === [1, 2, 3] (bestehender Test,
+    // pagination.test.ts Zeile 14) — je Seite trägt genau ein 200er-Block, es fehlen je 100px:
+    expect(computeFillerBeforeBreaks([200, 200, 200, 200], 300, [1, 2, 3])).toEqual([100, 100, 100])
   })
 
   it('returns zeros for a non-positive page height without crashing (Anforderung 3.10)', () => {
@@ -709,7 +835,10 @@ describe('computeFillerBeforeBreaks', () => {
 describe('pagination meta transactions never mark the document changed (Rundreise-Absicherung, Abschnitt 5.1 Punkt 3)', () => {
   it('tr.docChanged is false for a transaction that only sets pagination meta', () => {
     const state = EditorState.create({ schema: wordSchema })
-    const tr = state.tr.setMeta(paginationKey, { decorations: null, pageCount: 3 })
+    const tr = state.tr.setMeta(paginationKey, {
+      decorations: DecorationSet.empty,
+      pageCount: 3,
+    })
     expect(tr.docChanged).toBe(false)
   })
 })
@@ -749,6 +878,22 @@ test.describe('Seitenlayoutansicht — Struktur', () => {
     await expect(page.locator('[data-view-mode="page-layout"]')).toHaveAttribute(
       'data-page-count',
       String((await page.locator('.page-break-spacer').count()) + 1),
+    )
+
+    // Zusatzbefund E (0.6/3.2c): the recompute must be idempotent — a further edit must not
+    // let spacer widgets (which ProseMirror renders into view.dom.children) inflate the next
+    // measurement. Type more, then assert the invariant pageCount === spacerCount + 1 still holds
+    // and the count only grew monotonically (no oscillation / phantom spacers).
+    const spacersBefore = await page.locator('.page-break-spacer').count()
+    for (let i = 0; i < 20; i++) {
+      await page.keyboard.type(`Weiterer Absatz ${i}. `)
+      await page.keyboard.press('Enter')
+    }
+    const spacersAfter = await page.locator('.page-break-spacer').count()
+    expect(spacersAfter).toBeGreaterThanOrEqual(spacersBefore)
+    await expect(page.locator('[data-view-mode="page-layout"]')).toHaveAttribute(
+      'data-page-count',
+      String(spacersAfter + 1),
     )
   })
 })
@@ -921,54 +1066,73 @@ test('Tippen direkt an einer automatisch berechneten Umbruchstelle verliert/vert
 })
 ```
 
-### 4.8 Performance-Test mit realem, großem Dokument — `tests/e2e/large-document-import.spec.ts` — neu
+### 4.8 Performance-Test mit realem, großem Dokument — `tests/e2e/large-document-import.spec.ts` — **erweitern** (existiert bereits)
 
-Schließt Zusatzbefund B/Anforderung Abschnitt 3.7 endlich:
+**Korrektur zu Zusatzbefund B:** die Datei existiert bereits und misst DOCX- (`bug65649.docx`) **und**
+ODT-Import-Performance (`brokenList.odt`) über den `./fixtures`-Harness (`docxCard`/`odtCard`) mit
+15-s-Obergrenze und „Tab nicht eingefroren"-Beweis. Nicht neu anlegen. **Ergänzen** um genau die
+Paginierungs-spezifische Assertion, die Anforderung 3.7 über den reinen Import hinaus verlangt (der
+Editor bleibt nach dem Import eines mehrseitigen Groß-Dokuments tippbar, `data-page-count > 1`):
 
 ```ts
-import { test, expect } from '@playwright/test'
-import { readFileSync } from 'node:fs'
-import { join } from 'node:path'
+// Ergänzung im bestehenden bug65649.docx-Test, NACH dem Import-Timing-Block:
+// Paginierung des mehrseitigen Groß-Dokuments greift und der Editor bleibt reaktionsfähig
+// (Anforderung 3.7: kein spürbares Einfrieren durch rAF-Neumessung).
+await expect
+  .poll(async () =>
+    Number(await page.locator('[data-view-mode="page-layout"]').getAttribute('data-page-count')),
+  )
+  .toBeGreaterThan(1)
+await page.locator('.ProseMirror').click()
+await page.keyboard.type('X')
+await expect(page.locator('.ProseMirror')).toContainText('X')
+```
 
-test('großes reales Dokument (bug65649.docx, ~16000 Absätze) importiert performant und bleibt bedienbar', async ({
-  page,
-}) => {
-  await page.goto('/')
-  await page.getByRole('button', { name: /verstanden/i }).click()
+Alle E2E-Snippets dieses Abschnitts (4.2–4.9) sind über den bestehenden `./fixtures`-Harness zu
+schreiben (`import { test, expect, docxCard, odtCard } from './fixtures'`), der Banner-Dismiss und
+Karten-Lokalisierung bereits kapselt — die hier gezeigten `page.goto('/')`/„verstanden"-Sequenzen sind
+nur illustrativ und beim Implementieren durch die vorhandenen Fixtures zu ersetzen (siehe 0.1 Punkt 12).
 
-  const buffer = readFileSync(join(__dirname, '../fixtures/external/docx/bug65649.docx'))
-  const input = page
-    .locator('div.rounded-lg', { has: page.getByRole('heading', { name: 'Word-Dokument (.docx)' }) })
-    .locator('input[type="file"]')
+### 4.9 Export-Geometrie-Pin-Test — `src/formats/docx/__tests__` / `src/formats/odt/__tests__` — neu
 
-  const start = Date.now()
-  await input.setInputFiles({
-    name: 'bug65649.docx',
-    mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-    buffer,
-  })
-  await expect(page.locator('.ProseMirror')).toBeVisible()
-  await expect(page.locator('[data-view-mode="page-layout"]')).not.toHaveAttribute('data-page-count', '1', {
-    timeout: 15_000,
-  })
-  const importMs = Date.now() - start
-  expect(importMs).toBeLessThan(10_000)
+**Neu und wichtig** (Anforderung Abschnitt 5.1 Punkt 4 / Testplan Punkt 10): pinnt das in Befund 4
+korrigierte, aktuell korrekte Export-Verhalten fest, damit ein späterer Umbau auf dokumentabgeleitete
+Geometrie nicht unbemerkt die Standardgeometrie oder ihre Konsistenz mit der Bildschirmsimulation
+verliert. Als Unit-Test gegen den Writer (schneller, deterministischer als E2E):
 
-  // Editor bleibt nach dem Import reaktionsfähig (Anforderung 3.7: kein spürbares Einfrieren).
-  await page.locator('.ProseMirror').click()
-  await page.keyboard.type('X')
-  await expect(page.locator('.ProseMirror')).toContainText('X')
+```ts
+// DOCX (src/formats/docx/__tests__/page-setup.test.ts) — genau ein w:pgSz (A4) + ein w:pgMar (25mm):
+it('exportiert genau ein w:pgSz (A4) und ein w:pgMar (25mm)', async () => {
+  const blob = await writeDocx(minimalDoc()) // vorhandenes Writer-Muster der übrigen docx-Tests
+  const documentXml = await (await JSZip.loadAsync(blob)).file('word/document.xml')!.async('text')
+  expect(documentXml.match(/<w:pgSz\b/g)).toHaveLength(1)
+  expect(documentXml).toContain('w:w="11906"')
+  expect(documentXml).toContain('w:h="16838"')
+  expect(documentXml.match(/<w:pgMar\b/g)).toHaveLength(1)
+  expect(documentXml).toContain('w:top="1417"')
+})
+
+// ODT (src/formats/odt/__tests__/page-setup.test.ts) — genau ein style:page-layout mit A4-cm-Werten:
+it('exportiert genau ein style:page-layout mit fo:page-width=21cm/29.7cm/2.5cm', async () => {
+  const stylesXml = await (await JSZip.loadAsync(await writeOdt(minimalDoc()))).file('styles.xml')!.async('text')
+  expect(stylesXml.match(/<style:page-layout\b/g)).toHaveLength(1)
+  expect(stylesXml).toContain('fo:page-width="21cm"')
+  expect(stylesXml).toContain('fo:page-height="29.7cm"')
+  expect(stylesXml).toContain('fo:margin="2.5cm"')
 })
 ```
 
-### 4.9 Baseline-/Feature-Rundreise (Anforderung Abschnitt 5.1/5.2)
+(Die genauen Writer-Aufruf-/Fixture-Helfer sind aus den bestehenden `docx`/`odt`-`__tests__`-Dateien zu
+übernehmen — Muster existiert bereits; dieser Plan legt nur die zwei Assertion-Blöcke fest.)
+
+### 4.10 Baseline-/Feature-Rundreise (Anforderung Abschnitt 5.1/5.2)
 
 Kein neuer Mechanismus nötig — bestehende `tests/e2e/docx.spec.ts`/`odt.spec.ts`-Rundreise-Tests
-(Muster: Upload → Export → ZIP-Inhalt prüfen) werden um zwei reale, mehrseitige Fixtures ergänzt:
-`tests/fixtures/external/docx/saut_page.docx` und `tests/fixtures/external/odt/pagebreaks.odt`
-(beide bereits im Repo vorhanden, siehe Anforderungsdatei Testplan Punkt 11 — Eignung bestätigt:
-Datei-Namen/Inhalte belegen mehrseitige, umbruchnahe Struktur, siehe auch
-`specs/seitenumbruch-code.md` Abschnitt 0.3). Neuer Testfall in `tests/e2e/docx.spec.ts`:
+(Muster: Upload → Export → ZIP-Inhalt prüfen, über den `./fixtures`-Harness mit `docxCard`/`odtCard`)
+werden um zwei reale, mehrseitige Fixtures ergänzt: `tests/fixtures/external/docx/saut_page.docx` und
+`tests/fixtures/external/odt/pagebreaks.odt` (Eignung vor Verwendung im Repo bestätigen, siehe
+Anforderungsdatei Testplan Punkt 12 / `specs/seitenumbruch-code.md` Abschnitt 0.3). Neuer Testfall in
+`tests/e2e/docx.spec.ts`:
 
 ```ts
 test('reale mehrseitige DOCX-Datei: Rundreise ohne Paginierungs-Artefakte im Export', async ({ page }) => {
@@ -976,7 +1140,7 @@ test('reale mehrseitige DOCX-Datei: Rundreise ohne Paginierungs-Artefakte im Exp
   const input = docxCard(page).locator('input[type="file"]')
   await input.setInputFiles({
     name: 'saut_page.docx',
-    mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    mimeType: DOCX_MIME,
     buffer,
   })
   await expect(page.locator('.ProseMirror')).toBeVisible()
@@ -1003,7 +1167,7 @@ test('reale mehrseitige DOCX-Datei: Rundreise ohne Paginierungs-Artefakte im Exp
 | # | Grenzfall | Status nach diesem Plan |
 |---|---|---|
 | 1 | Kurzes Dokument | Verifiziert per Screenshot-Test 4.3; durch Filler-Fix (1.1) strukturell korrekt (kein Leerraum-Bug), da kurze Dokumente ohnehin nie einen Break überschreiten. |
-| 2 | Sehr langes Dokument (> 5 Seiten) | Behoben durch 1.1/1.2 (kein akkumulierender Versatz, siehe Induktionsbeweis 1.2); verifiziert per Screenshot-Test 4.3 (Seite 1/2 **und** 3/4). |
+| 2 | Sehr langes Dokument (> 5 Seiten) | Behoben durch 1.1/1.2 (kein akkumulierender Versatz, siehe Induktionsbeweis 1.2) **plus** den Spacer-Mess-Filter aus 0.6/3.2c (ohne den rechnete der Filler ab Seite 2 gegen verfälschte Höhen); verifiziert per Screenshot-Test 4.3 (Seite 1/2 **und** 3/4) und Konsistenz-Assert 4.2 (Spacer-Anzahl stabil nach mehreren `update`-Zyklen). |
 | 3 | Bild höher als eine Seite | Unverändert bewusstes Verhalten (Überlauf statt Splitting), bereits im Code kommentiert (`pagination.ts` Zeilen 8–10 Ist-Stand) — durch diesen Plan nicht angetastet, bleibt bestätigt akzeptiert. |
 | 4 | Große Tabelle über Seitengrenze | Wie 3 — bewusste, bestehende Einschränkung, unverändert. |
 | 5 | Schmaler Viewport (Tablet/Mobile) | Verifiziert per Test 4.4; Entscheidung 1.6 (horizontales Scrollen bleibt, Scale-to-fit bewusst verworfen). |
@@ -1016,13 +1180,13 @@ test('reale mehrseitige DOCX-Datei: Rundreise ohne Paginierungs-Artefakte im Exp
 | 12 | Abweichendes Ursprungsformat (US Letter etc.) | Unverändert außerhalb des Scopes (Entscheidung 1.5) — jetzt mit Code-Kommentaren an allen vier Lese-/Schreibstellen dokumentiert (3.6/3.7) statt nur in der Anforderungsdatei. |
 | 13 | Dokument mit vorhandener Kopf-/Fußzeile | Unverändert außerhalb des Scopes (Entscheidung 1.5) — jetzt mit Code-Kommentar in `WordEditor.tsx` dokumentiert (3.4). |
 | 14 | Manueller Seitenumbruch trifft auf automatische Paginierung | Siehe Abschnitt 1.4 (Schnittstelle zu `seitenumbruch-code.md`) — kein Duplikat, dort spezifiziert. |
-| 15 | Unverändert hochladen/exportieren/reimportieren | Verifiziert per Test 4.9 (Rundreise ohne Paginierungs-Artefakte) und 4.1 (docChanged-Regressionstest). |
+| 15 | Unverändert hochladen/exportieren/reimportieren | Verifiziert per Test 4.10 (Rundreise ohne Paginierungs-Artefakte im Export) und 4.1 (docChanged-Regressionstest); Export-Geometrie zusätzlich per 4.9 gepinnt. |
 
 ---
 
 ## 6. Testplan-Mapping (Anforderungsdatei Abschnitt 6)
 
-| # | Anforderung | Umgesetzt in |
+| # | Anforderung (Abschnitt 6 der Req) | Umgesetzt in |
 |---|---|---|
 | 1 | Bestehende Unit-Tests erhalten | `pagination.test.ts` Zeilen 3–51 Ist-Stand unverändert |
 | 2 | docChanged-Regressionstest | Abschnitt 4.1, zweiter Block (erfordert Export aus 3.2a) |
@@ -1033,8 +1197,9 @@ test('reale mehrseitige DOCX-Datei: Rundreise ohne Paginierungs-Artefakte im Exp
 | 7 | Farbschema-Test | Abschnitt 4.5 |
 | 8 | Selection-Sync-Regression an Umbruchstelle | Abschnitt 4.7 |
 | 9 | Resize-Test | Abschnitt 4.6 |
-| 10 | Rundreise als Unit **und** E2E | Abschnitte 4.1 (Unit) + 4.9 (E2E) |
-| 11 | Reale Fixtures (`pagebreaks.odt`, `saut_page.docx`) | Abschnitt 4.9 — Eignung bestätigt, keine neuen Fixtures nötig |
+| 10 | **Export-Geometrie-Test** (sichert Befund 4 ab: genau ein `w:pgSz`/`w:pgMar` bzw. `style:page-layout`) | Abschnitt 4.9 (neu) |
+| 11 | Rundreise als Unit **und** E2E | Abschnitte 4.1 (Unit) + 4.10 (E2E) |
+| 12 | Reale Fixtures + Performance (`bug65649.docx`, `saut_page.docx`, `pagebreaks.odt`) | Abschnitt 4.8 (Perf, **erweitert** bestehende Datei) + 4.10 (Rundreise) — Fixture-Eignung vor Verwendung bestätigen |
 
 ---
 
@@ -1048,12 +1213,12 @@ test('reale mehrseitige DOCX-Datei: Rundreise ohne Paginierungs-Artefakte im Exp
       **nach Implementierung** durch tatsächlichen Testlauf zu bestätigen (dieser Plan legt die Tests
       an, führt sie nicht aus).
 - [ ] Grenzfälle aus Abschnitt 4 einzeln befundet — siehe Tabelle Abschnitt 5 oben.
-- [ ] Abschnitt 5.1 (Baseline-Rundreise) — Abschnitt 4.1 (docChanged) + 4.9 (reale Fixtures ohne
-      Artefakte im Export).
+- [ ] Abschnitt 5.1 (Baseline-Rundreise) — Abschnitt 4.1 (docChanged) + 4.10 (reale Fixtures ohne
+      Artefakte im Export) + 4.9 (Export-Geometrie-Pin, Req 5.1 Punkt 4).
 - [ ] Abschnitt 5.2 (Feature-Rundreise DOCX/ODT/Cross-Format) — Cross-Format-Test (Punkt 6 der
       Anforderungsdatei Abschnitt 5.2) ist mit den bestehenden Cross-Format-Mustern in
       `docx.spec.ts`/`odt.spec.ts` (Import Format A → Export Format B → Reimport) analog zu Abschnitt
-      4.9 zu ergänzen — hier nicht separat ausformuliert, da strukturell identisch zu 4.9 nur mit
+      4.10 zu ergänzen — hier nicht separat ausformuliert, da strukturell identisch zu 4.10 nur mit
       Formatwechsel.
 - [ ] Selection-Sync-Regression aus `FEATURE-SPEC-DOCX-ODT.md` Abschnitt 2 an einer automatischen
       Umbruchstelle — Abschnitt 4.7.
@@ -1061,6 +1226,9 @@ test('reale mehrseitige DOCX-Datei: Rundreise ohne Paginierungs-Artefakte im Exp
       Kopf-/Fußzeilen-Anzeige (dokumentiert, 3.4/1.5), hartkodiertes A4/25mm (dokumentiert,
       3.1/3.6/3.7/1.5), Resize-Listener (**behoben**, 1.3/3.2d), Tablet-/Mobile-Verhalten
       (dokumentiert + verifiziert, 1.6/4.4).
+- [ ] Zusatzbefund E — Höhenmessung inklusive Spacer-Widgets (Index-Versatz + verfälschte Höhen) —
+      **behoben** durch den Klassen-Filter in 3.2c und in-Browser über den Idempotenz-Assert 4.2
+      bestätigt; ohne diesen Filter ist der Filler-Fix aus 1.1 nicht korrekt.
 
 Nach Umsetzung und grünem Testlauf ist der Backlog-Status von `seitenlayout-ansicht`
 (`specs/FEATURE-BACKLOG.md` Zeile 395) von „vorhanden" (unverifiziert) auf „vorhanden" (verifiziert,

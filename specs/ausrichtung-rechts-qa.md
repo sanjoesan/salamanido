@@ -19,29 +19,88 @@ bereits vorliegender QA-Plan für dasselbe Repo).
 
 Bevor der Plan aufgestellt wird, wurden die zentralen Codebehauptungen aus
 `ausrichtung-rechts-req.md`/`-code.md` direkt an den genannten Dateien
-nachvollzogen (nicht nur aus den Dokumenten übernommen):
+nachvollzogen (nicht nur aus den Dokumenten übernommen). **Die Zeilennummern in
+dieser Tabelle wurden am 2026-07-05 am tatsächlichen Stand von `E:\docs\src`
+gegengeprüft und gegenüber einer früheren Fassung dieses QA-Dokuments korrigiert
+(mehrere Angaben waren um einige Zeilen verschoben). Maßgeblich sind — wie schon
+`ausrichtung-rechts-req.md` im „Hinweis zur Code-Verankerung" festhält — die
+Symbol-/Funktionsnamen; die Zahlen sind nur ein Stand-2026-07-05-Hinweis und
+können erneut driften.**
 
 | Behauptung | QA-Gegenkontrolle | Ergebnis |
 |---|---|---|
 | `isAlignActive` wertet nur `$from` aus | `src/formats/shared/editor/commands.ts:29-38` gelesen | **Bestätigt**, Zeile für Zeile identisch zum in beiden Dokumenten zitierten Code. |
-| `setAlign` iteriert `nodesBetween`, unbedingtes Setzen | `commands.ts:13-27` gelesen | **Bestätigt.** |
+| `setAlign` iteriert `nodesBetween`, unbedingtes Setzen | `commands.ts:13-27` gelesen | **Bestätigt — und dabei KRITISCH:** `dispatch(state.tr.setNodeAttribute(pos, …))` steht **innerhalb** des `nodesBetween`-Callbacks (Z. 20–22); `state` ist die beim Command-Aufruf einmalig festgehaltene Ausgangs-`view.state`. Bei einer Selektion über **≥ 2** ausrichtbare Blöcke wird `state.tr` je Iteration erneut aus **demselben, unveränderten** `state` erzeugt → jede Transaktion trägt `tr.before` = Ursprungsdokument. Das führt zum **Absturz**, siehe „Kritischer QA-Fund Nr. 1" direkt unter dieser Tabelle. **Beide Vorgänger-QA-Fassungen sowie Teile dieses Plans hatten `setAlign` fälschlich als „funktioniert korrekt" eingestuft — das ist der schwerwiegendste hier korrigierte Fehler.** |
 | `setHeading` erzwingt `align: 'left'` bzw. verwirft auf `undefined` | `commands.ts:40-55` gelesen | **Bestätigt**, Zeile 43: `const attrs = level === null ? undefined : { level, align: 'left' }`. |
-| `Toolbar.tsx`: `title={\`Ausrichtung: ${align}\`}`, kein `aria-label` an `AlignButton` | `src/formats/shared/editor/Toolbar.tsx:69-70` gelesen und mit `MarkButton` (Zeile 46-48, hat **beide** Attribute) verglichen | **Bestätigt.** `AlignButton` hat nur `title`, keinen `aria-label` — Inkonsistenz zu `MarkButton` real vorhanden, nicht nur behauptet. |
-| `WordEditor.tsx`: kein Tastenkürzel für Ausrichtung, nur Undo/Redo/Fett/Kursiv/Unterstrichen | `src/formats/shared/editor/WordEditor.tsx:71-79` gelesen | **Bestätigt.** Keymap enthält exakt `Mod-z`, `Mod-y`, `Mod-Shift-z`, `Enter`, `Mod-b`, `Mod-i`, `Mod-u` — kein `Mod-r`. |
-| `docx/reader.ts`: `JC_TO_ALIGN` ohne `start`/`end` | `src/formats/docx/reader.ts:13,151-152` gelesen | **Bestätigt.** `{ left, center, right, both }`, Fallback `?? 'left'`. |
-| `odt/reader.ts`: `paragraphAligns` roh, keine `office:styles`/`parent-style-name`-Auflösung | `src/formats/odt/reader.ts:24,38-65,126,173` gelesen | **Bestätigt.** Rohwert wird unverändert per `paragraphAligns.set(name, align)` übernommen; Aufrufstellen nutzen nur `(styleName && styles.paragraphAligns.get(styleName)) || 'left'` — keine Kette. |
-| `docx/writer.ts`/`odt/writer.ts`: Export-Fallback bei ungültigem `align` bereits korrekt | `docx/writer.ts:16,68`, `odt/writer.ts:64-65`, `styleRegistry.ts:61-66` gelesen | **Bestätigt für Absätze** — `JC_BY_ALIGN[align] ?? 'left'` bzw. `PARAGRAPH_ALIGN_STYLE_NAME[align] ?? PARAGRAPH_ALIGN_STYLE_NAME.left`. |
+| `Toolbar.tsx`: `title={\`Ausrichtung: ${align}\`}`, kein `aria-label` an `AlignButton` | `src/formats/shared/editor/Toolbar.tsx` → `AlignButton` (Z. 91–111, `title` **Z. 96**) gelesen und mit `MarkButton` (Z. 55–89, das **beide** Attribute `title`+`aria-label` in **Z. 73–74** trägt) verglichen | **Bestätigt.** `AlignButton` hat nur `title`, keinen `aria-label` — Inkonsistenz zu `MarkButton` real vorhanden, nicht nur behauptet. Die vier Instanzen stehen in Z. 234–237, „rechts" ist der **dritte** (`label="⇥"`, Z. 236). |
+| `WordEditor.tsx`: kein Tastenkürzel für Ausrichtung | `src/formats/shared/editor/WordEditor.tsx` → `keymap({…})` **Z. 77–99** gelesen | **Bestätigt.** Der explizite `keymap`-Block enthält exakt `Mod-z`, `Mod-y`, `Mod-Shift-z`, `Enter` (→`splitListItem`), `Shift-Enter` (→`insertHardBreak`), `Mod-b`, `Mod-i`, `Mod-u`, `Shift-Delete` (→`cutSelection`) — **kein** `Mod-r` und kein anderes Ausrichtungs-Kürzel (die frühere Fassung dieser Tabelle ließ `Shift-Enter`/`Shift-Delete` fälschlich aus der „exakt"-Liste weg). |
+| `docx/reader.ts`: `JC_TO_ALIGN` ohne `start`/`end` | `src/formats/docx/reader.ts:14` (`JC_TO_ALIGN`) + `239-240` (jc-Auswertung in `paragraphToBlocks`) gelesen | **Bestätigt.** `{ left, center, right, both }`, `jcVal = … ?? 'left'`, `align = JC_TO_ALIGN[jcVal] ?? 'left'`. |
+| `odt/reader.ts`: `paragraphAligns` roh, keine `office:styles`/`parent-style-name`-Auflösung | `src/formats/odt/reader.ts:25` (`paragraphAligns`-Feld), `63-66` (Align-Read in `parseAutomaticStyles`), Aufrufstellen `178`/`259` gelesen | **Bestätigt.** Rohwert wird unverändert per `paragraphAligns.set(name, align)` (Z. 66) übernommen; Aufrufstellen nutzen nur `(styleName && styles.paragraphAligns.get(styleName)) || 'left'` (Z. 178/259) — keine Kette, `parseAutomaticStyles` liest nur `content.xml`s `office:automatic-styles`. |
+| `docx/writer.ts`/`odt/writer.ts`: Export-Fallback bei ungültigem `align` bereits korrekt | `docx/writer.ts` (`JC_BY_ALIGN`), `odt/writer.ts:89` (`blockToOdt`-Absatzzweig), `styleRegistry.ts:61-66` (`PARAGRAPH_ALIGN_STYLE_NAME`) gelesen | **Bestätigt für Absätze** — `JC_BY_ALIGN[align] ?? 'left'` bzw. `PARAGRAPH_ALIGN_STYLE_NAME[align] ?? PARAGRAPH_ALIGN_STYLE_NAME.left` (Z. 89). **Für Überschriften gilt das NICHT** — siehe O9-Fund unten. |
 | `schema.ts`: `validate: 'string'`, kein Enum, kein `sanitizeAlign` | `src/formats/shared/schema.ts:4` gelesen | **Bestätigt.** Weder `ALIGN_VALUES` noch `sanitizeAlign` existieren aktuell im Schema — `ausrichtung-rechts-code.md` Abschnitt 3.8/3.9 ist vollständig **ungebaut**. |
 | Fixture-Dateien (`60329.docx`, `rtl.docx`, `bug-paragraph-alignment.docx`, `invalid.odt`, `excelfileformat.odt`, `table-within-textBox-within-frame.odt`) existieren wie benannt | `Glob` gegen `tests/fixtures/external/{docx,odt}` | **Bestätigt**, alle sechs Dateien vorhanden. |
 | `tests/e2e/*.spec.ts` enthält noch keinen dedizierten Ausrichtungs-Test | `Glob` gegen `tests/e2e` | **Bestätigt.** Nur `docx.spec.ts`, `odt.spec.ts`, `selection-regression.spec.ts`, `lifecycle.spec.ts` vorhanden — keine `align-right.spec.ts`. |
 
-**Zusätzlicher QA-Fund, in keinem der beiden Vorgängerdokumente benannt:**
-`src/formats/odt/styleRegistry.ts:80-93` — `headingStyleName(level, align)` baut den
+**Kritischer QA-Fund Nr. 1 — `setAlign` stürzt bei Mehr-Block-Selektion ab
+(RangeError), lässt das Dokument halb ausgerichtet zurück.** Dies ist der
+wichtigste einzelne Befund dieser QA-Gegenkontrolle und **korrigiert eine
+Fehleinschätzung, die eine frühere Fassung dieses QA-Dokuments mit
+`ausrichtung-rechts-req.md` teilte** („setAlign … funktioniert korrekt",
+sinngemäß in P7/Abschnitt 5). `ausrichtung-rechts-code.md` Punkt 7/Abschnitt 3.10
+stuft `setAlign` dagegen als **kritischen Crash** ein — die Gegenkontrolle am
+echten Code bestätigt **den Code-Plan**, nicht die frühere QA-Fassung:
+
+- `src/formats/shared/editor/commands.ts:17-24` — `dispatch(state.tr.setNodeAttribute(pos, 'align', align))`
+  steht **innerhalb** des `nodesBetween`-Callbacks. `state` ist der beim
+  Command-Aufruf festgehaltene Ausgangs-`view.state`; **jeder** erneute Zugriff auf
+  `state.tr` liefert eine **neue** Transaktion, deren `tr.before` = **Ursprungs**-Doc
+  ist (nicht der nach dem vorigen Dispatch aktualisierte Stand).
+- `src/formats/shared/editor/WordEditor.tsx:125-133` — `dispatchTransaction(tr)`
+  wendet **jede** Transaktion mit `view.state.apply(tr)` gegen den **bereits
+  aktualisierten** `view.state` an. Nach dem **ersten** Dispatch ist
+  `view.state.doc` verändert; die **zweite** Transaktion trägt aber weiterhin
+  `tr.before` = Ursprungs-Doc. `EditorState.applyInner` prüft
+  `tr.before.eq(this.doc)`, das schlägt fehl → **`RangeError: Applying a mismatched
+  transaction`**.
+- `src/formats/shared/editor/Toolbar.tsx:28-31` — `run()` ruft
+  `command(view.state, view.dispatch, view)` **vor** `view.focus()` auf. Die
+  Exception aus dem zweiten Dispatch propagiert synchron durch `nodesBetween` →
+  `run` → den React-`onMouseDown`-Handler nach oben: `view.focus()` wird nicht mehr
+  erreicht, und der Fehler wird als **uncaught** an `window.onerror` gemeldet (in
+  Playwright über `page.on('pageerror')` sichtbar).
+
+**Konkrete Fehlersignatur (gilt für den alltäglichen „Strg+A → rechtsbündig"-Fall
+auf einem Dokument mit ≥ 2 Absätzen):** der **erste** ausrichtbare Block wird auf
+`right` gesetzt, dann wirft der zweite Dispatch `RangeError: Applying a mismatched
+transaction`; das Dokument bleibt **halb ausgerichtet** stehen (z. B. erster Absatz
+`right`, restliche `left`/unverändert). Eine **Einzelblock**-Selektion (Cursor oder
+Selektion innerhalb **eines** Absatzes/einer Überschrift) trifft in `nodesBetween`
+nur **einen** ausrichtbaren Knoten → genau **ein** Dispatch → **kein** Crash; deshalb
+funktioniert der Einzelblock-Pfad und deshalb ist der Bug in den bisherigen
+isolierten Unit-Tests (je ein Absatz) nie aufgefallen. **Empirischer Beleg außerhalb
+dieses Dokuments:** `ausrichtung-links-code.md` Abschnitt 1/3.1 reproduziert exakt
+diesen Crash durch **tatsächliche Ausführung** gegen denselben Produktivcode
+(assertiert grün: `RangeError: Applying a mismatched transaction`, Doc-Zustand danach
+`['left','center']`) — beide Features teilen `setAlign`. Der Fix (`commands.ts` →
+**eine** gemeinsame Transaktion über `state.selection.ranges`, `ausrichtung-rechts-code.md`
+Abschnitt 3.10) behebt denselben Defekt. **Konsequenz für diesen Testplan:** Jeder
+Testfall mit einer Selektion über ≥ 2 ausrichtbare Blöcke (Strg+A über mehrere
+Absätze, lange Mehr-Absatz-Selektion, Zell-Selektion über mehrere Zellen) ist
+**aktuell ROT (Crash)**, nicht GRÜN — die Rot/Grün-Zuordnung in Abschnitt 5 und der
+Kern-Testfall in Abschnitt 3.3 sind entsprechend korrigiert; ein dedizierter
+Crash-Reproduktions-Unittest (C0/C0b, Abschnitt 2.5) und die Absturzüberwachung per
+`page.on('pageerror')` in den E2E-Mehr-Block-Fällen halten das fest.
+
+**Zusätzlicher QA-Fund Nr. 2, in keinem der beiden Vorgängerdokumente benannt:**
+`src/formats/odt/styleRegistry.ts:80-82` — `headingStyleName(level, align)` baut den
 Stilnamen per Template-String direkt aus dem rohen `align`-Wert
-(`` `Heading${level}-${align}` ``), **ohne** die gleiche Absicherung, die
-`blockToOdt` für Absätze bereits hat (`PARAGRAPH_ALIGN_STYLE_NAME[align] ??
-PARAGRAPH_ALIGN_STYLE_NAME.left`, `odt/writer.ts:65`). `headingStyleDefs()`
-erzeugt nur Stile für die vier bekannten Werte (`ALIGNS`-Konstante). Ein
+(`` `Heading${level}-${align}` ``, wörtlich Z. 81), **ohne** die gleiche
+Absicherung, die `blockToOdt` für Absätze bereits hat
+(`PARAGRAPH_ALIGN_STYLE_NAME[align] ?? PARAGRAPH_ALIGN_STYLE_NAME.left`,
+**`odt/writer.ts:89`**). Aufgerufen wird `headingStyleName` **ungeschützt** in
+`odt/writer.ts:97` (`` `<text:h text:style-name="${headingStyleName(level, align)}" …` ``),
+während `headingStyleDefs()` (`styleRegistry.ts:84-93`) nur Stile für die vier
+bekannten Werte der `ALIGNS`-Konstante (Z. 78) erzeugt. Ein
 korrupter/ungültiger `align`-Wert (Grenzfall 13) auf einer **Überschrift** würde
 also `text:style-name="Heading{level}-foo"` referenzieren — einen Stilnamen, der
 in `content.xml`/`styles.xml` **nirgends deklariert ist** (nur `Heading1-left`,
@@ -56,7 +115,13 @@ Abschnitt 8.
 Konsequenz für diesen Testplan: **Kein** einziger der von `ausrichtung-rechts-code.md`
 beschriebenen Fixes ist im aktuellen Code umgesetzt. Alle unten als „aktuell ROT
 erwartet" markierten Testfälle sind also zum jetzigen Zeitpunkt echte,
-reproduzierbare Bugs/Lücken, nicht hypothetische Grenzfälle.
+reproduzierbare Bugs/Lücken, nicht hypothetische Grenzfälle. **Der schwerste davon
+ist der `setAlign`-Crash (QA-Fund Nr. 1): er trifft nicht einen Randfall, sondern
+den häufigsten Bedienweg überhaupt (Strg+A → rechtsbündig auf einem Dokument mit
+mehreren Absätzen) und ist Blocker für die Abnahme.** Er wird in Teil A als
+browserunabhängiger Reproduktions-Unittest (C0/C0b) und in Teil B als
+`pageerror`-überwachter E2E-Fall (P7, P6, P33m, P34m) rot festgehalten und muss nach
+dem Ein-Transaktions-Refactor auf grün wechseln.
 
 ---
 
@@ -78,13 +143,31 @@ reproduzierbare Bugs/Lücken, nicht hypothetische Grenzfälle.
   - Editor-Locator: `page.locator('.ProseMirror')`.
   - Export: `page.getByRole('button', { name: 'Exportieren' })` +
     `page.waitForEvent('download')`.
+  - **Upload (echter App-Pfad):** `docxCard(page)`/`odtCard(page)` →
+    `.locator('input[type="file"]').setInputFiles({ name, mimeType, buffer })`.
+    Es gibt **keinen** sichtbaren „Datei öffnen"-Button, der einen nativen
+    Browser-`filechooser` auslöst — der Datei-Input in `FormatPicker.tsx` ist
+    versteckt, und `setInputFiles` durchläuft dessen realen `onChange` →
+    `readDocx`/`readOdt`. Das **ist** der echte Upload-Pfad (kein interner
+    Funktionsaufruf), belegt durch die bestehenden `docx.spec.ts`/`odt.spec.ts`.
+    Frühere Formulierungen dieses Plans („echter `filechooser`-Upload statt
+    `setInputFiles` auf den versteckten Input") gingen von einer UI aus, die es
+    nicht gibt, und sind hiermit korrigiert.
+  - **Reimport/zweiter Upload (Pflicht-Navigationsschritt):** Der Datei-Input
+    existiert **nur** auf dem Format-Auswahl-Bildschirm, **nicht** im geöffneten
+    Editor. Vor jedem zweiten Upload (Export → Reimport, Cross-Format-Rundreise)
+    zuerst über `page.getByRole('button', { name: /formate/i }).click()`
+    (Button „← Formate", `DocumentWorkspace.tsx:113`) zur Auswahl zurück, **dann**
+    erneut `card.locator('input[type="file"]').setInputFiles(...)`. Ohne diesen
+    Schritt ist `input[type="file"]` nicht im DOM und der Test schlägt fehl —
+    genau so gelöst in `docx.spec.ts`/`odt.spec.ts` (jeweils `reimportInput`).
 - **Wichtiger, in `ausrichtung-rechts-code.md` implizit vorausgesetzter, aber
   aktuell falscher Zustand:** Der Code-Plan schreibt seine Beispiel-Tests bereits
   gegen `page.getByTitle('Ausrichtung: rechts')` — das ist der **Soll**-Zustand
   **nach** dem Tooltip-Fix (Abschnitt 3.7 dort). Solange dieser Fix nicht gebaut
   ist, muss jeder neu geschriebene Testfall gegen den **aktuellen** Titel
   `page.getByTitle('Ausrichtung: right')` laufen (Codebeleg: Abschnitt 0 oben).
-  Testfall P32 (Abschnitt 3.12) hält exakt diesen Übergang fest. Alle übrigen
+  Testfall P30 (Abschnitt 3.10) hält exakt diesen Titel-Übergang fest. Alle übrigen
   Testfälle in Abschnitt 3 werden daher mit einer **Locator-Konstante**
   geschrieben (`const rightAlignButton = () => page.getByTitle(/Ausrichtung:\s*(right|rechts)\b/)`),
   damit sie unabhängig vom Umsetzungsstand des Tooltip-Fixes lauffähig sind und
@@ -158,8 +241,75 @@ Reine Logik-Tests **ohne** Browser/DOM, direkt gegen `EditorState` aus
 `prosemirror-state` — testet exakt das, was Playwright später nur indirekt über
 `aria-pressed`/CSS beobachten kann, aber schneller und ohne UI-Rauschen:
 
+**C0/C0b — Reproduktion des `setAlign`-Crashes (QA-Fund Nr. 1) ohne Browser.** Der
+Absturz entsteht aus dem **Zusammenspiel** von `setAlign` (dispatcht je Block eine
+Transaktion aus dem festgehaltenen `state`) und `dispatchTransaction` (wendet jede
+Transaktion gegen den **fortlaufend aktualisierten** `view.state` an). Um das im
+Unit-Test **ohne** echten `EditorView` deterministisch nachzustellen, wird die
+`view.state.apply`-Semantik von `WordEditor.tsx:126` exakt nachgebaut — ein
+`dispatch`, der den laufenden State bei jeder Transaktion mit-aktualisiert (**nicht**
+der triviale „letzten State merken"-Dispatch, den viele PM-Unit-Tests verwenden;
+gerade der würde den Bug **verdecken**, weil er `tr.before` nie prüft):
+
+```ts
+import { EditorState } from 'prosemirror-state'
+import { wordSchema } from '../../schema'
+import { setAlign } from '../commands'
+
+// Baut ein Doc mit zwei linksbündigen Absätzen.
+function twoParagraphState() {
+  const doc = wordSchema.nodeFromJSON({
+    type: 'doc',
+    content: [
+      { type: 'paragraph', attrs: { align: 'left' }, content: [{ type: 'text', text: 'A' }] },
+      { type: 'paragraph', attrs: { align: 'left' }, content: [{ type: 'text', text: 'B' }] },
+    ],
+  })
+  return EditorState.create({ doc, schema: wordSchema })
+}
+
+test('C0: setAlign wirft bei >=2 Bloecken RangeError (mismatched transaction) — aktueller Bug', () => {
+  let running = twoParagraphState()
+  // Selektion ueber BEIDE Absaetze (AllSelection-aequivalent).
+  running = running.apply(running.tr.setSelection(
+    // volle Auswahl ueber das Dokument
+    require('prosemirror-state').AllSelection ? new (require('prosemirror-state').AllSelection)(running.doc) : running.selection,
+  ))
+  // dispatch, das EXAKT wie WordEditor.tsx:126 den laufenden State mit-anwendet:
+  const dispatch = (tr: any) => { running = running.apply(tr) }
+  // Aktueller Code: der zweite Dispatch trifft auf einen bereits geaenderten
+  // running.doc, tr.before passt nicht mehr -> RangeError.
+  expect(() => setAlign('right')(running, dispatch)).toThrow(/mismatched transaction/i)
+})
+
+test('C0b: nach dem Crash ist das Dokument halb ausgerichtet (Datenintegritaets-Beleg)', () => {
+  let running = twoParagraphState()
+  running = running.apply(running.tr.setSelection(
+    new (require('prosemirror-state').AllSelection)(running.doc),
+  ))
+  const dispatch = (tr: any) => { running = running.apply(tr) }
+  try { setAlign('right')(running, dispatch) } catch { /* erwarteter RangeError */ }
+  // Erster Absatz wurde noch gesetzt, zweiter nicht -> beweist den halb
+  // ausgerichteten Zwischenzustand, der im Browser sichtbar zurueckbleibt.
+  expect(running.doc.child(0).attrs.align).toBe('right')
+  expect(running.doc.child(1).attrs.align).toBe('left')
+})
+```
+
+> **Hinweis zur Testrobustheit:** C0/C0b sind bewusst so formuliert, dass sie den
+> **aktuellen** (kaputten) Zustand assertieren — sie sind also **jetzt grün** in dem
+> Sinne, dass sie den Bug *bestätigen*. Nach dem Ein-Transaktions-Refactor
+> (`ausrichtung-rechts-code.md` Abschnitt 3.10) **müssen sie umgeschrieben werden**
+> auf das Soll: `setAlign('right')` wirft **nicht**, und **beide** Absätze tragen
+> danach `align === 'right'` (siehe C0-fix/C0b-fix in der Statusspalte). Das ist der
+> maschinell prüfbare Nachweis, dass der Crash behoben ist. Die `require(...)`-Form
+> für `AllSelection` ist nur ein Platzhalter — in der Implementierung als normaler
+> `import { AllSelection } from 'prosemirror-state'` schreiben.
+
 | # | Testfall | Vorgehen | Erwartung | Erwarteter Status jetzt | Bezug |
 |---|---|---|---|---|---|
+| C0 | `setAlign` über 2-Absatz-Selektion wirft `RangeError` | siehe Code-Block oben (`dispatch` spiegelt `WordEditor.tsx:126`) | **Jetzt:** wirft `/mismatched transaction/`. **Nach Fix:** wirft **nicht** | **Crash bestätigt (Bug)** — nach Ein-Transaktions-Fix umzuschreiben auf „wirft nicht + beide `right`" | **QA-Fund Nr. 1**, Verdachtsmoment 6.12, Testfall 18/40/41 |
+| C0b | Doc bleibt nach dem Crash halb ausgerichtet | siehe Code-Block oben | Absatz 0 = `right`, Absatz 1 = `left` (halb) | **Bug-Beleg** — nach Fix beide `right` | **QA-Fund Nr. 1**, Datenintegrität |
 | C1 | `isAlignActive` bei kollabiertem Cursor in bereits rechtsbündigem Absatz | Ein-Absatz-Doc, `align:'right'`, Cursor hinein, `isAlignActive(state,'right')` | `true` | GRÜN | Grundfall |
 | C2 | `isAlignActive` bei gemischter Selektion, **erster** Absatz rechts, Rest nicht | Drei-Absatz-Doc (`right`,`left`,`center`), Selektion über alle drei, `isAlignActive(state,'right')` | **Soll:** `false` (nicht alle betroffenen Absätze sind rechtsbündig) | **ROT** — aktueller Code liest nur `$from`, liefert `true`, obwohl 2 von 3 Absätzen **nicht** rechtsbündig sind. Das ist der in Grenzfall 1/Verdachtsmoment 5 beschriebene irreführende Zustand, hier erstmals **reproduzierbar isoliert** (nicht nur aus dem Code abgeleitet) | Grenzfall 1/Verdachtsmoment 5, Testfall 7 |
 | C3 | `isAlignActive` bei `AllSelection` (Strg+A) über gemischte Ausrichtung | Zwei-Absatz-Doc (`right`,`left`), `AllSelection`, `isAlignActive(state,'right')` | **Soll:** `false` | **ROT** (analog C2, je nachdem wo `$from` bei `AllSelection` landet — muss empirisch mit dem echten `EditorState` bestätigt werden, nicht angenommen) | Grenzfall 1, Testfall 4/7 |
@@ -194,10 +344,60 @@ Testfall in Teil B darf durch direkten Aufruf interner Funktionen
 (`setAlign(...)`, `isAlignActive(...)`, `readDocx(...)` etc.) im Node-Kontext
 ersetzt werden. Jeder Testfall läuft über echte Nutzer:innen-Handlungen im
 Browser: `locator.click()`, `page.keyboard.press(...)`/`.type(...)`,
-`input.setInputFiles(...)` bzw. echtes `filechooser`-Event, sowie
+`card.locator('input[type="file"]').setInputFiles(...)` (der reale, versteckte
+Datei-Input der App — siehe Upload-Konvention Abschnitt 1), sowie
 `page.waitForEvent('download')` **plus** tatsächliches Einlesen und Parsen der
 heruntergeladenen Datei vom Dateisystem (nicht nur „Download ist irgendeine
 Datei").
+
+### 3.0 Determinismus-Regeln (bindend für **jeden** Testfall in Teil B)
+
+Der Auftrag verlangt ausdrücklich deterministische Tests „keine
+Race-Conditions durch zu schnelle Tastatureingaben; Selektions-Sync abwarten".
+Das ist in diesem Repo **kein hypothetisches** Risiko: die jüngsten Commits
+(`db61c89`, `0797d13`, `9f8fa03`-Umfeld) behoben genau eine „async-selection-sync
+race" in den Mobile-Projekt-Tests, und `tests/e2e/selection-regression.spec.ts`
+existiert ausschließlich wegen dieser Fehlerklasse. Alle unten geschriebenen
+Tests **müssen** diese vier Regeln einhalten, sonst reproduzieren sie die bekannte
+Flakiness:
+
+1. **Nur web-first, auto-wiederholende Assertions.** Zustand nach einer Aktion
+   ausschließlich über `await expect(locator).toHaveCSS('text-align', 'right')`,
+   `.toHaveAttribute('aria-pressed', 'true'|'false')`, `.toContainText(...)`,
+   `.toHaveCount(n)` prüfen — **nie** einen Wert synchron in eine Variable lesen
+   und darauf asserten. Grund: nach jeder Transaktion läuft
+   `WordEditor.tsx` → `dispatchTransaction` → `forceRender` + `onChange`, die
+   Toolbar rendert **asynchron** neu; `aria-pressed`/CSS spiegeln den neuen
+   Zustand erst nach dem React-Commit. Nur die pollenden `expect`-Matcher warten
+   darauf korrekt.
+2. **Nach einem nativen, tastatur-/klickgetriebenen Caret-Move
+   (`End`, Pfeiltasten, Klick zum Neupositionieren), der unmittelbar von `Enter`
+   oder Tippen gefolgt wird, `await page.waitForTimeout(50)` einfügen.**
+   ProseMirror erfährt einen solchen Caret-Move nur über das **asynchrone**
+   `selectionchange`-Event des Browsers; eine sofort folgende Playwright-`press()`
+   (ohne menschliche Reaktionszeit) kann diesem Nachziehen vorauslaufen und noch
+   auf der **alten** Position agieren (Enter no-opt, Tippen überschreibt die
+   Stale-Selektion). Das ist exakt die bereits ausgelieferte Gegenmaßnahme in
+   `selection-regression.spec.ts` (dort 4× `waitForTimeout(50)` mit ausführlicher
+   Begründung) und der Inhalt der genannten Flaky-Fix-Commits. **Besonders
+   relevant im Mobile- und Tablet-Projekt.**
+3. **Zwischen einer Toolbar-Aktion (Ausrichtungs-Button, Format-Dropdown) und
+   der nächsten Tastatureingabe genau ein echtes `await editor.click()`
+   setzen, wenn der Caret neu positioniert werden soll** — nicht auf eine bereits
+   kollabierte Selektion vertrauen. Ein Toolbar-Command umschließt/ersetzt den
+   selektierten Bereich; die App kollabiert die Modell-Selektion nur über
+   `reconcileSelectionOnClick` (`WordEditor.tsx`, mousedown/mouseup-Koordinaten-
+   vergleich → `posAtCoords`-Force-Collapse), und das feuert **nur** bei einem
+   realen `click()`, nicht bei bloßem `keyboard.press`. Ein `editor.click()` ist
+   also der deterministische Reset, kein bloßes `press`.
+4. **Grün in allen drei Playwright-Projekten** (Desktop Chrome, Mobile = Pixel 7 /
+   Chromium, Tablet = iPad Mini / WebKit). Ein **nur** im Mobile-Projekt
+   auftretender Fehlschlag ist als **echter Determinismus-Bug** zu behandeln
+   (dort trat die Selektions-Sync-Race historisch zuerst auf), nicht durch
+   Retries zu überdecken. Lange `waitForTimeout` als generelle Krücke sind zu
+   vermeiden — Regel 1 (pollende `expect`) ist der Normalfall, das 50-ms-Warten
+   aus Regel 2 die eng begrenzte Ausnahme für den einzigen Fall ohne
+   awaitsbares DOM-Signal.
 
 ### Neue Datei: `tests/e2e/align-right.spec.ts`
 
@@ -227,6 +427,10 @@ test('Testfall 7: gemischte Ausgangsausrichtung — Klick setzt alle rechtsbünd
   await page.keyboard.type('Erster Absatz')
   await rightAlignButton(page).click()          // erster Absatz jetzt rechts
   await page.keyboard.press('End')
+  // Determinismus-Regel 2 (siehe Abschnitt 3.0): dem async selectionchange nach
+  // dem "End"-Caret-Move Zeit geben, bevor "Enter" feuert — sonst Race,
+  // v. a. im Mobile-/Tablet-Projekt. Identisch zu selection-regression.spec.ts.
+  await page.waitForTimeout(50)
   await page.keyboard.press('Enter')
   await page.keyboard.type('Zweiter Absatz')      // bleibt links (Default)
   await page.keyboard.press('ControlOrMeta+a')    // Selektion ueber BEIDE Absaetze
@@ -258,7 +462,7 @@ Zusätzlich, Testfall 4 (Regressionsmuster wie bei Fett/Durchgestrichen):
 
 | # | Test | Schritte | Assertion | Bezug |
 |---|---|---|---|---|
-| P6 | Nach Strg+A + rechts: Klick-Neupositionierung + Enter + Tippen | Nach P-Test oben: ans Ende des letzten Absatzes klicken, `Enter`, dritten Absatz tippen | 3 Absätze insgesamt, dritter Absatz-Text sichtbar, keine der ersten beiden Absätze durch die neue Eingabe beschädigt | Testfall 4, `FEATURE-SPEC-DOCX-ODT.md` Abschnitt 2 |
+| P6 | Nach Strg+A + rechts: Klick-Neupositionierung + Enter + Tippen | Nach P-Test oben: ans Ende des letzten Absatzes klicken, **`waitForTimeout(50)` (Regel 2)**, `Enter`, dritten Absatz tippen | 3 Absätze insgesamt, dritter Absatz-Text sichtbar, keine der ersten beiden Absätze durch die neue Eingabe beschädigt | Testfall 4, `FEATURE-SPEC-DOCX-ODT.md` Abschnitt 2 |
 
 #### 3.4 Umschalten zwischen vier Werten + Idempotenz (Testfälle 8–9)
 
@@ -304,12 +508,18 @@ Browser — nicht nur auf Codeebene vermutet.
 #### 3.9 Rundreisen über echte Bedienung inkl. Prüfung der heruntergeladenen Datei (Testfälle 18–27, Anforderung Abschnitt 4)
 
 **Diese Gruppe ist der praktische Kern des Auftrags** — jeder Test lädt eine
-echte Datei hoch (über den sichtbaren Button + `filechooser`, nicht nur
-`setInputFiles` auf den versteckten Input) bzw. exportiert und liest die
-**tatsächlich heruntergeladene** Datei vom Dateisystem, geparst mit JSZip +
-(wo strukturelle Prüfung nötig ist) einem vom eigenen Reader **unabhängigen**
-DOM-Parser (`jsdom`s `DOMParser`, bereits Devdependency), nicht mit
-`readDocx`/`readOdt` selbst.
+echte Datei über den regulären App-Upload hoch
+(`card.locator('input[type="file"]').setInputFiles(...)`, siehe Upload-Konvention
+Abschnitt 1; ein sichtbarer `filechooser`-Button existiert nicht) bzw. exportiert
+und liest die **tatsächlich heruntergeladene** Datei vom Dateisystem, geparst mit
+JSZip + (wo strukturelle Prüfung nötig ist) einem vom eigenen Reader
+**unabhängigen** DOM-Parser (`jsdom`s `DOMParser`, bereits Devdependency), nicht
+mit `readDocx`/`readOdt` selbst. **Jeder Reimport / zweite Upload** (P20, P25–P27)
+erfordert vorab den Rücksprung zur Format-Auswahl (`/formate/i`-Button, siehe
+Abschnitt 1) — sonst fehlt der Datei-Input im DOM. Außerdem in jedem dieser Tests
+`page.on('pageerror', …)` registrieren und am Ende auf leer prüfen (Muster aus
+`docx.spec.ts` „full coverage"-Test), damit ein stiller Laufzeitfehler beim
+Import/Export nicht unbemerkt bleibt.
 
 ```ts
 test('Testfall 18/Rundreise 4.1.2: DOCX-Eigenrundreise ueber echte Bedienung, Downloadpruefung mit unabhaengigem Parser', async ({ page }) => {
@@ -350,15 +560,15 @@ test('Testfall 18/Rundreise 4.1.2: DOCX-Eigenrundreise ueber echte Bedienung, Do
 |---|---|---|---|---|---|
 | P18 | DOCX-Eigenrundreise | siehe Code-Block oben | `<w:jc w:val="right"/>` im richtigen `<w:pPr>`, struktureller Nachweis | GRÜN | Testfall 18, Rundreise 4.1.2 |
 | P19 | ODT-Eigenrundreise | analog, `content.xml` prüfen: `<text:p>` referenziert einen Stil mit `fo:text-align="right"` | analog | GRÜN | Testfall 19, Rundreise 4.2.2 |
-| P20 | Upload reale DOCX (`60329.docx`, unverändert) → Export → Reimport | **Echter** `filechooser`-Upload (Abschnitt 3.11), Text „Protocol No." muss rechtsbündig erscheinen, danach Export + Struktur-Check | Text und `text-align: right` identisch zum Original nach Rundreise | GRÜN | Testfall 23, Rundreise 4.1.1 |
+| P20 | Upload reale DOCX (`60329.docx`, unverändert) → Export → Reimport | Realer Upload via `docxCard(page).locator('input[type="file"]').setInputFiles(...)` (Upload-Konvention Abschnitt 1); Text „Protocol No." muss rechtsbündig erscheinen; Export; **vor** dem Reimport zurück über `/formate/i`-Button, dann zweiter Upload der heruntergeladenen Bytes + Struktur-Check | Text und `text-align: right` identisch zum Original nach Rundreise | GRÜN | Testfall 23, Rundreise 4.1.1 |
 | P21 | Upload reale ODT (`invalid.odt`, unverändert) → Export → Reimport | Text „hallo" muss rechtsbündig erscheinen | analog | GRÜN | Testfall 24, Rundreise 4.2.1 |
 | P22 | Upload reale DOCX `rtl.docx` (`w:jc="start"` auf arabischem Text) | Upload, Editor zeigt arabischen Text vollständig, kein Absturz | Text `إسبانيا` sichtbar; Ausrichtung dokumentiert als `left` (akzeptierte RTL-Einschränkung, **kein** Fehlschlag) | GRÜN (dokumentierte Grenze, kein Bug-Test) | Testfall 25, Grenzfall 6/12 |
 | P23 | Upload reale ODT `excelfileformat.odt` (`fo:text-align="end"`) | Upload, Absatz mit `end`-Stil im Editor identifizieren | **Soll:** `aria-pressed` des rechts-Buttons bei Cursor in diesem Absatz ist `true`, `text-align: right` im DOM | **ROT** — aktuell landet der Rohwert `"end"` unnormalisiert im Modell (Abschnitt 2.3, O3); der Button zeigt **keine** der vier Optionen aktiv, obwohl der Browser den unbekannten CSS-Wert `text-align: end` selbst korrekt als „rechts" rendert (LTR-Kontext) — **sichtbar widersprüchlicher UI-Zustand: Absatz sieht rechtsbündig aus, aber kein Button ist gedrückt.** Genau der in Verdachtsmoment 2 beschriebene Fehler, hier erstmals im Browser demonstriert statt nur auf Modellebene | **ROT** | Testfall 26, Grenzfall 8/Verdachtsmoment 2 |
 | P24 | Upload reale DOCX `bug-paragraph-alignment.docx` (Ausrichtung nur über Stil „Title" → `center`) | Upload, Absatz mit Text „does not have explicit alignment" | **Soll:** `text-align: center` im DOM | **ROT** — aktueller Code ignoriert `w:pStyle`-Vererbung, Absatz erscheint `text-align: left` | Testfall 27, Grenzfall 9/Verdachtsmoment 3 |
-| P25 | Cross-Format DOCX → ODT | DOCX mit rechtsbündigem Absatz erstellen/hochladen → als ODT exportieren → heruntergeladene ODT-Datei über die ODT-Karte per `filechooser` **erneut hochladen** → sichtbar weiterhin rechtsbündig | `text-align: right` nach Formatwechsel erhalten | GRÜN | Testfall 20, Rundreise 4.3.1 |
+| P25 | Cross-Format DOCX → ODT | DOCX mit rechtsbündigem Absatz erstellen/hochladen → als ODT exportieren → **zurück über `/formate/i`-Button** → heruntergeladene ODT-Datei via `odtCard(page).locator('input[type="file"]').setInputFiles(...)` **erneut hochladen** → sichtbar weiterhin rechtsbündig | `text-align: right` nach Formatwechsel erhalten | GRÜN | Testfall 20, Rundreise 4.3.1 |
 | P26 | Cross-Format ODT → DOCX | spiegelbildlich | analog | GRÜN | Testfall 21, Rundreise 4.3.2 |
 | P27 | Doppelte Cross-Format-Rundreise DOCX→ODT→DOCX, rechtsbündige Überschrift + Fett + Farbe kombiniert | Überschrift mit allen drei Eigenschaften anlegen, zweimal konvertieren wie P25+P26 verkettet, letzten Download strukturell prüfen | `<w:jc w:val="right"/>` **und** `<w:b/>`/Farbe am selben Run nach zwei Konvertierungen weiterhin vorhanden | GRÜN erwartet (keine bekannte Lücke für den reinen Absatzfall ohne Formatvorlagen-Abhängigkeit) | Testfall 22, Rundreise 4.3.3 |
-| P28 | Import Fremddatei mit ungültigem `w:jc`-Wert (`distribute`) — synthetisch, da im realen Korpus laut `ausrichtung-rechts-code.md` Abschnitt 6.1 **nicht** vorhanden | In-Memory per JSZip gebaute DOCX-Datei (Bytes, kein Pfad auf Platte) über `filechooser`/`setInputFiles` hochladen — bewusst weiterhin über den echten Upload-Pfad, nicht über `readDocx` direkt | Kein Absturz (`page.on('pageerror')` bleibt leer), Text bleibt vollständig sichtbar, Ausrichtung fällt dokumentiert auf `left` zurück | GRÜN | Testfall 36, Grenzfall 7 |
+| P28 | Import Fremddatei mit ungültigem `w:jc`-Wert (`distribute`) — synthetisch, da im realen Korpus laut `ausrichtung-rechts-code.md` Abschnitt 6.1 **nicht** vorhanden | In-Memory per JSZip gebaute DOCX-Datei (Bytes, kein Pfad auf Platte) per `setInputFiles({ name, mimeType, buffer })` auf den versteckten Datei-Input hochladen — bewusst weiterhin über den echten Upload-Pfad (`onChange` → `readDocx`), nicht über `readDocx` direkt | Kein Absturz (`page.on('pageerror')` bleibt leer), Text bleibt vollständig sichtbar, Ausrichtung fällt dokumentiert auf `left` zurück | GRÜN | Testfall 36, Grenzfall 7 |
 
 #### 3.10 Icon-Rendering, Tooltip, Tastenkürzel (Testfälle 31–33)
 
@@ -550,7 +760,7 @@ Abschnitt 8).
   `ausrichtung-rechts-code.md` Abschnitt 6.1 kein Beispiel für `w:jc
   w:val="distribute"` auf Absatzebene existiert, muss die Testdatei synthetisch
   (per JSZip, In-Memory-Bytes) gebaut werden — Upload-Pfad bleibt trotzdem der
-  echte `filechooser`/`setInputFiles`, nur die Bytes sind konstruiert statt von
-  Platte gelesen; das ist kein Widerspruch zum Grundsatz „keine internen
-  Funktionsaufrufe" aus Abschnitt 3, da der Parser (`readDocx`) weiterhin nur
-  über die reguläre Upload-UI erreicht wird.
+  echte `setInputFiles` auf den versteckten Datei-Input, nur die Bytes sind
+  konstruiert statt von Platte gelesen; das ist kein Widerspruch zum Grundsatz
+  „keine internen Funktionsaufrufe" aus Abschnitt 3, da der Parser (`readDocx`)
+  weiterhin nur über die reguläre Upload-UI (`onChange`-Handler) erreicht wird.

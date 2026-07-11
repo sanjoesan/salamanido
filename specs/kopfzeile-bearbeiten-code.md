@@ -118,11 +118,147 @@ diese Bedingung ist für die drei genannten Fälle nicht erfüllt, weshalb die i
 Plans beschriebenen Reader/Writer-Änderungen **im Rahmen dieser Anforderung selbst** notwendig sind, nicht
 optionale Zusatzarbeit.
 
+### 0.7 Nachverifikation gegen den aktuellen Code (Stand 2026-07-05) — Korrekturen dieser Planfassung
+
+Der Code wurde nach dem Merge des Nachbar-Slugs `ausschneiden` (Commits `9f8fa03`,
+`db61c89`, `175d86d`, `29cbc80`) **erneut vollständig gegen den aktuellen Stand gelesen**. Ergebnis:
+Alle **Symbolnamen und die Logik-/Bug-Analyse der Abschnitte 0.1–0.6 und 1–11 bleiben gültig**, aber
+vier Dinge müssen korrigiert werden, weil frühere Fassungen dieses Plans gegen einen **älteren**
+Code-Snapshot geschrieben wurden als die Anforderung selbst:
+
+**(1) Zeilennummern in den DOCX-/ODT-Reader/Writer-Abschnitten waren veraltet.** Der Plan zitierte z. B.
+`docx/reader.ts:352` und `odt/reader.ts:257`; die tatsächlichen (und mit der Anforderung Befund 2/4
+übereinstimmenden) Stellen sind unten aufgeführt. Maßgeblich bleibt laut Anforderung der **Symbolname**;
+die folgende Tabelle bringt die Zeilen auf den heutigen Stand, damit der Umsetzer nicht in die Irre geht:
+
+| Symbol / Stelle | Datei | veraltet im Plan | **aktuell** |
+|---|---|---|---|
+| `firstChildNS(sectPr, w, 'headerReference')` / `'footerReference'` | `docx/reader.ts` | 352–353 | **509–510** |
+| `sectPr = firstChildNS(bodyEl, w, 'sectPr')` | `docx/reader.ts` | 350 | **507** |
+| Header-Ladeblock (`readBodyChildren(root, …, documentRels, zip)`) | `docx/reader.ts` | 357–365 | **514–522** (Aufruf Z. 520) |
+| Footer-Ladeblock | `docx/reader.ts` | 366–374 | **523–531** (Aufruf Z. 529) |
+| `readRelationships` | `docx/reader.ts` | 23–34 | **24–35** |
+| `childElements` | `docx/reader.ts` | — | **16–18** |
+| `readBodyChildren` (Signatur mit `imageRels`) | `docx/reader.ts` | 307–313 | **464–470** |
+| `resolveImageSources` (hartkodiert `'word/document.xml'`) | `docx/reader.ts` | 285–305 | **442–462** (Pfad Z. 446) |
+| `documentRels = readRelationships(…document.xml.rels)` | `docx/reader.ts` | — | **501** |
+| `writeDocx` | `docx/writer.ts` | 222–267 | **252–318** |
+| `if (header) { buildHeaderFooterXml('hdr', …) … }` (gemeinsame `documentRels`) | `docx/writer.ts` | 264–268 | **264–268** (Aufruf `blocksToDocx(header.content, images, documentRels)` Z. 265) |
+| `if (footer) { … }` | `docx/writer.ts` | — | **269–273** |
+| `buildContentTypesXml(!!header, !!footer, …)`-Aufruf | `docx/writer.ts` | 238 | **290** (Funktion 229–250; Header-`Override` Z. 238) |
+| `<Default Extension="rels" …/>` | `docx/writer.ts` | 214 | **244** |
+| `document.xml.rels` serialisieren | `docx/writer.ts` | 297 | **299** |
+| `RelationshipRegistry` / `RELATIONSHIP_TYPES`-Import | `docx/writer.ts` | — | **4** (`./relationships`) |
+| `getElementsByTagNameNS(style, 'master-page')[0]` | `odt/reader.ts` | 257 | **375** |
+| Header/Footer-Extraktion aus Master-Page | `odt/reader.ts` | 258–269 | **376–388** |
+| `style:master-page style:name="Standard"` (Writer) | `odt/writer.ts` | 149 | **226** (Funktion `buildStylesXml` 216–233) |
+| `doc: { content: 'block+' }` | `shared/schema.ts` | 7 | **14** |
+
+**Nachverifiziert in diesem Pipeline-Durchlauf (Stand 2026-07-05, nach dem `ausschneiden`-Merge):** Die
+`WordEditor.tsx`-Zeilennummern sind **inzwischen gedriftet** (frühere Fassungen dieses Absatzes behaupteten
+fälschlich, sie seien noch aktuell). Ursache: Die transiente `cutError`-Auto-Dismiss-Logik wurde aus dem
+früheren **Inline-`useEffect`** in einen wiederverwendbaren Custom-Hook **`useAutoDismiss(value, setValue, ms)`**
+(`WordEditor.tsx:52–63`, aufgerufen als `useAutoDismiss(cutError, setCutError)` in Z. 74) **ausgelagert**,
+und `cutError` steht jetzt hinter dem lokalen `forceRender`-State. Dadurch hat sich der gesamte
+Funktionsrumpf um ~8–13 Zeilen nach unten verschoben. Aktuelle Stellen (maßgeblich bleibt der **Symbolname**):
+
+| Symbol / Stelle | veraltet in früheren Absatzfassungen | **aktuell** |
+|---|---|---|
+| `reconcileSelectionOnClick` | 43–50 | **43–50** (unverändert) |
+| `useAutoDismiss`-Hook-Definition (ersetzt den früheren Inline-`useEffect`) | (Inline-`useEffect` 62–66) | **52–63** (Aufruf Z. 74) |
+| `viewRef` | 54 | **67** |
+| `onChangeRef` | 121 (`.current`-Aufruf) | **68** (Definition), `.current`-Aufruf in `dispatchTransaction` Z. **129** |
+| `forceRender`-State (im Plan zu `setTick` umbenannt, 4.1 Punkt 3) | — | **70** (Deklaration), Bump in Z. **131** und **136** |
+| `cutError`-State | 58 | **71** |
+| Body-Seed (`wordSchema.nodeFromJSON(doc.content.body)`) | 71 | **79** |
+| `'Shift-Enter': insertHardBreak()` | 89 | **97** |
+| `'Shift-Delete': cutSelection({ onCutBlocked: setCutError })` | 98 | **106** |
+| Mod-c/x/v-Verzicht-Kommentar | 78–84 | **86–92** |
+| `createPaginationPlugin()` (argumentlos) | 105 | **113** |
+| `new EditorView(...)` / `clipboardTextSerializer` | 114 | **122** / **124** |
+| `dispatchTransaction` | 117–124 | **125–132** |
+| mousedown/mouseup-Listener-Registrierung | 146–147 (bzw. „103–104" in 4.1 Punkt 7) | **154–155** |
+| `<Toolbar view={viewRef.current} cutError=… setCutError=… />` | 162 | **170** |
+
+`Toolbar.tsx`s **Kern-Symbole aus Punkt (2)** (`ToolbarProps` 22–26, `ScissorsIcon` 33–53, `run()` 28–31)
+sind weiterhin **korrekt**. Aber die in Abschnitt 4.2 Punkt 1 genannte Einfüge-Ankerstelle „bestehende
+Tabelle/Bild-Gruppe (`Toolbar.tsx:226–244`)" ist **veraltet** — die Tabelle-/Bild-Buttons stehen aktuell in
+`Toolbar.tsx:277–294` (die neue Kopfzeilen-Gruppe wird nach dem `🖼 Bild`-`<label>` in Z. 291–294
+angehängt); und der in 4.3 zitierte `run()`-Helper liegt in **28–31**, nicht „23–26". **Allgemein: Die noch
+in den Prosa-Abschnitten 3.2/4.x/5.x/6.x verstreuten Inline-Zeilennummern können gegenüber dem heutigen
+Code driften — verbindlich sind die Symbolnamen und die beiden Korrekturtabellen hier in 0.7, nicht die
+Prosa-Zeilenzahlen.**
+
+**Verifizierte API-Voraussetzung:** `RelationshipRegistry` (`docx/relationships.ts`) besitzt `.all(): Relationship[]`
+(Z. 19–21) und `.serialize(): string` (Z. 23–31). Die in Abschnitt 1.3/5.2 verwendeten
+`headerRels.all().length`- und `headerRels.serialize()`-Aufrufe sind damit gedeckt — **keine** Ergänzung
+der Klasse nötig.
+
+**(2) Der Ausschneiden-Merge macht `Toolbar` und `WordEditor` reicher als in Abschnitt 4 abgebildet —
+Regressionsgefahr.** Der aktuelle Code enthält bereits:
+- `ToolbarProps = { view; cutError: string | null; setCutError: (m: string | null) => void }`
+  (`Toolbar.tsx:22–26`), ein eingebettetes `ScissorsIcon` (`Toolbar.tsx:33–53`, das exakt das in
+  Abschnitt 3.3 geforderte SVG-Muster **bereits liefert** — `HeaderIcon` ist also 1:1 daran zu
+  orientieren, nicht neu zu erfinden), sowie einen `run(view, command)`-Helper (`Toolbar.tsx:28–31`).
+- In `WordEditor.tsx`: `const [cutError, setCutError] = useState<string | null>(null)` (Z. **71**), das
+  Auto-Dismiss-Verhalten jetzt über den Custom-Hook `useAutoDismiss(cutError, setCutError)` (Z. **74**,
+  Hook-Definition **52–63** — **nicht mehr** ein Inline-`useEffect`), die Body-Keymap-Bindung
+  `'Shift-Delete': cutSelection({ onCutBlocked: setCutError })` (Z. **106**) und
+  `'Shift-Enter': insertHardBreak()` (Z. **97**), und den Toolbar-Aufruf
+  `<Toolbar view={viewRef.current} cutError={cutError} setCutError={setCutError} />` (Z. **170**).
+
+**Konsequenz (bindend für Abschnitt 3.2, 4.1, 4.2):**
+- Die in Abschnitt 4.2 vorgeschlagene `ToolbarProps`-Erweiterung darf `cutError`/`setCutError` **nicht
+  entfernen**, sondern muss sie **behalten** und die vier neuen Kopfzeilen-Props **ergänzen** (korrigierte
+  Fassung siehe Abschnitt 4.2 unten).
+- Der `<Toolbar .../>`-Aufruf in Abschnitt 4.1 muss `cutError`/`setCutError` weiterhin durchreichen und
+  das bestehende Cut-Fehler-Feedback (das heute unter der Toolbar gerendert wird) erhalten.
+- Die **Kopfzeilen-`EditorView`** braucht für die von Anforderung 3.2 geforderte Funktionsparität
+  (Ausschneiden/Kopieren/Einfügen, Shift-Enter) **denselben Plugin-/Keymap-Stack wie die Body-View minus
+  `createPaginationPlugin()`** — inklusive `'Shift-Delete': cutSelection({ onCutBlocked: setCutError })`,
+  `'Shift-Enter': insertHardBreak()`, `keymap(baseKeymap)`, `columnResizing()`, `tableEditing()`,
+  `dropCursor()`, `gapCursor()` und `clipboardTextSerializer`. Der bewusste Verzicht auf `Mod-c/x/v`
+  (native Clipboard-Behandlung, siehe `WordEditor.tsx:86–92`) gilt für die Kopfzeile identisch. Die in
+  Abschnitt 3.2 gezeigte Keymap ist entsprechend zu ergänzen (korrigierte Fassung dort).
+- `setCutError` ist gemeinsamer `WordEditor`-State und wird an **beide** Views (Body **und** Kopfzeile)
+  als `onCutBlocked` gereicht; das eine Fehlerbanner unter der (kontextsensitiven) Toolbar deckt beide ab.
+
+**(3) ODT-Master-Page-Auswahl muss mit dem Schwester-Plan `fusszeile-bearbeiten-code.md` §3.8
+zusammenfallen — es ist derselbe Code-Pfad.** `odt/reader.ts` liest **eine** Master-Page (Z. 375) und
+leitet daraus **sowohl** `headerEl` **als auch** `footerEl` ab (Z. 377–378). Kopf- und Fußzeilen-Feature
+teilen sich diese Auswahl also zwingend. Der Schwester-Plan hat die Heuristik an der **härteren** realen
+Datei `HeaderFirstAndEvenPageEnabled_MSO15.odt` verifiziert, in der **keine** Master-Page „Standard" heißt
+(sie heißen `MP0`/`MPF0`, verkettet über `style:next-style-name`). Die in Abschnitt 1.2 dieses Plans
+ursprünglich gewählte Heuristik „bevorzuge `style:name=\"Standard\"`, sonst die erste" wurde nur an
+`headerFinal.odt`/`headerFirstPage.odt` (beide **haben** eine „Standard"-Page) geprüft und würde auf der
+MSO15-Datei genau auf den in Befund 0.4 selbst benannten „nimm die erste in Dokumentreihenfolge"-Zufall
+zurückfallen. **Entscheidung: Abschnitt 1.2 wird auf die robustere, gemeinsam genutzte Heuristik
+umgestellt** (Ziel einer `next-style-name`-Kette zuerst, dann `Standard`, dann die erste gefundene — siehe
+korrigierte Fassung in Abschnitt 1.2). Wer von beiden Features zuerst umsetzt, legt genau **eine**
+`pickMasterPage`-Funktion an; der zweite verwendet sie unverändert.
+
+**(4) Pagination-Signatur mit dem Schwester-Plan vereinheitlichen.** `createPaginationPlugin()` nimmt
+heute **kein** Argument (`pagination.ts:72`). Dieser Plan (Abschnitt 1.6/4.4) und
+`fusszeile-bearbeiten-code.md` §3.4 fügen **beide** einen Seitenzahl-Callback hinzu, aber mit
+unterschiedlicher Signatur (Objekt-Form `{ onPageCountChange }` vs. Positional `onPageCountChange?`). Da
+es dieselbe Funktion ist: **verbindlich die Positional-Form `createPaginationPlugin(onPageCountChange?:
+(count: number) => void)`** verwenden (schlichter, und der Schwester-Plan hat sie so bereits ausformuliert).
+Der bestehende argumentlose Aufruf bleibt gültig (Kopfzeilen-View bindet das Plugin ohnehin nicht ein).
+
 ---
 
 ## 1. Architektur-/Produktentscheidungen
 
 ### 1.1 DOCX-Reader: Typ-Priorisierung für `headerReference`/`footerReference` (setzt Anforderung 3.4 um, behebt Befund 0.1)
+
+> **Gemeinsamer Code-Pfad mit `fusszeile-bearbeiten-code.md` §3.6a.** `pickReference` wählt aus **einem**
+> `sectPr` sowohl die Kopf- als auch die Fußzeilen-Referenz (Z. 509–510). Beide Features müssen **eine**
+> gemeinsame Helferfunktion nutzen; der Schwester-Plan nennt sie `pickSectionReference` und gibt zusätzlich
+> ein `hasVariants`-Flag für einen sichtbaren „mehrere Kopf-/Fußzeilen-Varianten importiert"-Hinweis zurück.
+> Wer zuerst umsetzt, legt genau eine Funktion an; die Prioritätsreihenfolge (`default` zuerst) ist in beiden
+> Plänen identisch, nur die Rückgabesignatur ist im Schwester-Plan reicher (`{ el, hasVariants }`) — diese
+> reichere Signatur übernehmen, damit der Varianten-Hinweis (Anforderung 3.4 „dokumentieren, welche
+> übernommen wird") nicht verloren geht.
 
 **Entscheidung:** Deterministische Priorität **`default` → `first` → `even` → (irgendein anderer
 gefundener Typ)**, dokumentiert in Code-Kommentar und in diesem Plan. Begründung: `default` ist der in
@@ -166,36 +302,56 @@ siehe 1.3 für die zusätzliche Relationship-Namensraum-Korrektur derselben Stel
 Priorisierung; nach Umsetzung ist in `kopfzeile-bearbeiten-req.md` Abschnitt 3.4 nachzutragen: „Priorität
 `default` → `first` → `even`, siehe `kopfzeile-bearbeiten-code.md` Abschnitt 1.1."
 
-### 1.2 ODT-Reader: Master-Page-Auswahl nach Name statt nach Dokumentreihenfolge (setzt Anforderung 3.4 um, behebt Befund 0.4)
+### 1.2 ODT-Reader: deterministische Master-Page-Auswahl (setzt Anforderung 3.4 um, behebt Befund 0.4)
 
-**Entscheidung:** Bevorzuge das `style:master-page`-Element mit `style:name="Standard"`; ist keines mit
-diesem Namen vorhanden, nimm das erste gefundene (bisheriges Verhalten als Fallback, nicht komplett
-ersetzt). Begründung: `"Standard"` ist der von LibreOffice/OpenOffice intern (sprachunabhängig,
-nicht lokalisiert) vergebene Name für die Standard-Seitenvorlage eines neuen Dokuments — in beiden
-geprüften Fixtures (0.4) trägt exakt die inhaltlich richtige Master-Page diesen Namen, während die
-„andere rechte Seite"-Variante `"Right_20_Page"` heißt. Das ist kein Zufallstreffer der beiden Dateien,
-sondern folgt der Namenskonvention des ODF-Referenz-Autorenwerkzeugs selbst.
+> **Aktualisiert (siehe 0.7 Punkt 3):** Diese Auswahl ist **derselbe Code-Pfad** wie in
+> `fusszeile-bearbeiten-code.md` §3.8 — `odt/reader.ts` liest genau **eine** Master-Page (Z. **375**) und
+> leitet daraus **Kopf- und** Fußzeile ab (Z. 377–378). Beide Features müssen dieselbe `pickMasterPage`-
+> Funktion verwenden. Die ursprünglich hier gewählte „nur `Standard`-bevorzugt"-Heuristik war nur an
+> Fixtures mit `Standard`-Page verifiziert; der Schwester-Plan hat an `HeaderFirstAndEvenPageEnabled_MSO15.odt`
+> gezeigt, dass reale Dateien Master-Pages `MP0`/`MPF0` (keine „Standard") führen. Deshalb die robustere,
+> gemeinsame Heuristik unten.
 
-In `src/formats/odt/reader.ts`, Ersatz für `reader.ts:257`:
+**Entscheidung (verbindlich, mit `fusszeile-bearbeiten-code.md` §3.8 identisch):** Priorität
+**(1) Ziel einer `style:next-style-name`-Kette** (die Folgeseiten-Master-Page; die Quelle einer solchen
+Kette ist typischerweise die „erste Seite anders"-Variante) → **(2) Master-Page `style:name="Standard"`**
+(u. a. von unserem eigenen Writer erzeugt, `odt/writer.ts:226`) → **(3) die erste in Dokumentreihenfolge**
+(bewusst dokumentierter letzter Fallback, kein Absturz, kein Totalverlust). Begründung: Deckt sowohl die
+`Standard`-Fixtures (0.4) als auch die MSO15-Mehrfach-Master-Page (Schwester-Plan §1.8) korrekt ab.
+
+In `src/formats/odt/reader.ts`, Ersatz für die Inline-Auswahl `getElementsByTagNameNS(style,
+'master-page')[0]` (**`reader.ts:375`**):
 ```ts
-/** Prefers the master-page literally named "Standard" — LibreOffice/OpenOffice's own,
- *  non-localized name for a document's main page style (see kopfzeile-bearbeiten-code.md
- *  Abschnitt 1.2/0.4 for the two real fixtures this was verified against, where the
- *  first-in-document-order master-page happened to also be "Standard" only coincidentally).
- *  Falls back to the first master-page found if none is named "Standard" (unchanged behavior
- *  for files that don't use this convention — still a documented, deterministic choice, not a
- *  crash or silent total loss, per Anforderung 3.4). */
+/** Picks one style:master-page deterministically from a styles.xml that may contain several
+ *  (real files with "erste Seite anders"/gerade-ungerade do). Shared by header & footer, since
+ *  odt/reader.ts derives both from a single master-page. Priority (see kopfzeile-bearbeiten-code.md
+ *  Abschnitt 1.2/0.7 and fusszeile-bearbeiten-code.md §3.8):
+ *   1. the TARGET of a style:next-style-name chain (the regular follow-on page — its source is
+ *      usually the first-page variant), verified against HeaderFirstAndEvenPageEnabled_MSO15.odt;
+ *   2. else the master-page literally named "Standard" (our own writer's name, and LibreOffice's
+ *      non-localized default);
+ *   3. else the first in document order — a documented, deterministic last resort, never a crash. */
 function pickMasterPage(stylesDoc: Document): Element | null {
-  const masterPages = Array.from(stylesDoc.getElementsByTagNameNS(ODF_NAMESPACES.style, 'master-page'))
-  return masterPages.find((el) => el.getAttributeNS(ODF_NAMESPACES.style, 'name') === 'Standard') ?? masterPages[0] ?? null
+  const all = Array.from(stylesDoc.getElementsByTagNameNS(ODF_NAMESPACES.style, 'master-page'))
+  if (all.length <= 1) return all[0] ?? null
+  const chainTargets = new Set(
+    all
+      .map((el) => el.getAttributeNS(ODF_NAMESPACES.style, 'next-style-name'))
+      .filter((v): v is string => !!v),
+  )
+  const chained = all.find((el) => chainTargets.has(el.getAttributeNS(ODF_NAMESPACES.style, 'name') ?? ''))
+  if (chained) return chained
+  const standard = all.find((el) => el.getAttributeNS(ODF_NAMESPACES.style, 'name') === 'Standard')
+  return standard ?? all[0] ?? null
 }
 ```
-Aufruf `reader.ts:257`:
+Aufruf (`reader.ts:375`):
 ```ts
 const masterPage = pickMasterPage(stylesDoc)
 ```
 **Dokumentationspflicht:** analog 1.1, Nachtrag in `kopfzeile-bearbeiten-req.md` Abschnitt 3.4: „ODT:
-bevorzugt Master-Page `style:name=\"Standard\"`, sonst die erste gefundene."
+bevorzugt das Ziel einer `next-style-name`-Kette, sonst Master-Page `style:name=\"Standard\"`, sonst die
+erste gefundene — identisch zum Fußzeilen-Feature."
 
 ### 1.3 DOCX Reader **und** Writer: eigener Relationship-Namensraum je Kopf-/Fußzeilen-Part (behebt Befund 0.2/0.3)
 
@@ -352,7 +508,7 @@ aktiver, aber leerer Zustand bleibt erhalten") — Konsistenz zwischen beiden Fe
 da die Anforderung selbst in Grenzfall 11 explizit offenlässt, welche der beiden Optionen gewählt wird,
 und keine gegenteilige Vorgabe wie bei der Bestätigungsdialog-Frage oben existiert. Kein zusätzlicher
 Code nötig — Writer/Reader behandeln `header !== null` bereits identisch, ob leer oder befüllt
-(`docx/writer.ts:234`, `odt/writer.ts:191`, beide prüfen nur `if (header)`, nicht dessen Inhalt).
+(`docx/writer.ts:264` `if (header)`, `odt/writer.ts:271` `header ? … : null`, beide prüfen nur die Existenz, nicht den Inhalt).
 
 ### 1.5 Zwei-`EditorView`-Architektur mit gemeinsamer, kontextsensitiver Toolbar
 
@@ -367,19 +523,20 @@ ausdrücklich „dieselbe Toolbar wie im Haupttext", nicht zwei separate Toolbar
 1. beide `EditorView`-Instanzen hält (`bodyViewRef`, `headerViewRef`),
 2. einen gemeinsamen `focusedRegion: 'body' | 'header'`-State hält, aktualisiert über einen
    `handleDOMEvents.focus`-Callback in **beiden** Views' Plugin-Konfiguration,
-3. einen gemeinsamen `tick`-State (statt des bisherigen lokalen `forceRender` in
-   `dispatchTransaction`, `WordEditor.tsx:91-98`) hält, der von **beiden** Views'
+3. einen gemeinsamen `tick`-State (statt des bisherigen lokalen `forceRender`-State, `WordEditor.tsx:70`,
+   der heute in `dispatchTransaction` Z. 131/136 gebumpt wird) hält, der von **beiden** Views'
    `dispatchTransaction` hochgezählt wird, damit `Toolbar` (die auf `view.state` zugreift, ohne selbst
    zu subscriben) nach **jeder** Transaktion in **irgendeiner** der beiden Views neu rendert — sonst
    würde z. B. „Fett" im Kopfzeilentext angeklickt, aber der aktive/gedrückte Zustand des Fett-Buttons
    nicht aktualisiert, weil `WordEditor` nicht wüsste, dass sich etwas geändert hat,
 4. `<Toolbar view={focusedRegion === 'header' ? headerViewRef.current : bodyViewRef.current} />`
    rendert — vor dem ersten Mount beider Views ist das wie bisher `null`-geschützt
-   (`{viewRef.current && <Toolbar …/>}`-Muster aus `WordEditor.tsx:118` bleibt für die aktive View
+   (`{viewRef.current && <Toolbar …/>}`-Muster aus `WordEditor.tsx:170` bleibt für die aktive View
    erhalten).
 
 **Selection-Sync-Fix wird geteilt, nicht dupliziert (Grenzfall 3/9, Pflicht-Regressionsschutz):** Die
-bestehende `reconcileSelectionOnClick`-Funktion (`WordEditor.tsx:42-53`) wird nach
+bestehende `reconcileSelectionOnClick`-Funktion (`WordEditor.tsx:43-50`, samt ihres Kommentarblocks
+`WordEditor.tsx:20-42`) wird nach
 `src/formats/shared/editor/selectionReconciliation.ts` (neue Datei) verschoben und **unverändert**
 exportiert. Beide `EditorView`-Instanzen (Body **und** Header) binden sie identisch über
 `view.dom.addEventListener('mouseup', (e) => reconcileSelectionOnClick(view, e))`. Begründung: Die
@@ -438,14 +595,15 @@ export const HEADER_BAND_MAX_PX = PAGE_MARGIN_PX * 2
 `pagination.ts:27-29`), aber nirgends nach außen gemeldet. `createPaginationPlugin` (`pagination.ts:72-105`)
 bekommt einen optionalen Parameter:
 ```ts
-export function createPaginationPlugin(options?: { onPageCountChange?: (count: number) => void }): Plugin {
+// Positional-Signatur (0.7 Punkt 4), identisch zu fusszeile-bearbeiten-code.md §3.4.
+export function createPaginationPlugin(onPageCountChange?: (count: number) => void): Plugin {
   return new Plugin({
     // … unverändert …
     view(view) {
       const recompute = () => {
         const next = measureAndBuildDecorations(view)
         const current = paginationKey.getState(view.state)
-        options?.onPageCountChange?.(countPagesFromDecorations(next) /* siehe unten */)
+        onPageCountChange?.(countPagesFromDecorations(next) /* siehe unten */)
         if (current && sameDecorationSet(current, next)) return
         view.dispatch(view.state.tr.setMeta(paginationKey, next))
       }
@@ -457,7 +615,7 @@ export function createPaginationPlugin(options?: { onPageCountChange?: (count: n
 (`countPagesFromDecorations`: kleine Hilfsfunktion, zählt `next.find().length + 1`, dieselbe Formel wie
 `computePageCount` bereits verwendet, hier direkt auf die bereits gebauten Decorations angewandt, um keine
 zweite Messung/kein zweites `getBoundingClientRect()` zu benötigen.) `WordEditor.tsx` hält
-`const [pageCount, setPageCount] = useState(1)` und übergibt `onPageCountChange: setPageCount` beim
+`const [pageCount, setPageCount] = useState(1)` und übergibt `setPageCount` (Positional) beim
 Erzeugen des Plugins für die **Body**-View (Kopfzeile selbst paginiert nicht, braucht das Plugin nicht).
 
 **Rendering (neue Komponente `src/formats/shared/editor/HeaderChrome.tsx`):**
@@ -466,19 +624,26 @@ interface HeaderChromeProps {
   pageCount: number
   header: ProseMirrorJSON | null
   headerViewRef: RefObject<EditorView | null>
-  onActivate: () => void
-  onFocusHeader: () => void
+  onHeaderChange: (json: ProseMirrorJSON) => void   // Rückschreiben via onChangeRef, siehe 4.1 Punkt 6
+  focusedRegion: 'body' | 'header'
+  onFocusChange: (region: 'body' | 'header') => void
+  onTick: () => void                                 // Toolbar-Re-Render nach jeder Header-Transaktion (1.5 Punkt 3)
+  onCutBlocked: (message: string | null) => void     // = setCutError, für Shift-Delete-Cut in der Kopfzeile (0.7 Punkt 2 / 3.2)
   onEscapeToBody: () => void
 }
 ```
+(Die einheitliche, oben stehende Prop-Liste ist maßgeblich — frühere Teilaufzählungen in Abschnitt 3.2/
+4.1 werden hierdurch konsolidiert. `onActivate`/`onFocusHeader` aus einer früheren Fassung entfallen
+zugunsten von `onHeaderChange` + `onFocusChange`: „Aktivieren" = `onHeaderChange(emptyDocJSON())` durch den
+Doppelklick-Handler, „Fokus wechseln" = `onFocusChange('header')`.)
 - Rendert `pageCount` absolut positionierte `<div>`s (`top: pageHeaderBandTop(i)`, `height: 'auto'`,
   `maxHeight: HEADER_BAND_MAX_PX`, `overflowY: 'auto'`) innerhalb des bestehenden Seiten-Stack-`<div>`
-  aus `WordEditor.tsx:120-127` (dieser bekommt zusätzlich `position: 'relative'` in seinem `style`-Objekt
+  aus `WordEditor.tsx:172-179` (dieser bekommt zusätzlich `position: 'relative'` in seinem `style`-Objekt
   — einzige nötige Änderung an diesem bestehenden Element außer dem neuen Kind).
 - **Band 0** enthält entweder (a) bei `header === null`: einen dezenten Platzhalter-Text/-Rahmen
   („Doppelklick, um eine Kopfzeile hinzuzufügen") mit `onDoubleClick={onActivate}`, oder (b) bei
   `header !== null`: das `<div ref={headerContainerRef} />`-Mount-Ziel für die echte, interaktive
-  `EditorView` (analog `WordEditor.tsx:128`, `containerRef`).
+  `EditorView` (analog `WordEditor.tsx:180`, `containerRef`).
 - **Bänder 1..pageCount-1** sind bei `header !== null` **rein visuelle, nicht editierbare Spiegel**
   desselben Inhalts: `contentEditable={false}`, Inhalt via `useEffect` einmal pro `header`-Änderung neu
   gerendert durch `DOMSerializer.fromSchema(wordSchema).serializeFragment(wordSchema.nodeFromJSON(header).content)`,
@@ -530,7 +695,7 @@ ProseMirror-Undo-Historie der Kopfzeile — die Kopfzeilen-`EditorView` (inkl. i
 wird überhaupt erst **beim** Aktivieren gemountet (React-`{header !== null && <HeaderEditorView .../>}`),
 ihre Historie beginnt also frisch mit dem leeren Dokument als unterstem Zustand — exakt wie das
 bestehende Verhalten der Body-`EditorView`, deren Historie ebenfalls erst ab dem initial geladenen
-Dokument existiert (`WordEditor.tsx:66-70`, `history()` im frisch erzeugten `EditorState`). `Strg+Z`
+Dokument existiert (`WordEditor.tsx:80-115` `EditorState.create`, `history()` Z. 84). `Strg+Z`
 direkt nach dem ersten Tippen macht die Eingabe rückgängig bis zum leeren Absatz; ein **weiteres** `Strg+Z`
 ist ein No-Op (`undo()` liefert `false`, keine Historie mehr vorhanden) — der Bereich bleibt aktiv/leer,
 wird **nicht** durch Undo wieder auf `header === null` zurückgesetzt. Kein Crash (per definitionem, da
@@ -581,7 +746,7 @@ Datenverlust führen" — sie sind schlicht strukturell erlaubt, exakt wie im Ha
 ## 3. Neue Dateien
 
 ### 3.1 `src/formats/shared/editor/selectionReconciliation.ts`
-Enthält **wortwörtlich** die aktuell in `WordEditor.tsx:18-53` lebende `reconcileSelectionOnClick`-Funktion
+Enthält **wortwörtlich** die aktuell in `WordEditor.tsx:20-50` lebende `reconcileSelectionOnClick`-Funktion
 (inkl. ihres ausführlichen Kommentars) plus Export. Kein Verhaltensunterschied — reine Extraktion zur
 gemeinsamen Nutzung durch Body- **und** Kopfzeilen-View (siehe Abschnitt 1.5).
 
@@ -594,27 +759,40 @@ die Kopfzeilen-`EditorView` (siehe unten). Erhält von `WordEditor.tsx` als Prop
 Escape → Body fokussieren), sowie `tick`-Bump-Callback (damit `WordEditor` nach jeder Kopfzeilen-
 Transaktion neu rendert, siehe 1.5 Punkt 3).
 
-Erzeugt intern ihre eigene `EditorView` (analog zu `WordEditor.tsx:62-114`, aber ohne
-`createPaginationPlugin()` — die Kopfzeile paginiert nicht selbst) mit folgender Keymap-Ergänzung
-gegenüber der Body-Keymap (`WordEditor.tsx:71-79`):
+Erzeugt intern ihre eigene `EditorView` mit **demselben Plugin-/Keymap-Stack wie die Body-View**
+(`WordEditor.tsx:83-114` Plugin-Array bzw. der `new EditorView`-Aufruf 122-133) **minus `createPaginationPlugin()`**
+(die Kopfzeile paginiert nicht selbst) und **plus** einer `Escape`-Bindung. Wichtig (siehe 0.7 Punkt 2):
+Die Kopfzeile braucht für die von Anforderung 3.2 geforderte Funktionsparität (Ausschneiden/Kopieren/
+Einfügen, Shift-Enter-Zeilenumbruch) den **vollständigen** Body-Keymap, nicht nur die Formatier-Marks:
 ```ts
+// gleicher Plugin-Stack wie Body: history(), keymap({...}) [siehe unten], keymap(baseKeymap),
+// columnResizing(), tableEditing(), dropCursor(), gapCursor()  — OHNE createPaginationPlugin()
 keymap({
+  // Mod-c/Mod-x/Mod-v bewusst NICHT gebunden — native Clipboard-Behandlung wie in der Body-View
+  // (WordEditor.tsx:86-92). clipboardTextSerializer wird beim EditorView-Konstruktor gesetzt.
   'Mod-z': undo,
   'Mod-y': redo,
   'Mod-Shift-z': redo,
+  Enter: splitListItem(wordSchema.nodes.list_item),
+  'Shift-Enter': insertHardBreak(),
   'Mod-b': toggleMark(wordSchema.marks.strong),
   'Mod-i': toggleMark(wordSchema.marks.em),
   'Mod-u': toggleMark(wordSchema.marks.underline),
-  Escape: (_state, _dispatch, view) => {
+  // Windows-Sekundär-Cut, identisch zur Body-View (WordEditor.tsx:106); onCutBlocked reicht in den
+  // gemeinsamen WordEditor-State setCutError (per Prop an HeaderChrome übergeben).
+  'Shift-Delete': cutSelection({ onCutBlocked: onCutBlocked }),
+  Escape: () => {
     onEscapeToBody()
     return true
   },
 }),
 ```
-(`Enter: splitListItem(...)` wird **nicht** übernommen — die Kopfzeile hat i. d. R. keine Listen als
-Hauptanwendungsfall, aber `baseKeymap` deckt normales `Enter`/neuer Absatz ohnehin ab; `splitListItem`
-bleibt trotzdem über `toggleList`/die Toolbar erreichbar, falls eine Liste eingefügt wird — dieselbe
-Situation wie „Tabellen/Listen kein Hauptanwendungsfall, aber erlaubt", Anforderung 3.2 letzter Punkt).
+`Enter: splitListItem(...)` **wird** übernommen (identisch zur Body-View) — die Kopfzeile hat zwar Listen
+nicht als Hauptanwendungsfall, aber die Anforderung 3.2 verlangt volle Text-Grundfunktionsparität, und
+`splitListItem` fällt bei Nicht-Listen ohnehin durch auf `baseKeymap`s normales `Enter`. `HeaderChrome`
+erhält dafür einen zusätzlichen `onCutBlocked: (m: string | null) => void`-Prop (= das `setCutError` des
+`WordEditor`, siehe Abschnitt 4.1) und den `EditorView`-Konstruktor mit `clipboardTextSerializer` (Import
+aus `./clipboard`, wie `WordEditor.tsx:13`).
 
 ### 3.3 SVG-Icon für den Toolbar-Button
 Kein separates Datei-Asset nötig (Projekt embettet SVGs bisher inline als JSX, siehe Muster-Suche unten)
@@ -642,15 +820,32 @@ function HeaderIcon() {
 1. Import ergänzen: `HeaderChrome` aus `./HeaderChrome`, `reconcileSelectionOnClick` aus
    `./selectionReconciliation` (statt der lokal definierten Funktion, die entfällt — Zeilen 18-53 werden
    entfernt, nicht dupliziert).
-2. Neuer State:
+2. Neuer State (zusätzlich zum **bestehenden** `cutError`/`setCutError`-State aus `WordEditor.tsx:71`,
+   der **erhalten bleibt** und jetzt beide Views bedient, siehe 0.7 Punkt 2):
    ```ts
    const [focusedRegion, setFocusedRegion] = useState<'body' | 'header'>('body')
    const [pageCount, setPageCount] = useState(1)
    const [tick, setTick] = useState(0)
    const headerViewRef = useRef<EditorView | null>(null)
+   const [pendingHeaderFocus, setPendingHeaderFocus] = useState(false)  // Fokus erst nach dem Mount der Header-View, siehe 4.2 Punkt 2
+
+   // onEditHeader-Handler (an Toolbar gereicht): aktiviert bzw. fokussiert nur.
+   function handleEditHeader() {
+     if (doc.content.header === null) {
+       onChangeRef.current({ ...doc.content, header: emptyDocJSON() })
+       setPendingHeaderFocus(true)        // headerViewRef existiert erst nach Re-Render
+     } else {
+       headerViewRef.current?.focus()
+     }
+   }
    ```
-   (`viewRef` aus `WordEditor.tsx:57` wird zu `bodyViewRef` umbenannt, Semantik unverändert.)
-3. Body-`EditorView`-`dispatchTransaction` (`WordEditor.tsx:91-98`) bumpt zusätzlich `tick`:
+   `pendingHeaderFocus` wird in einem `useEffect` konsumiert, sobald `headerViewRef.current` gesetzt ist
+   (`if (pendingHeaderFocus && headerViewRef.current) { headerViewRef.current.focus(); setPendingHeaderFocus(false) }`).
+   (`viewRef` aus `WordEditor.tsx:67` wird zu `bodyViewRef` umbenannt, Semantik unverändert; der
+   Auto-Dismiss-Custom-Hook-Aufruf `useAutoDismiss(cutError, setCutError)`, `WordEditor.tsx:74`
+   (Hook-Definition 52–63), bleibt unverändert — er ist seit dem `ausschneiden`-Merge **kein** Inline-
+   `useEffect` mehr, siehe 0.7 Korrekturtabelle.)
+3. Body-`EditorView`-`dispatchTransaction` (`WordEditor.tsx:125-132`, `forceRender`-Bump Z. 131) bumpt zusätzlich `tick`:
    ```ts
    dispatchTransaction(tr) {
      const newState = view.state.apply(tr)
@@ -664,21 +859,30 @@ function HeaderIcon() {
    (`forceRender` wird zu `setTick` umbenannt/vereinheitlicht — bisher rein lokal für die Body-View
    gedacht, jetzt gemeinsamer „irgendetwas hat sich geändert"-Trigger für **beide** Views, siehe 1.5
    Punkt 3. Funktional identisch zum bisherigen `forceRender`-Zweck, nur semantisch geteilt.)
-4. Body-`EditorView`-Plugins bekommen `createPaginationPlugin({ onPageCountChange: setPageCount })`
-   (statt `createPaginationPlugin()`, `WordEditor.tsx:85`).
-5. Body-Fokus-Tracking: neues Plugin-Prop bei der `EditorView`-Konstruktion (`WordEditor.tsx:89-99`):
+4. Body-`EditorView`-Plugins bekommen `createPaginationPlugin(setPageCount)` (Positional-Signatur, siehe
+   0.7 Punkt 4 — identisch zu `fusszeile-bearbeiten-code.md` §3.4) statt des heutigen argumentlosen
+   `createPaginationPlugin()` (`WordEditor.tsx:113`, im `plugins`-Array Z. 83-114).
+5. Body-Fokus-Tracking: neues Plugin-Prop bei der `EditorView`-Konstruktion (`WordEditor.tsx:122-133`):
    ```ts
    handleDOMEvents: {
      focus: () => { setFocusedRegion('body'); return false },
    },
    ```
-6. JSX (`WordEditor.tsx:116-133`) wird um `HeaderChrome` ergänzt, äußerer Seiten-`<div>` bekommt
+6. JSX (`WordEditor.tsx:168-184`) wird um `HeaderChrome` ergänzt, äußerer Seiten-`<div>` bekommt
    `position: 'relative'`:
    ```tsx
    return (
      <div className="flex flex-col h-full">
        {(bodyViewRef.current || headerViewRef.current) && (
-         <Toolbar view={focusedRegion === 'header' ? headerViewRef.current! : bodyViewRef.current!} />
+         <Toolbar
+           view={focusedRegion === 'header' ? headerViewRef.current! : bodyViewRef.current!}
+           cutError={cutError}          /* BEHALTEN — Ausschneiden-Feature, siehe 0.7 Punkt 2 */
+           setCutError={setCutError}    /* BEHALTEN */
+           isHeaderFocused={focusedRegion === 'header'}
+           hasHeader={doc.content.header !== null}
+           onEditHeader={handleEditHeader}     /* siehe 4.2 Punkt 2 */
+           onRemoveHeader={() => onChangeRef.current({ ...doc.content, header: null })}
+         />
        )}
        <div className="flex-1 overflow-auto bg-neutral-200 dark:bg-neutral-950 flex justify-center py-8">
          <div
@@ -708,14 +912,14 @@ function HeaderIcon() {
    ```
    (`onHeaderChange` liest bewusst `doc.content` zum Zeitpunkt des Callback-Aufrufs über `onChangeRef`,
    nicht über eine veraltete Closure-Variable — gleiches Muster wie das bestehende `onChangeRef.current`
-   in `WordEditor.tsx:95`.)
-7. **Bestehendes Verhalten unverändert:** `mouseup`-Listener der Body-View (`WordEditor.tsx:103-104`)
+   in `WordEditor.tsx:129`.)
+7. **Bestehendes Verhalten unverändert:** `mouseup`-Listener der Body-View (`WordEditor.tsx:154-155`)
    nutzt jetzt die importierte, geteilte Funktion statt der lokalen — keine Verhaltensänderung.
 
 ### 4.2 `src/formats/shared/editor/Toolbar.tsx`
 1. Neue Button-Gruppe „Einfügen/Layout" (Anforderung Zeile 128: „sinnvoll in einer eigenen
    Einfügen/Layout-Gruppe platziert") wird **zusätzlich** zur bestehenden Tabelle/Bild-Gruppe
-   (`Toolbar.tsx:226-244`) angehängt, durch einen weiteren Trenner abgesetzt:
+   (`Toolbar.tsx:277-294`, endend mit dem `🖼 Bild`-`<label>`) angehängt, durch einen weiteren Trenner abgesetzt:
    ```tsx
    <div className="w-px h-5 bg-neutral-300 dark:bg-neutral-700 mx-1" />
 
@@ -751,11 +955,14 @@ function HeaderIcon() {
      </button>
    )}
    ```
-2. `ToolbarProps` erweitert sich um die vier neuen, von `WordEditor`/`HeaderChrome`-Koordination
-   abgeleiteten Werte:
+2. `ToolbarProps` wird um vier neue Werte **ergänzt** — die bestehenden `cutError`/`setCutError`
+   (`Toolbar.tsx:22-26`, Ausschneiden-Feature) **bleiben erhalten** (siehe 0.7 Punkt 2; ihr Entfernen wäre
+   eine Regression):
    ```ts
    interface ToolbarProps {
      view: EditorView
+     cutError: string | null                       // BEHALTEN
+     setCutError: (message: string | null) => void // BEHALTEN
      isHeaderFocused: boolean
      hasHeader: boolean
      onEditHeader: () => void
@@ -781,11 +988,11 @@ function HeaderIcon() {
 `liftFromList`, `insertImage`, `insertTable`, `applyMarkColor`, `clearMarkColor`) sind bereits
 schema-/state-generisch (nehmen `state`/`dispatch` entgegen, nicht fest die Body-View) — sie
 funktionieren unverändert, wenn `Toolbar` sie mit `view.state`/`view.dispatch` der Kopfzeilen-View statt
-der Body-View aufruft (`run()`-Helper in `Toolbar.tsx:23-26` ist bereits generisch).
+der Body-View aufruft (`run()`-Helper in `Toolbar.tsx:28-31` ist bereits generisch).
 
 ### 4.4 `src/formats/shared/editor/pagination.ts`
-Ergänzung wie in Abschnitt 1.6 beschrieben: `createPaginationPlugin(options?: { onPageCountChange?:
-(count: number) => void })`, neue kleine Hilfsfunktion `countPagesFromDecorations(set: DecorationSet):
+Ergänzung wie in Abschnitt 1.6 beschrieben: `createPaginationPlugin(onPageCountChange?:
+(count: number) => void)` (Positional, siehe 0.7 Punkt 4), neue kleine Hilfsfunktion `countPagesFromDecorations(set: DecorationSet):
 number` (extrahiert die bereits in `computePageCount` verwendete `+ 1`-Logik, hier auf ein bereits
 gebautes `DecorationSet` statt auf rohe `heights[]` angewandt, um keine zweite Messung zu benötigen).
 Rückwärtskompatibel: bestehender Aufruf `createPaginationPlugin()` (ohne Argument) bleibt gültig (Body-
@@ -808,10 +1015,10 @@ Abschnitt 1.4 beschrieben.
 ### 5.1 `src/formats/docx/reader.ts`
 Wie in Abschnitt 1.1 (Typ-Priorisierung, neue Funktion `pickReference`) und Abschnitt 1.3 (eigener
 Relationship-Namensraum je Part, neue Funktion `relsPathFor`) im Detail spezifiziert. Beide Änderungen
-betreffen ausschließlich die Header-/Footer-Auflösung in `readDocx` (`reader.ts:348-375`); die
+betreffen ausschließlich die Header-/Footer-Auflösung in `readDocx` (`reader.ts:507-531`); die
 Body-Verarbeitung (`readBodyChildren` selbst, `parseTable`, `paragraphToBlocks` etc.) bleibt
 **vollständig unverändert** — `readBodyChildren`s Signatur ändert sich nicht (sie nimmt bereits eine
-`imageRels`-Map als Parameter entgegen, siehe `reader.ts:307-313`; es ändert sich nur, **welche** Map an
+`imageRels`-Map als Parameter entgegen, siehe `reader.ts:464-470`; es ändert sich nur, **welche** Map an
 den beiden Header-/Footer-Aufrufstellen übergeben wird).
 
 ### 5.2 `src/formats/docx/writer.ts`
@@ -822,10 +1029,10 @@ erzeugte neue Zip-Einträge (`word/_rels/header1.xml.rels`, `word/_rels/footer1.
 (Entscheidung: keine Mehrfach-Typ-Unterstützung beim Schreiben, siehe Anforderung 3.4 — nur beim Lesen
 wird priorisiert ausgewählt).
 
-`buildContentTypesXml` (`writer.ts:199-220`) — **keine Änderung nötig**: `[Content_Types].xml` deklariert
+`buildContentTypesXml` (`writer.ts:229-250`) — **keine Änderung nötig**: `[Content_Types].xml` deklariert
 Content-Types nur für `header1.xml`/`footer1.xml` selbst (per `Override`), nicht für deren `.rels`-Dateien
 — `.rels`-Dateien sind bereits pauschal über den bestehenden
-`<Default Extension="rels" ContentType="…relationships+xml"/>`-Eintrag (`writer.ts:214`) abgedeckt, der
+`<Default Extension="rels" ContentType="…relationships+xml"/>`-Eintrag (`writer.ts:244`) abgedeckt, der
 schon für `document.xml.rels` gilt und automatisch auch für die beiden neuen `.rels`-Dateien greift.
 
 ---
@@ -834,14 +1041,14 @@ schon für `document.xml.rels` gilt und automatisch auch für die beiden neuen `
 
 ### 6.1 `src/formats/odt/reader.ts`
 Wie in Abschnitt 1.2 spezifiziert: neue Funktion `pickMasterPage(stylesDoc)`, ersetzt die Inline-Auswahl
-`stylesDoc.getElementsByTagNameNS(ODF_NAMESPACES.style, 'master-page')[0]` (`reader.ts:257`). Rest der
-Kopf-/Fußzeilen-Verarbeitung (`reader.ts:258-269`) bleibt unverändert — die Auswahl ändert nur **welches**
+`stylesDoc.getElementsByTagNameNS(ODF_NAMESPACES.style, 'master-page')[0]` (`reader.ts:375`). Rest der
+Kopf-/Fußzeilen-Verarbeitung (`reader.ts:376-388`) bleibt unverändert — die Auswahl ändert nur **welches**
 `masterPage`-Element als Quelle für `headerEl`/`footerEl` dient, nicht wie deren Inhalt in Blöcke
 umgewandelt wird.
 
 ### 6.2 `src/formats/odt/writer.ts`
 **Keine Änderung nötig.** Der ODT-Writer schreibt bereits korrekt in ein einziges, benanntes
-`style:master-page style:name="Standard"` (`writer.ts:149`) — das ist exakt der Name, den der reparierte
+`style:master-page style:name="Standard"` (`writer.ts:226`) — das ist exakt der Name, den der reparierte
 Reader (Abschnitt 6.1) jetzt aktiv **bevorzugt** sucht. Selbst erzeugte ODT-Dateien sind dadurch
 automatisch mit dem neuen Reader-Verhalten konsistent, ohne Writer-Änderung.
 

@@ -3,313 +3,347 @@
 Bezug: `E:\docs\specs\zeile-einfuegen-req.md` (Anforderung), `E:\docs\FEATURE-SPEC-DOCX-ODT.md`
 (Rahmenbedingungen, insbesondere Abschnitt 6 „Tabellen", Abschnitt 2 Selection-Sync-
 Regressionstest, Abschnitt 19 Export-Robustheit, Abschnitt 20.1/20.4). Code-Stand geprüft
-am 2026-07-04 in `E:\docs` (kein Git-Repo im Arbeitsverzeichnis, Stand entspricht dem
-Dateisystem zum Prüfzeitpunkt) — inklusive `node_modules/prosemirror-tables` Quellcode
-(Paket-Version `1.8.5`, siehe `node_modules/prosemirror-tables/package.json`), nicht nur
-dessen Typdeklarationen, damit Aussagen zum Bibliotheksverhalten (Grenzfall 2/3/5/8)
-belegt und nicht nur vermutet sind.
+am **2026-07-04** in `E:\docs` (Stand entspricht dem Dateisystem zum Prüfzeitpunkt) —
+inklusive `node_modules/prosemirror-tables` (installierte Version **1.8.5**,
+`node_modules/prosemirror-tables/package.json`), nicht nur der Typdeklarationen, damit
+Aussagen zum Bibliotheksverhalten belegt und nicht vermutet sind.
+
+> **Entwickler-Zweitprüfung (2026-07-05):** Diese Fassung wurde erneut gegen den
+> tatsächlichen, inzwischen Git-versionierten Arbeitsstand geprüft (`E:\docs` ist entgegen
+> der ursprünglichen Notiz oben ein Git-Repo, `main`-Branch, letzter Commit
+> `29cbc80` — die frühere Aussage „kein Git-Repo" war zum damaligen Prüfzeitpunkt korrekt,
+> ist aber überholt und wurde hiermit berichtigt). Jede Zeilen-/Abschnittsangabe zu
+> `commands.ts`, `Toolbar.tsx`, `WordEditor.tsx`, `schema.ts`, `docx/writer.ts` und
+> `odt/writer.ts` wurde erneut Zeile für Zeile gegen den Ist-Code nachgezählt (nicht nur aus
+> der Vorfassung übernommen) — **keine Abweichung gefunden**, alle Fundstellen weiterhin
+> exakt zutreffend, kein Zeilen-Drift seit dem 2026-07-04-Stand. Zusätzlich wurde — über
+> reines Quelltext-Lesen hinaus — die bislang als „noch zu verifizieren" markierte
+> Kernarithmetik **tatsächlich ausgeführt**, siehe Abschnitt 2.1.
+
+> **Wichtiger Hinweis zu dieser Fassung (Änderungshistorie in Abschnitt 12):** Eine frühere
+> Fassung dieses Dokuments (Stand ~13:45) beschrieb als „wichtigsten Fund" einen Bug im
+> **ODT-Writer** (fehlende `<table:covered-table-cell/>`-Ausgabe, colspan-blinde
+> Spaltenzahl) und verlangte in Abschnitt 6.4 eine „Pflichtänderung" an
+> `src/formats/odt/writer.ts`. **Diese Diagnose trifft auf den aktuellen Code nicht mehr
+> zu** — der ODT-Writer wurde zwischenzeitlich unter dem Ticket `speichern-exportieren`
+> vollständig korrigiert (siehe Abschnitt 1). Die damals vorgeschlagene Ersetzung würde
+> heute (a) nicht kompilieren (falsche `blockToOdt`-Signatur) und (b) die Byte-Determinismus-
+> Korrektur (`TableNameSequence` statt `Math.random()`) **wieder brechen**. Diese Fassung
+> ersetzt die frühere; sie deckt sich mit `zeile-einfuegen-req.md` Befund 0.6 (korrigierter
+> Befund) und wurde erneut Zeile für Zeile gegen den Ist-Code verifiziert. Das entspricht
+> dem in der Anforderungsdatei selbst dokumentierten Vorgehen, einen überholten Befund zu
+> korrigieren statt ihn ungeprüft weiterzutragen.
 
 Rolle dieses Dokuments: beantwortet, was am **bestehenden Code** fehlt bzw. falsch/
-unvollständig ist, legt fest, welche Dateien geändert werden (kein einziges neues
-Produktivmodul nötig — siehe Abschnitt 3), spezifiziert die ProseMirror-Schema-/Commands-
-Änderungen (keine Schema-Änderung nötig, siehe Abschnitt 5), die Toolbar-Änderungen und
-die Import-/Export-Anpassungen für OOXML (DOCX) und ODF (ODT). Ein zweiter, vom eigentlichen
-Feature unabhängiger, aber durch dessen Abnahmekriterien zwingend berührter Bug wird in
-Abschnitt 1 dokumentiert (analog zu `einfuegen-code.md` Abschnitt 1).
+unvollständig ist, legt fest, welche Dateien geändert werden, spezifiziert die
+ProseMirror-Schema-/Commands-Änderungen, die Toolbar-Änderungen und die Import-/Export-
+Situation für OOXML (DOCX) und ODF (ODT). **Kernaussage nach der Verifikation:** Dieses
+Feature ist reine **Verdrahtung** von drei bestehenden Dateien (`commands.ts`,
+`Toolbar.tsx`, `WordEditor.tsx`) um bereits fertige, getestete `prosemirror-tables`-
+Commands — **keine** Schema-Änderung, **keine** Reader-/Writer-Änderung, **kein** neues
+Produktivmodul. Alle Grenzfälle 1–10 werden von der Bibliothek bereits korrekt behandelt;
+zu tun ist Bedienelement + Command-Aufruf + Tab-Bindung + Fehlerrückmeldung + Tests.
 
 ---
 
-## 0. Bestätigung des Codebefunds aus `zeile-einfuegen-req.md` Abschnitt 0
+## 0. Verifizierter Codebefund (Ist-Zustand, geprüft gegen die tatsächlichen Dateien)
 
-Alle sieben Befundpunkte wurden gegen den tatsächlichen Dateiinhalt erneut verifiziert:
+Alle acht Befundpunkte aus `zeile-einfuegen-req.md` Abschnitt 0 wurden gegen den echten
+Dateiinhalt geprüft. Ergebnis inkl. Korrekturen (die Zeilennummern der früheren Fassung
+waren durchgehend veraltet — die Quelldateien sind seither gewachsen; unten stehen die
+**tatsächlichen** aktuellen Zeilen):
 
-1. **Kein Bedienelement.** `src/formats/shared/editor/Toolbar.tsx:228-239` enthält genau
-   einen Tabellen-Button (`title="Tabelle einfügen"`, ruft `insertTable(2, 2)` auf, Zeile
-   234). Kein weiterer tabellenbezogener Button, kein Kontextmenü (`grep -rn
-   "contextmenu" src/` liefert keinen Treffer), kein Tastatur-Shortcut für Zeilen
-   überhaupt. Bestätigt.
-2. **Kein Command.** `src/formats/shared/editor/commands.ts` (108 Zeilen) exportiert
-   `isInTable` (Re-Export, Zeile 6), `setAlign`, `isAlignActive`, `setHeading`,
-   `toggleList`, `liftFromList`, `insertImage`, `insertTable` (Zeilen 76-86, erzeugt
-   **immer** eine komplett neue Tabelle über `state.tr.replaceSelectionWith(table)`),
-   `applyMarkColor`, `clearMarkColor`. Keine Zeilen-Funktion. Bestätigt.
-3. **Bibliothek installiert, aber ungenutzt.** `node_modules/prosemirror-tables/package.json`
-   → Version `1.8.5`. Export-Liste (`node_modules/prosemirror-tables/dist/index.js:2625`)
-   enthält u. a. `addRow`, `addRowAfter`, `addRowBefore`, `deleteRow`, `addColumnBefore`,
+1. **Kein Bedienelement — bestätigt.** `src/formats/shared/editor/Toolbar.tsx` (298 Zeilen)
+   enthält genau einen Tabellen-Button (`title/aria-label="Tabelle einfügen"`, Zeile
+   277–289, ruft `insertTable(2, 2)` auf, Zeile 284). Kein Zeilen-/Spalten-Button, kein
+   `contextmenu`-Listener, kein Zeilen-Shortcut. `isInTable(view.state)` wird bereits als
+   `aria-pressed` am Tabellen-Button verwendet (Zeile 281) — die für die neuen Buttons
+   nötige `isInTable`-Auswertung ist also schon importiert und im Einsatz.
+2. **Kein Command — bestätigt, mit Korrektur der Aufzählung.**
+   `src/formats/shared/editor/commands.ts` (168 Zeilen, **nicht** 108) re-exportiert
+   `isInTable` (Zeile 3/6) und definiert `setAlign`, `isAlignActive`, `setHeading`,
+   `toggleList`, `liftFromList`, `insertImage`, **`insertHardBreak`** (Zeile 83–90, in der
+   früheren Fassung übersehen), `insertTable` (Zeile 92–102, erzeugt **immer** eine neue
+   Tabelle über `replaceSelectionWith`), `applyMarkColor`, `clearMarkColor`, **`canCut`**
+   (Zeile 126–128) und **`cutSelection`** (Zeile 149–166, samt `CutHandlers`-Interface,
+   Zeile 130–134). **Keine** Zeilen-/Spalten-Funktion. Bestätigt.
+3. **Bibliothek installiert, aber ungenutzt — bestätigt.** `prosemirror-tables@1.8.5`
+   exportiert (verifiziert gegen `node_modules/prosemirror-tables/dist/index.d.ts`):
+   `addRow`, `addRowBefore`, `addRowAfter`, `deleteRow`, `addColumnBefore`,
    `addColumnAfter`, `deleteColumn`, `mergeCells`, `splitCell`, `deleteTable`,
-   `CellSelection`, `TableMap`, `goToNextCell`, `selectedRect`, `findTable`,
-   `tableNodes`. `src/formats/shared/editor/WordEditor.tsx:81-82` bindet bereits
-   `columnResizing()` und `tableEditing()` ein. Kein Zeilen-/Spalten-Command wird
-   irgendwo importiert (`grep -rn "addRow\|addColumn\|deleteRow" src/` → keine Treffer
-   außerhalb von `node_modules`). Bestätigt.
-4. **Schema unterstützt beliebige Zeilenanzahl.** `src/formats/shared/schema.ts:106`:
-   `...tableNodes({ tableGroup: 'block', cellContent: 'block+', cellAttributes: {} })`.
-   Bestätigt — siehe Abschnitt 5 unten für die Detailanalyse, warum hier **keine**
-   Änderung nötig ist.
-5. **Reader/Writer bereits mit Unit-Tests für mehrzeilige Tabellen abgesichert, aber nie
-   über echte Bedienung erzeugt.** `src/formats/docx/__tests__/roundtrip.test.ts:173-249`
-   (`describe('DOCX round trip: tables')`) und
-   `src/formats/odt/__tests__/roundtrip.test.ts:162-210`
-   (`describe('ODT round trip: tables')`) — beide bauen Tabellen direkt als JSON-Fixture.
-   Bestätigt. **Wichtige Ergänzung, die der Befund in der Anforderungsdatei noch nicht
-   hatte:** Der ODT-Rowspan-Test (`roundtrip.test.ts:194-209`, „preserves merged cells
-   (colspan/rowspan)") testet in Wahrheit **nur colspan**, nicht rowspan über zwei Zeilen
-   hinweg (anders als das DOCX-Pendant `docx/__tests__/roundtrip.test.ts:223-248`, das
-   echtes `rowspan: 2` über zwei Zeilen mit unterschiedlicher Zellenzahl testet). Das ist
-   kein Zufall, sondern kaschiert einen echten Bug — siehe Abschnitt 1.
-6. **Spaltenzahl-Kollaps-Risiko beim Export.** `src/formats/docx/writer.ts:130`:
-   `colCount = (rows[0]?.content ?? []).reduce((sum, cell) => sum + Number(cell.attrs?.colspan
-   ?? 1), 0) || 1` (berücksichtigt colspan). `src/formats/odt/writer.ts:88`:
-   `colCount = rows[0]?.content?.length ?? 1` (**ignoriert** colspan komplett — schlechter
-   als beim DOCX-Pendant). Bestätigt, mit einer wichtigen Präzisierung in Abschnitt 2
-   unten: **dieses konkrete Grenzfall-5-Szenario (Zeile oberhalb der bisherigen ersten
-   Zeile einfügen) triggert den Bug in der Praxis nicht**, weil `addRowBefore`/`addRowAfter`
-   aus `prosemirror-tables` für eine frisch eingefügte Zeile grundsätzlich eine Zelle pro
-   Spalte ohne colspan erzeugen (siehe Abschnitt 2, Punkt 2) — die **zugrunde liegende**
-   Ungenauigkeit der ODT-Spaltenzahlberechnung bleibt aber ein eigenständiger, hier
-   mitzubehebender Bug, weil sie mit dem in Abschnitt 1 gefundenen Bug zusammenhängt
-   (beide sitzen im selben `case 'table'`-Block).
-7. **Keine Tests.** `grep -rn "addRow\|insertRow\|Zeile einfügen" tests/ src/**/__tests__`
-   liefert keinen Treffer. Bestätigt.
+   `goToNextCell`, `selectedRect`, `findTable`, `TableMap`, `CellSelection`,
+   `tableEditing`, `columnResizing`, `isInTable`, `tableNodes`. `WordEditor.tsx:109–110`
+   bindet `columnResizing()` und `tableEditing()` bereits ein. Kein Zeilen-/Spalten-Command
+   wird irgendwo importiert (nur `isInTable` in `commands.ts`, nur `tableEditing`/
+   `columnResizing`/`tableNodes` in `WordEditor.tsx`/`schema.ts`). Bestätigt.
+4. **Schema unterstützt beliebige Zeilenanzahl — bestätigt.** `src/formats/shared/schema.ts`
+   **Zeile 154** (nicht 106): `...tableNodes({ tableGroup: 'block', cellContent: 'block+',
+   cellAttributes: {} })`. `colspan`/`rowspan`/`colwidth` sind Standardattribute. Siehe
+   Abschnitt 5 — keine Änderung nötig.
+5. **Reader/Writer für mehrzeilige Tabellen abgesichert — bestätigt, mit korrigiertem
+   Zusatzbefund.** `src/formats/docx/__tests__/roundtrip.test.ts` (`describe('DOCX round
+   trip: tables')`, ab Zeile 229) enthält u. a. `it('preserves rows, columns, and cell
+   text')` (230), `it('preserves merged cells (colspan)')` (261) und
+   `it('preserves vertically merged cells (rowspan)')` (279–300, echtes `rowspan: 2` über
+   zwei Zeilen). `src/formats/odt/__tests__/roundtrip.test.ts` (`describe('ODT round trip:
+   tables')`, ab Zeile 219) enthält **inzwischen ebenfalls** einen echten
+   Roh-XML-Rowspan-Test — siehe Korrektur unten. Alle Fixtures sind direkt konstruiert (nie
+   über echte Bedienung erzeugt) — genau das ist die von Befund 0.5 beschriebene, noch
+   offene Lücke.
+   * **Korrektur gegenüber der früheren Fassung:** Die Behauptung, der ODT-Rowspan-Test
+     „teste in Wahrheit nur colspan" und „kaschiere einen echten Bug", ist **falsch**.
+     `odt/__tests__/roundtrip.test.ts` enthält **zwei dedizierte Roh-content.xml-Tests**:
+     `it('emits ODF-compliant covered-table-cell placeholders for a horizontal (colspan)
+     merge')` (Zeile 275, öffnet die Zip per `JSZip.loadAsync`, prüft `content.xml`-Text,
+     Zeile 295–307) **und** `it('emits ODF-compliant covered-table-cell placeholders for a
+     vertical (rowspan) merge')` (Zeile 310, prüft, dass Zeile 2 mit
+     `<table:covered-table-cell/><table:table-cell` beginnt, Zeile 337). Ein echter
+     zweizeiliger Rowspan-Fall **mit Roh-XML-Assertion** existiert also bereits.
+6. **Export-Logik colspan/Merge — bestätigt korrekt in BEIDEN Formaten (Korrektur des
+   früheren „ODT-Bug"-Befunds).**
+   * `src/formats/docx/writer.ts` `tableToDocx` (ab Zeile 158): `colCount` als Summe der
+     colspans der ersten Zeile (Zeile 160), `pending[]`-Tracker (Zeile 163),
+     `<w:vMerge/>`-Continuation für überdeckte Rasterzellen (Zeile 174). Korrekt.
+   * `src/formats/odt/writer.ts` `case 'table'` (Zeile 110–174): `colCount` **ebenfalls**
+     als Summe der colspans (Zeile 115–116, **identisch** zu DOCX — **nicht**
+     `rows[0]?.content?.length`, wie die frühere Fassung behauptete), `pending[]`-Tracker
+     (Zeile 126), `<table:covered-table-cell/>` für horizontal (Zeile 160–162) und
+     vertikal (Zeile 135–139 über `pending`, gesetzt in Zeile 165–167) überdeckte Zellen.
+     Der ODF-Standard-konforme Export ist damit vorhanden **und** getestet (Punkt 5). Der
+     ODT-Writer vergibt Tabellennamen zudem deterministisch über `TableNameSequence`
+     (Zeile 54–60, `tableNames.next()` in Zeile 173) statt `Math.random()` — die frühere
+     Fassung hätte das mit ihrer 6.4-Ersetzung wieder zerstört.
+   * **Konsequenz:** Der einst als Hauptrisiko notierte „Spaltenzahl-Kollaps beim Export"
+     ist **kein offener Bug**, sondern ein **Regressionsrisiko** (Grenzfall 5): Die neue
+     Funktion darf diese bereits korrekte Export-Logik nicht brechen. Nachweis über
+     Roh-XML gegen die vorhandenen Tests (Punkt 5) plus einen neuen, dedizierten
+     Grenzfall-5-Test (Abschnitt 8.4).
+7. **Keine Tests für Zeilenoperationen — bestätigt.** Kein Treffer für
+   `addRow`/`insertRow`/„Zeile einfügen" in `tests/` oder `src/**/__tests__` (außer den
+   generischen Tabellen-Roundtrips oben). `tests/e2e/selection-regression.spec.ts` prüft
+   nur Zellwechsel, keine Zeilenoperation. `tests/e2e/` enthält u. a. `docx.spec.ts`,
+   `odt.spec.ts`, `roundtrip-fidelity.spec.ts`, `complex-import-fidelity.spec.ts`,
+   `selection-regression.spec.ts` — noch **keine** `zeile-einfuegen.spec.ts`.
+8. **Kein Cross-Format-Export in der App — bestätigt.** Jedes `FormatModule.exportFile`
+   schreibt nur sein eigenes Format (`docxModule` → `writeDocx`, `odtModule` → `writeOdt`).
+   Cross-Format-Rundreise nur auf Adapter-/Unit-Ebene prüfbar (Abschnitt 4.4).
 
-Der Befund aus `zeile-einfuegen-req.md` Abschnitt 0 ist damit vollständig bestätigt, mit
-einer zusätzlichen, wichtigeren Präzisierung: ein erheblicher Teil der in Abschnitt 4 der
-Anforderungsdatei aufgeführten Grenzfälle (2, 3, 5, 6, 7, 8) wird bereits durch
-`prosemirror-tables`s eigene `addRow`-Implementierung korrekt behandelt — der
-Implementierungsaufwand ist noch geringer als die Anforderungsdatei selbst einschätzt
-(„überwiegend Verdrahtung"), **mit einer Ausnahme**: dem in Abschnitt 1 beschriebenen
-ODT-Schreibfehler, der ohne diese Prüfung unentdeckt geblieben wäre.
+**Fazit:** Der Backlog-Status „fehlt" ist auf UI-/Command-Ebene korrekt. Der
+Implementierungsaufwand ist **reine Verdrahtung** — es gibt keinen begleitenden Bug mehr
+zu beheben (der früher vermutete ODT-Writer-Bug existiert im aktuellen Code nicht).
 
 ---
 
-## 1. Kritischer Zusatzbefund: `odt/writer.ts` erzeugt bei vertikalen Merges (rowspan) heute schon ungültige ODF-Struktur
+## 1. Import/Export ist bereits korrekt — Regressionsschutz statt Bugfix
 
-**Das ist der wichtigste Fund dieser Prüfung**, weil er unabhängig vom Feature
-„Zeile einfügen" existiert (jede vorhandene, importierte ODT-Tabelle mit `rowspan` ist
-betroffen), aber durch die Abnahmekriterien dieses Tickets (Grenzfall 2, Anforderung 3.3,
-Feature-Rundreise 5.2 Punkt 5) zwingend zu Tage tritt und **behoben werden muss**, weil
-sonst kein einziger dieser Punkte für ODT wirklich abnahmefähig ist.
+**Es ist keine Änderung an Reader oder Writer nötig.** Dieser Abschnitt hält fest, was
+bereits stimmt, damit die neue Funktion es nachweislich nicht bricht (Grenzfall 2/5,
+Anforderung 3.3, Feature-Rundreise 5.2 Punkt 5).
 
-**Belegkette:**
+**DOCX-Writer** (`src/formats/docx/writer.ts`, `tableToDocx`, Zeile 158–~200): berechnet
+`colCount` als Summe der colspans der ersten Zeile (Zeile 160); führt `pending[c]` für
+jede Spalte, die von einem `rowspan` überdeckt wird, und schreibt an diesen Positionen der
+Folgezeilen eine `<w:tc><w:tcPr><w:vMerge/></w:tcPr><w:p/></w:tc>`-Continuation-Zelle
+(Zeile 172–176). Damit deklariert jede Zeile exakt `colCount` `<w:tc>`.
 
-- `src/formats/odt/writer.ts:86-111` (`case 'table'` in `blockToOdt`) mappt jede Zeile
-  1:1 auf `(row.content ?? []).map(...)` — **ohne** Spalten-Positionsverfolgung. Für jede
-  JSON-`table_cell` wird genau ein `<table:table-cell>` geschrieben, sonst nichts.
-- ProseMirrors `tableNodes`-Modell speichert (wie bei DOCX) **keinen** eigenen Knoten für
-  eine Zelle, die durch den `rowspan` einer Zelle in einer früheren Zeile „überdeckt"
-  wird — die Folgezeile enthält in ihrem `content`-Array schlicht **eine Zelle weniger**
-  an dieser Spaltenposition (siehe `docx/__tests__/roundtrip.test.ts:236-238`: Zeile 2
-  hat nur 1 Zelle statt 2, weil Spalte 1 durch `rowspan: 2` aus Zeile 1 überdeckt ist).
-- `docx/writer.ts:128-171` (`tableToDocx`) löst das korrekt mit einem `pending[]`-Array
-  (Zeile 133, `pending[c] = rowspan - 1` bei Zeile 161-163), das bei jeder Folgezeile für
-  überdeckte Spalten explizit einen `<w:tc><w:tcPr><w:vMerge/></w:tcPr><w:p/></w:tc>`
-  „Continuation"-Zellknoten in die OOXML-Ausgabe schreibt (Zeile 142-146) — **exakt das
-  Gegenstück fehlt in `odt/writer.ts` komplett.** Der ODF-Standard verlangt für dieselbe
-  Situation ein `<table:covered-table-cell/>`-Element pro überdeckter Rasterzelle (ODF
-  1.3 Teil 1, §9.1.1/§9.1.4) — ohne dieses Element hat eine Zeile in der exportierten
-  ODT-Datei **weniger `<table:table-cell>`/`<table:covered-table-cell>`-Kindelemente als
-  `table:number-columns` deklariert**, was in einer echten Zielanwendung (LibreOffice)
-  zu falsch ausgerichteten Spalteninhalten oder impliziter Reparatur/Datenverlust führt —
-  genau das, was `FEATURE-SPEC-DOCX-ODT.md` Abschnitt 19 („nicht nur durch unseren
-  eigenen Reader wieder einlesbar") als Prüfmaßstab verlangt.
-- **Warum das bisher nicht auffiel:** `src/formats/odt/reader.ts:189-203` filtert beim
-  Einlesen ausschließlich auf `childElements(rowEl, ODF_NAMESPACES.table, 'table-cell')`
-  (Zeile 192) — `<table:covered-table-cell>`-Elemente werden also beim Lesen ohnehin
-  ignoriert/übersprungen (das ist für sich genommen **korrekt**, weil ODF im Gegensatz zu
-  OOXML den `rowspan`-Wert bereits direkt als Attribut `table:number-rows-spanned` auf
-  der Ursprungszelle trägt, Zeile 194 — die Folgezeilen-Elemente selbst tragen keine
-  Zusatzinformation). Weil unser eigener Reader **und** Writer denselben (fehlenden)
-  Blindpunkt teilen, besteht ein reiner Eigen-Rundtrip-Unit-Test (Reader liest zurück,
-  was der Writer geschrieben hat) selbst mit dieser Lücke — das ist exakt die Falle, vor
-  der `zeile-einfuegen-req.md` Befund 0.5 warnt („Reader/Writer... aber nur mit direkt
-  konstruierten Test-Fixtures... nie über eine tatsächliche Zeilen-Einfügen-Bedienung").
-  `roundtrip.test.ts:194-209` deckt deshalb nur `colspan` ab, nie ein zweizeiliges
-  `rowspan`-Szenario — vermutlich genau deswegen, weil ein solcher Test bislang nie
-  ergänzt wurde, nicht weil er bewusst als „funktioniert nicht" markiert worden wäre.
+**ODT-Writer** (`src/formats/odt/writer.ts`, `case 'table'`, Zeile 110–174): berechnet
+`colCount` **identisch** als Summe der colspans (Zeile 115–116); führt denselben
+`pending[]`-Mechanismus (Zeile 126) und schreibt für jede von einem `rowspan` (vertikal,
+Zeile 135–139) oder `colspan` (horizontal, Zeile 160–162) überdeckte Rasterzelle ein
+`<table:covered-table-cell/>`. Damit hat jede Zeile exakt `colCount`
+`<table:table-cell>` + `<table:covered-table-cell>` Kindelemente — ODF-1.3-konform.
 
-**Notwendige Behebung (Teil dieses Tickets, nicht optional):** `odt/writer.ts`s
-`case 'table':` erhält denselben `pending[]`-Mechanismus wie `docx/writer.ts` **und**
-dieselbe colspan-bewusste `colCount`-Berechnung (behebt zugleich Befund 0.6/Grenzfall 5
-für ODT strukturell, nicht nur für den einen im Feature ausgelösten Spezialfall). Siehe
-Abschnitt 6.4 für die konkrete Ersetzung.
+**Warum das ein reines Regressionsthema ist:** Aus Sicht beider Writer ist eine per
+`addRowBefore`/`addRowAfter` eingefügte Zeile von einer importierten **nicht
+unterscheidbar** (dasselbe JSON-Datenmodell, Abschnitt 5). Eine frisch eingefügte Zeile
+hat außerdem grundsätzlich `map.width` Einzelzellen ohne colspan (Abschnitt 2, Punkt 2),
+verändert also die Merge-/Spaltenstruktur der übrigen Tabelle nicht. Der Nachweis muss
+trotzdem geführt werden — gegen die **bereits vorhandenen** Roh-XML-Tests
+(`odt/__tests__/roundtrip.test.ts:275/310`, `docx/__tests__/roundtrip.test.ts:261/279`)
+**und** einen neuen dedizierten Grenzfall-5-Test (Abschnitt 8.4), damit eine spätere
+Änderung diese korrekte Logik nicht unbemerkt bricht.
 
 ---
 
 ## 2. Bestätigtes Bibliotheksverhalten von `prosemirror-tables` (Belegstellen)
 
 Gegen `node_modules/prosemirror-tables/dist/index.js` (nicht nur `.d.ts`) geprüft, weil
-mehrere Design-Entscheidungen unten direkt davon abhängen, **was die Bibliothek bereits
-selbst tut** — das entscheidet, wie viel eigener Code überhaupt nötig ist.
+die Architekturentscheidung „reine Verdrahtung" davon abhängt, was die Bibliothek bereits
+selbst leistet.
 
-| # | Frage | Fundstelle | Ergebnis |
+| # | Frage | Fundstelle (`dist/index.js`) | Ergebnis |
 |---|---|---|---|
-| 1 | Verlängert `addRowBefore`/`addRowAfter` einen bestehenden vertikalen Merge korrekt (Anforderung 3.3, Grenzfall 2)? | `addRow` (Zeile 1418-1440): `if (row > 0 && row < map.height && map.map[index] == map.map[index - map.width]) { ...tr.setNodeMarkup(..., { ...attrs, rowspan: attrs.rowspan + 1 }); col += attrs.colspan - 1 }` | **Ja, bereits eingebaut.** Wird eine Zeile innerhalb eines rowspan-Bereichs eingefügt, wird die Ursprungszelle einfach um 1 verlängert, es entsteht **keine** neue Zelle und **keine** verwaiste Referenz. Muss nur mit Test bestätigt werden (Abschnitt 8), nicht selbst implementiert werden. |
-| 2 | Übernimmt eine frisch eingefügte Zeile eine „plausible" Spaltenaufteilung, wenn die Nachbarzeile `colspan` hat (Grenzfall 3)? | `addRow`, `else`-Zweig (Zeile 1432-1437): pro Spaltenindex wird — sofern keine Fortsetzung eines Merges vorliegt — **eine einzelne** neue Zelle (`colspan` 1, per `createAndFill()`) erzeugt; die Schleife läuft pro Spalte (`col++`), es gibt **keinen** Code-Pfad, der eine neu erzeugte Zelle mit `colspan > 1` anlegt. | Eine neue Zeile hat **immer genau `map.width` Zellen** (je colspan 1) — Summe der effektiven Spalten stimmt per Konstruktion **immer** exakt mit dem Rest der Tabelle überein. Erfüllt die Minimalanforderung aus Grenzfall 3 automatisch, ohne eigenen Code. |
-| 3 | Was passiert bei Grenzfall 5 (Zeile wird neue Zeile 1, vorherige Zeile 1 hatte colspan)? | Folgt aus Punkt 2: die **neue** Zeile 0 hat `map.width` Einzel-Zellen (kein colspan), unabhängig davon, welche colspan-Struktur die (nun verschobene) alte Zeile 1 hatte. | Für DOCX ist `colCount` (Summe der colspans der neuen Zeile 0) automatisch `= map.width`, exakt richtig. Für ODT ist das nach der Abschnitt-1-Korrektur (colspan-bewusste Summe) ebenso korrekt — **ohne** die Korrektur wäre `rows[0].content.length` zufällig auch richtig (da die neue Zeile keine colspans hat), aber nur, weil hier kein colspan mehr vorkommt; der zugrunde liegende Bug (Befund 0.6) besteht unabhängig fort und muss trotzdem behoben werden (Abschnitt 1). |
-| 4 | Bleibt die Editor-Selektion nach dem Einfügen in derselben logischen Zelle (Anforderung 3.4)? | `addRow` dispatcht nur `tr.insert(rowPos, ...)`, **ohne** `tr.setSelection(...)` aufzurufen. `EditorState.apply()` (Standardverhalten von `prosemirror-state`, nicht `prosemirror-tables`) mappt die bestehende Selektion automatisch durch `tr.mapping`, wenn keine neue Selektion explizit gesetzt wird. | **Automatisch korrekt, kein eigener Code nötig.** Bei `addRowBefore` (Einfügung **vor** der aktuellen Zeile) verschiebt sich die absolute Cursor-Position um die Größe der neuen Zeile nach hinten — bleibt aber in derselben logischen Zelle. Bei `addRowAfter` ändert sich die Position gar nicht (Einfügung liegt vollständig danach). Muss nur mit Test verifiziert werden (Selection-Sync-Regressionsschutz, Abschnitt 2 der Hauptspezifikation). |
-| 5 | Ein Undo-Schritt pro Aktion (Anforderung 3.6)? | `addRowBefore`/`addRowAfter` (Zeile 1446-1466) dispatchen jeweils **eine** Transaktion. `history()` (aus `prosemirror-history`, bereits in `WordEditor.tsx:70` eingebunden) fasst standardmäßig jede dispatchte Transaktion zu einem eigenen Undo-Eintrag zusammen. | Automatisch korrekt, kein eigener Code nötig. |
-| 6 | Was tut `addRowBefore`/`addRowAfter` bei einer `CellSelection`, die mehrere Zeilen umspannt (Grenzfall 8)? | `selectedRect` (Zeile 1303-1315): `map.rectBetween(...)` liefert `{ left, top, right, bottom }` für die **gesamte** Selektion; `addRowBefore` ruft `addRow(tr, rect, rect.top)`, `addRowAfter` ruft `addRow(tr, rect, rect.bottom)` auf — **jeweils genau eine** neue Zeile relativ zur obersten/untersten Zeile der Selektion. | **Bibliotheksverhalten entspricht Variante (a)** aus der Anforderungsdatei (Abschnitt 4, Grenzfall 8): „es wird relativ zur ersten/letzten Zeile der Selektion je **eine** Zeile eingefügt" — **nicht** Variante (b) (N Zeilen für N selektierte Zeilen). Siehe Abschnitt 4 unten für die verbindliche Festlegung dieser Variante als Soll-Verhalten. |
-| 7 | Repariert `tableEditing()` bereits heute eine strukturell inkonsistente (z. B. aus einer Fremddatei importierte) Tabelle, bevor unser Command überhaupt zum Zug kommt (Grenzfall 9)? | `tableEditing()` (Zeile 2593-2622) registriert `appendTransaction(_, oldState, state) { return normalizeSelection(state, fixTables(state, oldState), ...) }` — läuft nach **jeder** dispatchten Transaktion; `fixTables`/`fixTable` (Zeile 784-849) behebt `collision`/`missing`/`overlong_rowspan`/`zero_sized`-Probleme in der `TableMap` automatisch per Zusatztransaktion. | **Ja, mit einer Einschränkung:** `appendTransaction` läuft nicht für die allererste `EditorState.create(...)`-Initialisierung (`WordEditor.tsx:66-87`), sondern erst ab der ersten **dispatchten** Transaktion danach. Da unsere neuen Buttons aber erst aktivierbar sind, wenn `isInTable(state)` wahr ist — was voraussetzt, dass der Cursor bereits per Klick in eine Zelle gesetzt wurde, was selbst bereits eine dispatchte Transaktion ist (`view.dispatch` beim Setzen der Klick-Selektion) — hat `fixTables` zu diesem Zeitpunkt bereits mindestens einmal gegriffen. Trotzdem: kein Ersatz für einen expliziten Test mit einer absichtlich unregelmäßigen Tabelle (Abschnitt 8). |
+| 1 | Verlängert `addRowBefore`/`addRowAfter` einen bestehenden vertikalen Merge korrekt (3.3, Grenzfall 2)? | `addRow` (Zeile 1418 ff.): erkennt eine Zelle, die aus der Zeile darüber fortgesetzt wird (`map.map[index] == map.map[index - map.width]`) und erhöht deren `rowspan` per `setNodeMarkup`, statt eine neue Zelle zu erzeugen. | **Ja, eingebaut.** Merge wird um eine Zeile verlängert, keine verwaiste Referenz. Nur Test nötig (8.1). |
+| 2 | Hat eine frisch eingefügte Zeile immer die richtige Spaltenzahl (Grenzfall 3)? | `addRow`, `else`-Zweig: pro Spalte genau **eine** Einzelzelle (`colspan` 1) via `createAndFill()`; kein Pfad erzeugt `colspan > 1`. | Neue Zeile hat **immer genau `map.width` Zellen** — Summe der effektiven Spalten stimmt per Konstruktion. Kein eigener Code. |
+| 3 | Grenzfall 5 (neue Zeile wird Zeile 1, alte Zeile 1 hatte colspan)? | Folgt aus #2: neue Zeile 0 hat `map.width` Einzelzellen, unabhängig von der colspan-Struktur der verschobenen alten Zeile. | `colCount` (Summe colspans Zeile 0) = `map.width`, für DOCX **und** ODT automatisch korrekt. Reiner Regressionsschutz (Abschnitt 1), kein Fix. |
+| 4 | Bleibt die Selektion in derselben logischen Zelle (3.4)? | `addRow` dispatcht nur `tr.insert(...)`, **ohne** `setSelection`. `EditorState.apply()` mappt die Selektion automatisch durch `tr.mapping`. | **Automatisch korrekt.** `addRowBefore` verschiebt die Cursor-Position mit, `addRowAfter` lässt sie unverändert. Nur Test (Selection-Sync, Abschnitt 8.2). |
+| 5 | Ein Undo-Schritt pro Aktion (3.6)? | `addRowBefore`/`addRowAfter` dispatchen je **eine** Transaktion; `history()` (in `WordEditor.tsx:84`) macht daraus einen Undo-Eintrag. | Automatisch korrekt. |
+| 6 | Mehrzeilige `CellSelection` (Grenzfall 8)? | `selectedRect` liefert `{ top, bottom, ... }` für die gesamte Selektion; `addRowBefore` → `addRow(tr, rect, rect.top)`, `addRowAfter` → `addRow(tr, rect, rect.bottom)`. | **Genau eine** neue Zeile relativ zur obersten/untersten Zeile = **Variante (a)** der Anforderung (Abschnitt 4.1). |
+| 7 | Repariert `tableEditing()` inkonsistente Fremdtabellen (Grenzfall 9)? | `tableEditing()` registriert `appendTransaction(... fixTables(...) ...)`; `fixTable` behebt `collision`/`missing`/`overlong_rowspan`/`zero_sized` automatisch. | **Ja**, ab der ersten dispatchten Transaktion (der Klick, der `isInTable` wahr macht, ist bereits eine solche). Kein Ersatz für einen expliziten Test (8.1). |
 
-**Konsequenz:** Die Kernlogik für Grenzfälle 1-8 (mit Ausnahme des ODT-Bugs aus
-Abschnitt 1) ist bereits vollständig in `prosemirror-tables` vorhanden. Der verbleibende
-Implementierungsaufwand ist tatsächlich reine Verdrahtung + der eine ODT-Bugfix + Tests
-— **kein** neuer Tabellen-Manipulationsalgorithmus.
+`TableMap.positionAt(row, col, table)` (Zeile 101) liefert einen Offset **relativ zum
+tableStart**; die absolute Position ist `tableStart + positionAt(...)` (belegt durch die
+Bibliotheks-eigene Nutzung in `dist/index.js:1333–1334`:
+`tr.insert(tr.mapping.map(tableStart + pos), ...)`). `findTable($pos)` liefert
+`{ node, pos, start, depth }`, wobei `start` der tableStart ist. Beides wird von
+`insertRowOnTabAtTableEnd` (Abschnitt 6.1) genutzt.
+
+**Konsequenz:** Die Kernlogik für Grenzfälle 1–10 ist vollständig in `prosemirror-tables`
+vorhanden. Verbleibender Aufwand = Verdrahtung + Tests, **kein** neuer Algorithmus, **kein**
+Writer-Fix.
+
+### 2.1 Entwickler-Verifikation (2026-07-05): Kernarithmetik empirisch bestätigt, nicht nur aus dem Quelltext abgeleitet
+
+Die Tabelle in Abschnitt 2 sowie Abschnitt 6.1 stützten sich bislang ausschließlich auf
+**Lesen** von `node_modules/prosemirror-tables/dist/index.cjs` — korrekt, aber noch keine
+Ausführung. In dieser Prüfrunde wurde zusätzlich ein Wegwerf-Testskript gegen
+`wordSchema` (`src/formats/shared/schema.ts`) und die echte installierte
+`prosemirror-tables@1.8.5` geschrieben, per `npx vitest run` ausgeführt und danach wieder
+gelöscht (kein Dauerartefakt; die **dauerhaften** Tests sind weiterhin in Abschnitt 8.1/8.3
+zu erstellen). Ergebnis — **alle Fälle grün**:
+
+| Geprüfter Fall | Aufbau | Ergebnis |
+|---|---|---|
+| `addRowBefore` hält den Cursor in derselben logischen Zelle (3.4) | 2×2-Tabelle, Cursor im Text „A2" (Zeile 2), `addRowBefore` ausgelöst | Tabelle danach 3 Zeilen; `newState.selection.$head.parent.textContent === 'A2'` — Cursor bleibt nachweislich in der ursprünglichen Zelle, nicht in der neuen leeren Zeile |
+| rowspan-Verlängerung statt verwaister Zelle (3.3, Grenzfall 2) | Zeile 0 hat eine Zelle mit `rowspan: 2`, Cursor in Zeile 1, `addRowBefore` (Einfügeposition **innerhalb** des Merge-Bereichs) | Tabelle danach 3 Zeilen; die ursprüngliche Zelle hat jetzt `rowspan: 3` (verlängert) — **keine** zusätzliche, unverbundene Zelle an dieser Rasterposition |
+| Mehrzeilige `CellSelection` → genau eine neue Zeile (Grenzfall 8, Variante (a)) | 3×2-Tabelle, `CellSelection` über Zeile 0–1 (beide Spalten), `addRowAfter` | Tabelle danach 4 Zeilen (nicht 5) — bestätigt Variante (a) exakt wie in 4.1 festgelegt |
+| `insertRowOnTabAtTableEnd`-Arithmetik (Abschnitt 6.1, Grenzfall 4) | 1×2-Tabelle, Cursor in der letzten Zelle, das exakte Codeschnipsel aus 6.1 (inkl. `found.start + map.positionAt(rect.bottom, 0, found.node)` und `+ 1`) ausgeführt | **Ein** Dispatch (ein Undo-Schritt, 3.6); Tabelle danach 2 Zeilen; Cursor landet in einem leeren `paragraph` **innerhalb der neu eingefügten (zweiten) Zeile**, nicht in Zeile 1 — die Positions-Arithmetik ist korrekt, kein Off-by-one |
+| Verschachtelte Tabelle (Grenzfall 10) | Äußere 2×2-Tabelle, eine Zelle enthält eine innere 1×2-Tabelle | `addRowBefore` auf die **äußere** Tabelle: äußere Tabelle danach 3 Zeilen, innere Tabelle strukturell und inhaltlich unverändert (weiterhin 1 Zeile, Text erhalten). `addRowAfter` mit Cursor **in der inneren** Tabelle: innere Tabelle danach 2 Zeilen, äußere Tabelle bleibt bei 2 Zeilen — keine Kreuzwirkung in beide Richtungen |
+
+**Konsequenz für den Umsetzungsplan:** Der in Abschnitt 6.1 stehende Vorbehalt „Zu
+verifizieren im Unit-Test (Abschnitt 8.1), bevor als korrekt gewertet" ist damit **erfüllt**
+— das dort abgedruckte Codeschnipsel wurde nicht nur entworfen, sondern lauffähig
+durchgespielt. Abschnitt 8.1 bleibt trotzdem verbindlich: Die hier verwendeten
+Wegwerf-Tests sind **keine** Umsetzung der Testpflicht aus `zeile-einfuegen-req.md`
+Abschnitt 6, sondern ausschließlich ein Vertrauens-/Risikoabbau für diesen Plan vor
+Übergabe an die Umsetzung; die dauerhaften, benannten Tests aus 8.1/8.2/8.3/8.4 sind
+weiterhin zu schreiben und müssen unabhängig grün sein.
 
 ---
 
-## 3. Architektur-Entscheidung
+## 3. Architektur-Entscheidungen
 
-1. **Kein neues Modul nötig.** Anders als bei vergleichbaren Tickets (z. B.
-   `einfuegen-code.md`, das `shared/editor/paste.ts` einführt) genügt hier eine
-   Erweiterung von drei bestehenden Dateien (`commands.ts`, `Toolbar.tsx`,
-   `WordEditor.tsx`) plus dem in Abschnitt 1 beschriebenen Bugfix in `odt/writer.ts`.
-   Begründung: Es gibt keine wiederverwendbare „reine Logik ohne ProseMirror-Typen", die
-   ein eigenes Modul rechtfertigen würde (anders als z. B. `splitPlainTextIntoParagraphs`
-   in der Paste-Anforderung) — die gesamte Funktionalität besteht aus dünnen
-   Command-Wrappern um bereits vorhandene, gut getestete Bibliotheksfunktionen.
-2. **`commands.ts` bleibt der einzige Ort, an dem `Toolbar.tsx` Tabellen-Commands
-   importiert** — analog zum bestehenden Muster `export { isInTable }` (Zeile 6).
-   `Toolbar.tsx` importiert **nie** direkt aus `prosemirror-tables`, damit ein künftiger
-   Wechsel/Wrapper (z. B. für `zeile-loeschen`, `spalte-einfuegen`) an einer Stelle
-   gebündelt bleibt.
-3. **Kein eigenes Tabellen-Kontextmenü.** Deckt sich mit der Anforderungsdatei
-   (Abschnitt 1, # 3: „Nice-to-have, kein Blocker"). Wird **nicht** umgesetzt, um den
-   Scope dieses Tickets nicht zu erweitern — Entscheidung, keine vergessene Anforderung
-   (analog zu `einfuegen-code.md` Abschnitt 4.5 für das allgemeine Kontextmenü).
-4. **Tab-Navigation zwischen Zellen ist ein notwendiger Nebeneffekt, keine
-   Scope-Erweiterung.** Um Grenzfall 4 („Tab in letzter Zelle fügt Zeile hinzu")
-   umzusetzen, muss zwingend zuerst `goToNextCell(1)` (normale Tab-Navigation zur
-   nächsten Zelle) in einer `chainCommands`-Kette vorangestellt werden — der
-   „Tab-in-letzter-Zelle"-Fall ist exakt der Fallback, wenn `goToNextCell(1)` `false`
-   liefert (keine nächste Zelle mehr vorhanden). Es ist technisch nicht möglich, nur den
-   Randfall zu binden, ohne die allgemeine Tab-Navigation als ersten Kettenglied
-   mitzuliefern — das ist kein „scope creep", sondern zwingende Voraussetzung. Als
-   spiegelbildliche Ergänzung wird `Shift-Tab` an `goToNextCell(-1)` gebunden (vorherige
-   Zelle) — ohne Fallback-Zeilenerzeugung (dafür gibt es in Word/LibreOffice keine
-   Konvention), liefert an der ersten Zelle einfach `false` (Standard-Browser-Verhalten
-   greift dort unverändert wie heute überall).
-   **Wichtig für Kompatibilität mit dem separaten Ticket `liste-einruecken-tab`**
-   (`specs/liste-einruecken-tab-req.md:34-42`, bislang ebenfalls **nicht** implementiert,
-   bestätigt: kein `Tab`/`Shift-Tab`-Eintrag in `WordEditor.tsx`): Die hier gebundene
-   Tab-Kette **muss** `false` zurückgeben, wenn der Cursor sich außerhalb einer Tabelle
-   befindet (das leisten sowohl `goToNextCell` als auch die neue Fallback-Funktion
-   bereits von sich aus über `isInTable(state)`), damit ein künftiger, zweiter
-   `chainCommands`-Eintrag für Listen-Einzug außerhalb von Tabellen weiterhin
-   anschließbar bleibt, ohne diese Datei nochmals umbauen zu müssen.
-5. **Keine Änderung an `reconcileSelectionOnClick`** (`WordEditor.tsx:42-53`) nötig:
-   Zeilen-Einfügen läuft immer über eine reguläre, von `dispatchTransaction` verarbeitete
-   Transaktion (Toolbar-Klick → `run()` → `command(state, dispatch)` → `view.dispatch`),
-   nie über eine DOM-Mutation ohne Transaktion — der bekannte Selection-Sync-Bug entsteht
-   nur dort. Muss trotzdem mit einem expliziten Regressionstest bestätigt werden
-   (Abschnitt 8.2), weil genau das laut Anforderung Abschnitt 2 Pflicht ist.
+1. **Kein neues Modul.** Erweiterung von drei bestehenden Dateien (`commands.ts`,
+   `Toolbar.tsx`, `WordEditor.tsx`). Keine wiederverwendbare „reine Logik ohne
+   ProseMirror-Typen", die ein eigenes Modul rechtfertigen würde — alles sind dünne
+   Command-Wrapper um getestete Bibliotheksfunktionen.
+2. **`commands.ts` bleibt der einzige Ort, an dem Tabellen-Commands aus
+   `prosemirror-tables` importiert werden** — analog zum bestehenden `export { isInTable }`
+   (Zeile 6). `Toolbar.tsx`/`WordEditor.tsx` importieren Zeilen-Commands **nur** aus
+   `./commands`, damit `zeile-loeschen`/`spalte-einfuegen` später an derselben Stelle
+   andocken.
+3. **Kein eigenes Tabellen-Kontextmenü.** Deckt sich mit Anforderung Abschnitt 1 # 3
+   („Nice-to-have, kein Blocker"). Bewusst **nicht** umgesetzt (Scope), nicht vergessen.
+   Analog zur bestehenden Entscheidung, das native Browser-Kontextmenü unangetastet zu
+   lassen (`WordEditor.tsx:117–121`).
+4. **Tab-Navigation zwischen Zellen ist zwingender Nebeneffekt, keine Scope-Erweiterung.**
+   Grenzfall 4 („Tab in letzter Zelle fügt Zeile hinzu") erfordert eine
+   `chainCommands(goToTableCell(1), insertRowOnTabAtTableEnd())`-Kette: `goToNextCell(1)`
+   navigiert normal zur nächsten Zelle; nur wenn es `false` liefert (keine nächste Zelle),
+   greift der Fallback. Es ist technisch nicht möglich, nur den Randfall zu binden.
+   `Shift-Tab` = `goToTableCell(-1)` (vorherige Zelle, keine Zeilenerzeugung).
+   **Kompatibilität mit `liste-einruecken-tab`** (`specs/liste-einruecken-tab-req.md`,
+   ebenfalls noch nicht implementiert — kein `Tab`-Eintrag im aktuellen Keymap,
+   `WordEditor.tsx:85–107` bestätigt): Die Kette **muss** außerhalb einer Tabelle `false`
+   liefern (beide Kettenglieder prüfen `isInTable`), damit ein späterer Listen-Einzug an
+   dieselbe Taste angehängt werden kann, ohne diese Datei erneut umzubauen. Der native
+   Browser-Tab (Fokus verlässt Editor) bleibt außerhalb von Tabellen unverändert.
+5. **Keine Änderung an `reconcileSelectionOnClick`** (`WordEditor.tsx:43–50`): Zeilen-
+   Einfügen läuft immer über eine reguläre, von `dispatchTransaction` (`WordEditor.tsx:125`)
+   verarbeitete Transaktion, nie über eine DOM-Mutation ohne Transaktion — der bekannte
+   Selection-Sync-Bug entsteht nur dort. Dennoch Pflicht-Regressionstest (Abschnitt 8.2).
+6. **Fehlerrückmeldung nutzt das bestehende `cutError`-Muster** (siehe Abschnitt 4.3) statt
+   eines neuen, divergierenden Banners.
 
 ---
 
 ## 4. Verbindliche Design-Entscheidungen zu offenen Fragen der Spezifikation
 
-### 4.1 Grenzfall 8 (mehrzeilige `CellSelection`) — Entscheidung: Bibliotheksverhalten übernehmen
+### 4.1 Grenzfall 8 (mehrzeilige `CellSelection`) — Variante (a), Bibliotheksverhalten übernehmen
 
-**Entscheidung: Variante (a).** Bei einer `CellSelection`, die mehrere Zeilen umspannt,
-wird genau **eine** neue Zeile relativ zur obersten (Zeile-oberhalb-Aktion) bzw.
-untersten (Zeile-unterhalb-Aktion) Zeile der Selektion eingefügt — das ist das
-Standardverhalten von `addRowBefore`/`addRowAfter` (Abschnitt 2, Punkt 6) und wird
-**unverändert übernommen**, nicht durch eigenen Code auf Variante (b) („N Zeilen für N
-selektierte Zeilen") umgebaut. Begründung:
+**Entscheidung: Variante (a).** Bei einer `CellSelection` über mehrere Zeilen wird genau
+**eine** neue Zeile relativ zur obersten (Aktion „oberhalb") bzw. untersten (Aktion
+„unterhalb") Zeile der Selektion eingefügt — das Standardverhalten von
+`addRowBefore`/`addRowAfter` (Abschnitt 2, Punkt 6). Es wird **nicht** auf „N Zeilen für N
+selektierte Zeilen" umgebaut. Begründung: Variante (b) verlangte eigene, ungetestete
+Schleifenlogik statt des direkten Aufrufs; Variante (a) entspricht dem verbreiteten
+„eine Zeile einfügen"-Verhalten. Dieser Absatz ist die von `zeile-einfuegen-req.md`
+Abschnitt 6, Testplanhinweis 5 geforderte Dokumentation der Variante und Grundlage des
+Tests in Abschnitt 8.1.
 
-- Variante (b) würde bedeuten, `addRowBefore`/`addRowAfter` **nicht** direkt zu
-  verwenden, sondern eine eigene Schleife über `rect.bottom - rect.top` Wiederholungen zu
-  schreiben — das widerspricht der in der Anforderungsdatei selbst hervorgehobenen
-  Erkenntnis (Befund 0.3), dass der Aufwand „überwiegend Verdrahtung" sein soll, und
-  führt zusätzliche, ungetestete Eigenlogik ein, wo die Bibliothek bereits ein
-  konsistentes, wohldefiniertes Verhalten liefert.
-- Variante (a) ist zudem das in mehreren gängigen Rich-Text-Editoren (nicht nur
-  ProseMirror-basierten) beobachtbare Verhalten für „eine Zeile einfügen" (im Unterschied
-  zu einer eigenen „N Zeilen einfügen"-Funktion) — die Nutzerin bekommt exakt eine neue,
-  leere Zeile, unabhängig davon, wie viele Zeilen sie zuvor markiert hatte.
-- **Empfehlung an die Anforderungsseite:** Dieser Absatz gilt als die in
-  `zeile-einfuegen-req.md` Abschnitt 6, Testplanhinweis 5 geforderte Dokumentation der
-  gewählten Verhaltensvariante („muss zunächst in dieser Datei oder einem Folge-Commit
-  dokumentiert... werden") und ist Grundlage für den in Abschnitt 8.1 unten festgelegten
-  Test.
+### 4.2 Formatierung/Zellinhalt der neuen Zeile (3.5) — keine Übernahme
 
-### 4.2 Formatierung/Zellinhalt der neuen Zeile (Anforderung 3.5) — keine Übernahme, weil `colwidth` heute nirgends erhalten bleibt
+Geprüft: `src/formats/odt/reader.ts:315` und `src/formats/docx/reader.ts:350` setzen
+`colwidth: null` **immer**; `docx/writer.ts:161` schreibt pauschal `<w:gridCol w:w="2000"/>`,
+`odt/writer.ts:117` schreibt `<table:table-column/>` ohne Breite. Es existiert also **kein**
+von `null` abweichender `colwidth`-Wert, den man erben oder nicht erben könnte — die in 3.5
+befürchtete optische „Sprung"-Situation ist mit dem heutigen Code unmöglich. Eine per
+`addRowBefore`/`addRowAfter` erzeugte Zelle hat ebenfalls `colwidth: null` (Default von
+`createAndFill()`) und einen leeren `paragraph` ohne Marks — exakt „kein automatisches
+Übernehmen von Formatierung". **Keine Zusatzlogik.**
 
-Geprüft: `src/formats/docx/reader.ts:244` und `src/formats/odt/reader.ts:197` setzen
-`colwidth: null` **immer** (nie aus `w:gridCol`/`table:table-column` gelesen);
-`docx/writer.ts:131` schreibt für **jede** Spalte pauschal `<w:gridCol w:w="2000"/>`;
-`odt/writer.ts` schreibt `<table:table-column/>` **ohne** Breitenangabe. Das heißt: **kein**
-bestehender Zellknoten (importiert oder per `insertTable` erzeugt) trägt heute je einen
-von `null` abweichenden `colwidth`-Wert. Eine per `addRowBefore`/`addRowAfter` neu
-erzeugte Zelle hat ebenfalls `colwidth: null` (Default von `cell.createAndFill()`) — sie
-weicht damit von **keiner** bestehenden Zelle ab. Die in Anforderung 3.5 befürchtete
-optische „Sprung"-Situation kann mit dem heutigen Code gar nicht auftreten, weil es keine
-divergierenden `colwidth`-Werte gibt, die man erben/nicht erben könnte.
-**Entscheidung:** keine Zusatzlogik zur `colwidth`-Übernahme — das wäre Vorgriff auf eine
-Funktion (persistente Spaltenbreiten), die dieses Ticket nicht einführt.
-Zeichenformatierung: `createAndFill()` liefert eine leere Zelle mit einem leeren
-`paragraph` ohne Marks — entspricht bereits exakt der Anforderung „kein automatisches
-Übernehmen von Formatierung". Keine Zusatzlogik nötig.
+### 4.3 Grenzfall 9 (kein stiller Fehlschlag) — bestehendes `cutError`-Muster wiederverwenden
 
-### 4.3 Grenzfall 9 (kein stiller Fehlschlag bei unerwartetem Fehler) — Entscheidung: defensiver Wrapper in `Toolbar.tsx`, kein globaler Umbau von `run()`
+Es gibt **keinen bekannten** Pfad, auf dem `addRowBefore`/`addRowAfter` bei
+`isInTable(state) === true` `false` zurückgeben oder werfen (der Button ist deaktiviert,
+solange `isInTable` falsch ist, Abschnitt 6.2). Anforderung 3.7/Grenzfall 9 verlangt
+dennoch sichtbare Rückmeldung für den unwahrscheinlichen Restfall.
 
-Wie in Abschnitt 2, Punkt 7 begründet, gibt es aktuell **keinen bekannten** Code-Pfad, auf
-dem `addRowBefore`/`addRowAfter` — einmal `isInTable(state) === true` — `false`
-zurückgeben oder eine Exception werfen (der Button ist ohnehin deaktiviert, solange
-`isInTable` falsch ist, siehe Abschnitt 6.2). Trotzdem verlangt Anforderung 3.7/Grenzfall 9
-ausdrücklich eine sichtbare Rückmeldung für den Fall, dass doch etwas fehlschlägt (z. B.
-eine bislang unbekannte Interaktion mit einer besonders pathologischen Fremdstruktur).
-**Entscheidung:** Ein schlanker, **lokal auf die zwei neuen Buttons beschränkter**
-try/catch-Wrapper (nicht in `commands.ts`, sondern in `Toolbar.tsx`, siehe Abschnitt 6.2)
-— bewusst **kein** Umbau des globalen `run()`-Helpers für alle bestehenden Buttons, um
-den Scope dieses Tickets nicht auf unbeteiligte Funktionen (Fett, Ausrichtung, Listen...)
-auszuweiten. `run()` selbst wird nur um einen Rückgabewert ergänzt (siehe unten), das ist
-rückwärtskompatibel, weil alle elf bestehenden Aufrufstellen den Rückgabewert schlicht
-ignorieren.
+**Entscheidung:** Das Projekt hat für genau diesen Zweck bereits ein etabliertes Muster —
+den **`cutError`-Kanal**: `WordEditor.tsx:71` hält `const [cutError, setCutError] =
+useState<string | null>(null)`. Die 4-Sekunden-Auto-Ausblendung ist inzwischen in einen
+**wiederverwendbaren Hook `useAutoDismiss(value, setValue, ms = 4000)`** ausgelagert
+(`WordEditor.tsx:57–63`), der für `cutError` per `useAutoDismiss(cutError, setCutError)`
+aufgerufen wird (`WordEditor.tsx:74`). `Toolbar.tsx:157–161` rendert die Meldung als
+`<span role="alert" …>` neben dem Ausschneiden-Button, und
+`cutSelection({ onCutBlocked: setCutError })` (`commands.ts:149`) speist sie. Die
+Zeilen-Einfügen-Rückmeldung wird **spiegelbildlich** dazu gebaut (paralleler
+`rowError`/`setRowError`-State in `WordEditor`, per Props an die Toolbar, gleiches
+`role="alert"`-Rendering) — **nicht** als neuer lokaler `useState` mit manuellem
+Schließen-Button in der Toolbar. **Wichtig (Abweichung gegenüber einer früheren Fassung
+dieses Plans):** Die Auto-Ausblendung wird **nicht** als zweiter, inline duplizierter
+`useEffect` gebaut, sondern durch **denselben** vorhandenen Hook — ein zusätzlicher Aufruf
+`useAutoDismiss(rowError, setRowError)` genügt (siehe 6.3, Punkt 3). Vorteile: konsistente
+UX, Auto-Ausblendung „gratis" und ohne Code-Duplikat, und die (theoretisch ebenfalls
+fehlbare) Tab-Bindung in `WordEditor` kann denselben State setzen, weil er dort und nicht
+in der Toolbar lebt — exakt der Grund, aus dem `cutError` in `WordEditor` liegt (auch
+`Shift-Delete` in `WordEditor.tsx:106` setzt ihn). `run()` wird nur um einen
+**Rückgabewert** ergänzt (siehe 6.2), rückwärtskompatibel.
 
-### 4.4 Cross-Format-Rundreise (Anforderung 5.2) — Entscheidung: nur auf Unit-Test-Ebene möglich, nicht per echter Bedienung
+### 4.4 Cross-Format-Rundreise (5.2) — nur auf Unit-Ebene möglich
 
-**Wichtiger, code-verifizierter Befund:** `src/formats/types.ts:15-28`
-(`FormatModule<TContent>`) und `src/app/DocumentWorkspace.tsx` zeigen, dass ein
-geöffnetes Dokument **ausschließlich** über `module.exportFile` in **sein eigenes**
-Format re-exportiert werden kann (`docxModule.exportFile = writeDocx`,
-`odtModule.exportFile = writeOdt`, siehe `src/formats/docx/docx.ts:12`) — es gibt in der
-App **keine** Funktion „als anderes Format exportieren". Ein als DOCX geöffnetes und
-bearbeitetes Dokument kann über die UI nicht als ODT exportiert werden und umgekehrt.
-**Konsequenz:** Der in Anforderung 5.2 geforderte Cross-Format-Test („in ein ursprünglich
-als DOCX importiertes Dokument eine Zeile einfügen und als ODT exportieren") **kann nicht
-als E2E-Test über echte Bedienung** umgesetzt werden, weil die dafür nötige App-Funktion
-schlicht nicht existiert (das ist eine Lücke außerhalb des Scopes dieses Tickets). Er wird
-stattdessen als **Unit-Test** umgesetzt: `readDocx(...)` liefert `WordDocumentContent`,
-dessen `body`-JSON (nach simuliertem Zeilen-Einfügen über eine direkt aufgerufene
-ProseMirror-Transaktion, s. Abschnitt 8.1) direkt an `writeOdt(...)` übergeben wird, und
-umgekehrt. Das ist konsistent mit Anforderung Abschnitt 6, Testplanhinweis 4 („sowohl als
-Unit-Test... als auch zusätzlich als E2E-Test"), nur dass der Cross-Format-Teil aus
-strukturellen Gründen ausschließlich der Unit-Test-Spielart zufällt — dieser Punkt gehört
-in die Abnahme-Checkliste (Abschnitt 11) als dokumentierte Einschränkung, nicht als
-stillschweigend erfüllt.
+`src/formats/types.ts` (`FormatModule.exportFile`) und die Format-Module
+(`docxModule.exportFile = writeDocx`, `odtModule.exportFile = writeOdt`) zeigen: ein
+geöffnetes Dokument kann **ausschließlich** in sein eigenes Format re-exportiert werden;
+es gibt **keine** UI-Funktion „als anderes Format exportieren". Der in 5.2 geforderte
+Cross-Format-Test ist daher **nicht** als E2E über echte Bedienung umsetzbar, sondern nur
+als Unit-Test: `readDocx(...)` → `body`-JSON per Transaktion (`addRowBefore`/`addRowAfter`
+auf einem `EditorState`) ändern → `writeOdt(...)` → `readOdt(...)`, und umgekehrt. Als
+**dokumentierte strukturelle Einschränkung** in die Abnahme (Abschnitt 11) aufnehmen,
+nicht stillschweigend als „E2E getestet" ausgeben.
 
 ---
 
 ## 5. ProseMirror-Schema — keine Änderung nötig
 
-`src/formats/shared/schema.ts:106`: `tableNodes({ tableGroup: 'block', cellContent:
-'block+', cellAttributes: {} })` liefert bereits `colspan`/`rowspan`/`colwidth` als
-Standardattribute jeder `table_cell`/`table_header`-Node sowie beliebige `block+`-Inhalte
-pro Zelle (mehrere Absätze, verschachtelte Tabellen, Listen, Bilder). Eine per
-`addRowBefore`/`addRowAfter` eingefügte Zelle ist strukturell identisch zu einer beim
-Import bereits vorhandenen — keine neuen Attribute, kein neuer Node-Typ nötig. Bestätigt
-insbesondere für Grenzfall 10 (verschachtelte Tabelle in einer Zelle): `cellContent:
-'block+'` schließt `table` ein (da `table` selbst `tableGroup: 'block'` trägt, Zeile
-106), das ist bereits heute so und bleibt unverändert.
+`src/formats/shared/schema.ts:154`: `...tableNodes({ tableGroup: 'block', cellContent:
+'block+', cellAttributes: {} })` liefert bereits `colspan`/`rowspan`/`colwidth` je Zelle
+und `block+`-Inhalte (mehrere Absätze, verschachtelte Tabellen, Listen, Bilder). Eine per
+`addRowBefore`/`addRowAfter` eingefügte Zelle ist strukturell identisch zu einer
+importierten — kein neuer Node-Typ, kein neues Attribut. Grenzfall 10 (verschachtelte
+Tabelle) ist durch `cellContent: 'block+'` bereits abgedeckt, unverändert.
 
 ---
 
 ## 6. Datei-für-Datei-Umsetzungsplan
 
+Drei geänderte Dateien. **Keine** Änderung an `odt/writer.ts`, `docx/writer.ts`,
+`*/reader.ts` oder `schema.ts`.
+
 ### 6.1 GEÄNDERT: `src/formats/shared/editor/commands.ts`
 
-Neuer Import-Block (ergänzt Zeile 1-4):
+**Imports (Zeile 1–4) ergänzen** — `TextSelection` als Wert-Import (für die Tab-Kette) und
+die Zeilen-Commands aus `prosemirror-tables`:
 
 ```ts
 import type { Command, EditorState } from 'prosemirror-state'
@@ -330,47 +364,46 @@ import { wordSchema } from '../schema'
 export { isInTable }
 ```
 
-Neue Exporte (nach `insertTable`, Zeile 86, einzufügen):
+**Neue Exporte (am Ende der Datei, nach `cutSelection`, Zeile 166, anfügen):**
 
 ```ts
 /** Fügt eine neue, leere Zeile unmittelbar oberhalb der Zeile ein, in der sich die
- *  aktuelle Selektion befindet (Anforderung Abschnitt 3.1). Bei einer `CellSelection`,
- *  die mehrere Zeilen umspannt, bezieht sich „oberhalb" auf die oberste Zeile der
- *  Selektion (Grenzfall 8, Entscheidung siehe zeile-einfuegen-code.md Abschnitt 4.1) —
- *  reiner Re-Export der bereits korrekten `prosemirror-tables`-Implementierung, siehe
- *  zeile-einfuegen-code.md Abschnitt 2 für die Belegkette (Merge-Verlängerung,
- *  Spaltenkonsistenz, Selektions-/Undo-Verhalten sind bereits in der Bibliothek
- *  korrekt). */
+ *  aktuelle Selektion befindet (Anforderung 3.1). Bei einer mehrzeilige `CellSelection`
+ *  bezieht sich „oberhalb" auf die oberste Zeile der Selektion (Grenzfall 8, Variante (a),
+ *  siehe zeile-einfuegen-code.md Abschnitt 4.1). Reiner Re-Export der bereits korrekten
+ *  prosemirror-tables-Implementierung — Merge-Verlängerung, Spaltenkonsistenz,
+ *  Selektions-Mapping und Undo-Gruppierung sind dort bereits richtig (Abschnitt 2). */
 export const insertRowBefore: Command = addRowBefore
 
-/** Spiegelbildlich zu `insertRowBefore` (Anforderung Abschnitt 3.2). */
+/** Spiegelbildlich zu `insertRowBefore` (Anforderung 3.2). */
 export const insertRowAfter: Command = addRowAfter
 
-/** Navigation zur nächsten/vorherigen Tabellenzelle (Tab/Umschalt+Tab). Liefert `false`
- *  außerhalb einer Tabelle bzw. — für `direction: 1` — wenn keine nächste Zelle mehr
- *  existiert (das ist genau der Fall, den `insertRowOnTabAtTableEnd` unten als
- *  Fallback behandelt). */
+/** Tab/Umschalt+Tab-Navigation zur nächsten/vorherigen Tabellenzelle. Liefert außerhalb
+ *  einer Tabelle `false` (native Tab-Semantik bleibt erhalten) und — für `direction: 1` —
+ *  auch dann `false`, wenn keine nächste Zelle mehr existiert; genau dieser Fall wird von
+ *  `insertRowOnTabAtTableEnd` als Fallback behandelt. */
 export function goToTableCell(direction: 1 | -1): Command {
   return goToNextCell(direction)
 }
 
-/** Bindet Grenzfall 4 der Anforderung: Tab in der letzten Zelle der letzten Zeile fügt
- *  eine neue Zeile unterhalb an und setzt den Cursor in deren erste Zelle — in **einer**
- *  Transaktion (Anforderung 3.6: ein Undo-Schritt für den gesamten Vorgang, keine
- *  getrennte Selektions-Transaktion danach, die einen zweiten History-Eintrag erzeugen
- *  könnte). Muss in einer `chainCommands`-Kette **nach** `goToTableCell(1)` stehen, damit
- *  normale Tab-Navigation (nicht letzte Zelle) unverändert Vorrang hat — siehe
- *  zeile-einfuegen-code.md Abschnitt 3, Punkt 4/6.3. */
+/** Grenzfall 4: Tab in der letzten Zelle der letzten Zeile hängt eine neue Zeile unten an
+ *  und setzt den Cursor in deren erste Zelle — in **einer** Transaktion (3.6: ein
+ *  Undo-Schritt). Muss in einer `chainCommands`-Kette **nach** `goToTableCell(1)` stehen,
+ *  damit normale Zellnavigation Vorrang hat (Abschnitt 3, Punkt 4). Positions-Arithmetik
+ *  belegt gegen prosemirror-tables (Abschnitt 2): absolute Zellposition =
+ *  `found.start + TableMap.positionAt(row, col, found.node)`. */
 export function insertRowOnTabAtTableEnd(): Command {
   return (state, dispatch) => {
     if (!isInTable(state)) return false
     if (dispatch) {
       const rect = selectedRect(state)
       const tr = addRow(state.tr, rect, rect.bottom)
-      const table = findTable(tr.doc.resolve(tr.mapping.map(rect.tableStart)))
-      if (table) {
-        const map = TableMap.get(table.node)
-        const firstCellPos = table.start + map.positionAt(rect.bottom, 0, table.node)
+      const found = findTable(tr.doc.resolve(tr.mapping.map(rect.tableStart)))
+      if (found) {
+        const map = TableMap.get(found.node)
+        // erste Zelle der neu eingefügten Zeile (Index rect.bottom); +1 = erster
+        // gültiger Cursor-Punkt innerhalb der Zelle.
+        const firstCellPos = found.start + map.positionAt(rect.bottom, 0, found.node)
         tr.setSelection(TextSelection.near(tr.doc.resolve(firstCellPos + 1)))
       }
       dispatch(tr.scrollIntoView())
@@ -380,79 +413,96 @@ export function insertRowOnTabAtTableEnd(): Command {
 }
 ```
 
-**Begründung der Positionsberechnung** (damit die Implementierung nicht „irgendwie"
-nachgebaut wird, sondern gegen die Bibliotheksquelle abgesichert ist):
-`node_modules/prosemirror-tables/dist/index.js:1266-1287` (`moveRow`) zeigt exakt dasselbe
-Muster — nach einer Tabellenmutation wird die Tabelle **erneut** über
-`findTable(tr.doc.resolve(...))` aus `tr.doc` aufgelöst (nicht die alte, vor der Mutation
-gecachte Node verwendet), dann `TableMap.get(newTable)` neu berechnet, dann
-`map.positionAt(row, col, newTable)` (Zeile 101-110) für die absolute Zellposition
-verwendet. `rect.bottom` ist hier sicher als Zeilenindex der **neu eingefügten** Zeile
-verwendbar, weil `addRow(tr, rect, rect.bottom)` diese Zeile exakt an Index `rect.bottom`
-einfügt. `tr.mapping.map(rect.tableStart)` ist zwar in diesem konkreten Fall unverändert
-(die Einfügung liegt immer **nach** `tableStart`, nie davor, weil dieser Pfad nur am Ende
-der Tabelle feuert), wird aber trotzdem über `tr.mapping` gemappt statt den rohen Wert
-wiederzuverwenden, um nicht von dieser Eigenschaft abhängig zu sein, falls der Code
-künftig geändert wird. **Diese Positions-Arithmetik muss durch den in Abschnitt 8.1
-geforderten Unit-Test verifiziert werden, bevor sie als korrekt gilt** — insbesondere der
-`+ 1`-Offset (Sprung von der Zellgrenze in den ersten gültigen Cursor-Punkt darin), der
-hier aus Analogie zu vergleichbaren Stellen in der Bibliothek angenommen, aber nicht
-direkt aus einer identischen Bibliotheksstelle kopiert wurde.
-
-**Kein Wrapper mit Zusatzlogik für `insertRowBefore`/`insertRowAfter` selbst** — bewusste
-Entscheidung, siehe Abschnitt 2 (Bibliothek erledigt Merge-Verlängerung, Spaltenzahl,
-Selektions-Mapping, Undo-Gruppierung bereits korrekt) und Abschnitt 4.3 (Fehlerbehandlung
-lebt in `Toolbar.tsx`, nicht in `commands.ts`).
+**Bereits empirisch verifiziert (Abschnitt 2.1), zusätzlich als dauerhafter Unit-Test in
+Abschnitt 8.1 zu erstellen:** der `+ 1`-Offset (Zellgrenze → erster Cursor-Punkt) und die
+Verwendung von `rect.bottom` als Index der neuen Zeile. Beides ist aus der
+Bibliotheksnutzung (Abschnitt 2) abgeleitet, nicht 1:1 aus einer identischen
+Bibliotheksstelle kopiert — ein Wegwerf-Testlauf in dieser Prüfrunde hat das Schnipsel
+Zeile für Zeile wie oben abgedruckt ausgeführt und bestätigt (ein Dispatch, Cursor in der
+neuen Zeile, siehe Abschnitt 2.1); das ersetzt **nicht** den in 8.1 geforderten,
+eingecheckten Test. `insertRowBefore`/`insertRowAfter` bekommen **bewusst keinen** eigenen
+Wrapper (Bibliothek erledigt alles, Fehlerbehandlung lebt in der Toolbar, Abschnitt 4.3).
 
 ### 6.2 GEÄNDERT: `src/formats/shared/editor/Toolbar.tsx`
 
-1. `run()` (Zeile 23-26) liefert neu den Rückgabewert des Commands zurück — rückwärts-
-   kompatibel, da alle bisherigen 11 Aufrufstellen (`toggleMark`, `setAlign`,
-   `setHeading`, `toggleList`, `liftFromList`, `insertImage`, `insertTable`,
-   `applyMarkColor`, `clearMarkColor`) den Rückgabewert schlicht nicht verwenden:
+1. **`run()` (Zeile 28–31) liefert den Command-Rückgabewert zurück — und behält den
+   dritten `view`-Parameter** (den `cutSelection` zwingend braucht; die frühere Fassung
+   ließ ihn fälschlich weg):
 
    ```ts
-   function run(view: EditorView, command: (state: typeof view.state, dispatch: typeof view.dispatch) => boolean): boolean {
-     const result = command(view.state, view.dispatch)
+   function run(view: EditorView, command: Command): boolean {
+     const ok = command(view.state, view.dispatch, view)
      view.focus()
-     return result
+     return ok
    }
    ```
 
-2. Neuer Import-Block (ergänzt Zeile 5-17):
+   Rückwärtskompatibel: alle bestehenden Aufrufer ignorieren den Rückgabewert.
+
+2. **`ToolbarProps` (Zeile 22–26) um den Fehlerkanal erweitern** (parallel zu `cutError`,
+   siehe Abschnitt 4.3):
+
+   ```ts
+   interface ToolbarProps {
+     view: EditorView
+     cutError: string | null
+     setCutError: (message: string | null) => void
+     rowError: string | null
+     setRowError: (message: string | null) => void
+   }
+   ```
+
+3. **Import (Zeile 6–20) um `insertRowAfter`, `insertRowBefore` ergänzen** (`isInTable`
+   ist bereits importiert, Zeile 14):
 
    ```ts
    import {
-     applyMarkColor,
-     clearMarkColor,
-     insertImage,
-     insertRowAfter,
-     insertRowBefore,
-     insertTable,
-     isAlignActive,
-     isInTable,
-     liftFromList,
-     setAlign,
-     setHeading,
-     toggleList,
-     type Align,
+     applyMarkColor, canCut, clearMarkColor, cutSelection, insertImage,
+     insertRowAfter, insertRowBefore, insertTable, isAlignActive, isInTable,
+     liftFromList, setAlign, setHeading, toggleList, type Align,
    } from './commands'
    ```
 
-3. Neuer lokaler State für die in Abschnitt 4.3 festgelegte Fehlerrückmeldung
-   (Grenzfall 9), analog zum bestehenden Muster `exportError` in
-   `DocumentWorkspace.tsx:13-14/24-26`:
+4. **Zwei SVG-Icons** (nach `ScissorsIcon`, Zeile 53, im selben Stil — `viewBox="0 0 24 24"`,
+   `stroke="currentColor"`, `aria-hidden`, `focusable="false"`). SVG statt Unicode-Glyphe,
+   weil Anforderung Abschnitt 1 # 8 / `FEATURE-SPEC-DOCX-ODT.md` 20.1 SVG **bevorzugt** und
+   das Projekt den Ausschneiden-Button gerade erst von einem Emoji auf `ScissorsIcon`
+   umgestellt hat — die neuen Buttons folgen diesem frischen Hausmuster:
 
    ```tsx
-   const [tableRowNotice, setTableRowNotice] = useState<string | null>(null)
+   function InsertRowAboveIcon() {
+     return (
+       <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor"
+         strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" focusable="false">
+         <path d="M12 3v5M9.5 5.5 12 3l2.5 2.5" />
+         <rect x="4" y="11" width="16" height="10" rx="1" />
+         <line x1="4" y1="16" x2="20" y2="16" />
+         <line x1="12" y1="11" x2="12" y2="21" />
+       </svg>
+     )
+   }
+   function InsertRowBelowIcon() {
+     return (
+       <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor"
+         strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" focusable="false">
+         <rect x="4" y="3" width="16" height="10" rx="1" />
+         <line x1="4" y1="8" x2="20" y2="8" />
+         <line x1="12" y1="3" x2="12" y2="13" />
+         <path d="M12 21v-5M9.5 18.5 12 21l2.5-2.5" />
+       </svg>
+     )
+   }
    ```
 
-   (erfordert `import { useState } from 'react'`, Toolbar ist aktuell eine reine
-   Funktionskomponente ohne eigenen State — das ist die erste Stelle, die welchen
-   braucht.)
+   *(Zulässiger Fallback, falls kein Icon gezeichnet werden soll: ein reines Textlabel
+   „Zeile oberhalb" / „Zeile unterhalb" — Anforderung # 8 erlaubt „ein eindeutiges
+   Textlabel" alternativ zum SVG. Eine alleinstehende Unicode-Pfeil-Glyphe `↑`/`↓` ohne
+   Textlabel ist dagegen genau das, wovor # 8 warnt.)*
 
-4. Zwei neue Buttons, unmittelbar nach dem bestehenden Tabellen-Button (nach Zeile 239,
-   vor dem schließenden `</button>`-Block für Bilder):
+5. **Zwei Buttons unmittelbar nach dem „⊞ Tabelle"-Button** (nach Zeile 289, vor dem
+   „🖼 Bild"-Label Zeile 291). `disabled`-Muster und Klassen **wörtlich** vom bereits
+   bestehenden Ausschneiden-Button (Zeile 147/153) übernommen — das ist **kein** neues
+   Muster (die frühere Fassung behauptete fälschlich „erste Verwendung von `disabled`"):
 
    ```tsx
    <button
@@ -462,19 +512,16 @@ lebt in `Toolbar.tsx`, nicht in `commands.ts`).
      disabled={!isInTable(view.state)}
      onMouseDown={(e) => {
        e.preventDefault()
+       setRowError(null)
        try {
-         if (!run(view, insertRowBefore)) {
-           setTableRowNotice('Zeile konnte nicht eingefügt werden.')
-         } else {
-           setTableRowNotice(null)
-         }
+         if (!run(view, insertRowBefore)) setRowError('Zeile konnte nicht eingefügt werden.')
        } catch {
-         setTableRowNotice('Zeile konnte nicht eingefügt werden.')
+         setRowError('Zeile konnte nicht eingefügt werden.')
        }
      }}
      className="px-2 py-1 rounded text-sm hover:bg-neutral-100 dark:hover:bg-neutral-800 text-neutral-700 dark:text-neutral-300 disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-transparent"
    >
-     Zeile ↑
+     <InsertRowAboveIcon />
    </button>
    <button
      type="button"
@@ -483,220 +530,123 @@ lebt in `Toolbar.tsx`, nicht in `commands.ts`).
      disabled={!isInTable(view.state)}
      onMouseDown={(e) => {
        e.preventDefault()
+       setRowError(null)
        try {
-         if (!run(view, insertRowAfter)) {
-           setTableRowNotice('Zeile konnte nicht eingefügt werden.')
-         } else {
-           setTableRowNotice(null)
-         }
+         if (!run(view, insertRowAfter)) setRowError('Zeile konnte nicht eingefügt werden.')
        } catch {
-         setTableRowNotice('Zeile konnte nicht eingefügt werden.')
+         setRowError('Zeile konnte nicht eingefügt werden.')
        }
      }}
      className="px-2 py-1 rounded text-sm hover:bg-neutral-100 dark:hover:bg-neutral-800 text-neutral-700 dark:text-neutral-300 disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-transparent"
    >
-     Zeile ↓
+     <InsertRowBelowIcon />
    </button>
-   ```
-
-   **Icon-Wahl-Begründung (Anforderung Abschnitt 2, Bezug `FEATURE-SPEC-DOCX-ODT.md`
-   Abschnitt 20.1):** `↑`/`↓` (U+2191/U+2193) statt eines neuen Emoji — diese beiden
-   Zeichen gehören zum abgedeckten Basisbereich praktisch jeder Systemschriftart (deutlich
-   verlässlicher als die bereits im Bestand befindlichen `⊞`/`⇧`/`≡`/`🖍`, die dieselbe
-   Anforderung eigentlich schon einschränken sollte) und sind mit Textlabel kombiniert
-   („Zeile ↑"/„Zeile ↓"), nicht alleinstehend — konsistent mit dem bestehenden Muster
-   „⊞ Tabelle" (Zeile 238).
-
-   **`disabled`-Attribut ist die erste Verwendung dieses Musters in `Toolbar.tsx`** —
-   bisher hat kein Button einen deaktivierten Zustand (auch der Tabellen-Button nicht,
-   der nutzt `aria-pressed` nur als Aktiv-Indikator, nie `disabled`). Die
-   `disabled:opacity-40 disabled:cursor-not-allowed`-Utility-Klassen existieren im
-   Projekt bereits (`DocumentWorkspace.tsx:62`: `disabled:opacity-50`), also kein neues
-   CSS-Konzept, nur die erste Anwendung im Toolbar-Kontext.
-
-5. Rendering des Fehlerbanners, direkt unterhalb der `role="toolbar"`-Zeile (nach Zeile
-   246, vor dem schließenden `</div>` der Toolbar):
-
-   ```tsx
-   {tableRowNotice && (
-     <div
-       role="alert"
-       className="px-3 py-1.5 text-xs bg-red-100 dark:bg-red-950 text-red-800 dark:text-red-200 flex items-center justify-between"
-     >
-       <span>{tableRowNotice}</span>
-       <button type="button" onClick={() => setTableRowNotice(null)} aria-label="Meldung schließen" className="ml-2">
-         ×
-       </button>
-     </div>
+   {rowError && (
+     <span role="alert" className="text-xs text-red-600 dark:text-red-400 max-w-[16rem] truncate">
+       {rowError}
+     </span>
    )}
    ```
 
-   `role="alert"` (nicht `role="status"` wie im Paste-Ticket) — hier handelt es sich laut
-   Anforderung 3.7 tatsächlich um einen Fehlerfall (Aktion ist fehlgeschlagen), nicht nur
-   eine Information wie beim Paste-Bild-Platzhalter; konsistent mit
-   `FormatPicker.tsx:44` (`role="alert"` für den Import-Fehler).
+   `onMouseDown` + `e.preventDefault()` wie bei allen Toolbar-Buttons (verhindert
+   Fokusverlust/Selektionskollaps vor der Aktion). Die `disabled`-Auswertung aktualisiert
+   sich automatisch, weil `dispatchTransaction` (`WordEditor.tsx:125`) nach jeder
+   Transaktion `forceRender` auslöst und die Toolbar `isInTable(view.state)` bei jedem
+   Render frisch liest — identisch zum bestehenden `disabled={!canCut(view.state)}` und
+   `aria-pressed={isInTable(view.state)}`.
 
 ### 6.3 GEÄNDERT: `src/formats/shared/editor/WordEditor.tsx`
 
-`keymap({...})`-Objekt (Zeile 71-79) ergänzen um zwei Einträge (Import-Zeile 1 um
-`chainCommands` aus `prosemirror-commands` erweitern, Zeile 6 bereits vorhandenen Import
-von `baseKeymap, toggleMark` erweitern; Import-Zeile ergänzt um
-`goToTableCell, insertRowOnTabAtTableEnd` aus `../commands`):
+1. **Import Zeile 6** um `chainCommands` erweitern:
+   `import { baseKeymap, chainCommands, toggleMark } from 'prosemirror-commands'`
+2. **Import Zeile 12** um die neuen Commands erweitern:
+   `import { cutSelection, goToTableCell, insertHardBreak, insertRowOnTabAtTableEnd } from './commands'`
+3. **Neuer State `rowError`** parallel zu `cutError` (Zeile 71) plus Auto-Ausblendung über
+   den **bereits vorhandenen** `useAutoDismiss`-Hook (`WordEditor.tsx:57–63`, für `cutError`
+   aufgerufen in Zeile 74) — **kein** zweiter, inline duplizierter `useEffect` (das ist die
+   Korrektur gegenüber der früheren Fassung, siehe Abschnitt 4.3 und 12):
 
-```ts
-import { baseKeymap, chainCommands, toggleMark } from 'prosemirror-commands'
-// ...
-import { goToTableCell, insertRowOnTabAtTableEnd } from './commands'
-```
+   ```ts
+   const [rowError, setRowError] = useState<string | null>(null)
+   // ... direkt nach useAutoDismiss(cutError, setCutError) (Zeile 74):
+   useAutoDismiss(rowError, setRowError)
+   ```
 
-```ts
-keymap({
-  'Mod-z': undo,
-  'Mod-y': redo,
-  'Mod-Shift-z': redo,
-  Enter: splitListItem(wordSchema.nodes.list_item),
-  'Mod-b': toggleMark(wordSchema.marks.strong),
-  'Mod-i': toggleMark(wordSchema.marks.em),
-  'Mod-u': toggleMark(wordSchema.marks.underline),
-  Tab: chainCommands(goToTableCell(1), insertRowOnTabAtTableEnd()),
-  'Shift-Tab': goToTableCell(-1),
-}),
-```
+   Der Hook nimmt `(value, setValue, ms = 4000)` und ist genau für diesen Zweck gebaut
+   (JSDoc in `WordEditor.tsx:52–56`); ein eigener Timeout-`useEffect` wäre eine unnötige
+   Duplikation.
 
-Muss **vor** `keymap(baseKeymap)` (Zeile 80) registriert bleiben (unverändert
-sichergestellt durch die bestehende Reihenfolge — `keymap`-Plugins mit demselben
-Tastenkürzel werden in Registrierungsreihenfolge geprüft, das erste, das `true`
-zurückliefert, gewinnt). Da `baseKeymap` selbst **kein** `Tab`/`Shift-Tab` bindet
-(bestätigt gegen `node_modules/prosemirror-commands/dist/index.cjs:636-658`,
-`pcBaseKeymap`/`macBaseKeymap`), gibt es hier keine Kollision. Außerhalb einer Tabelle
-liefern sowohl `goToTableCell(1)` als auch `insertRowOnTabAtTableEnd()` `false`
-(`isInTable(state)` schlägt fehl) — der native Browser-Tab (Fokus verlässt den Editor)
-bleibt dort unverändert erhalten, exakt wie heute.
+4. **Zwei Einträge zum bestehenden `keymap({...})`-Objekt** (Zeile 85–107) **hinzufügen** —
+   additiv, die vorhandenen Bindungen `'Shift-Enter': insertHardBreak()` (Zeile 97),
+   `'Shift-Delete': cutSelection({ onCutBlocked: setCutError })` (Zeile 106) und der
+   load-bearing Kommentar zu `Mod-c/x/v` (Zeile 86–92) **bleiben unverändert erhalten**
+   (die frühere Fassung zeigte ein gekürztes Keymap-Objekt, das diese Einträge
+   versehentlich gelöscht hätte):
 
-**Kein neues Plugin, keine Änderung an `plugins: [...]` (Zeile 69-86) nötig** —
-`columnResizing()`/`tableEditing()` sind bereits vorhanden (Zeile 81-82), das ist alles,
-was `addRowBefore`/`addRowAfter`/`goToNextCell` zur Laufzeit voraussetzen.
+   ```ts
+   // ... innerhalb des bestehenden keymap({ ... }), z. B. nach 'Mod-u':
+   Tab: chainCommands(goToTableCell(1), insertRowOnTabAtTableEnd()),
+   'Shift-Tab': goToTableCell(-1),
+   ```
 
-### 6.4 GEÄNDERT: `src/formats/odt/writer.ts` (Bugfix aus Abschnitt 1)
+5. **`rowError`/`setRowError` an die Toolbar durchreichen** (Zeile 170):
+   `<Toolbar view={viewRef.current} cutError={cutError} setCutError={setCutError} rowError={rowError} setRowError={setRowError} />`
 
-Ersetzt `case 'table':` (aktuell Zeile 86-111) vollständig:
+**Keine Änderung an `plugins: [...]`** — `columnResizing()`/`tableEditing()`
+(Zeile 109–110) und `history()` (Zeile 84) sind bereits vorhanden; das ist alles, was
+`addRowBefore`/`addRowAfter`/`goToNextCell` zur Laufzeit voraussetzen. Das eigene
+`keymap({...})` steht bereits **vor** `keymap(baseKeymap)` (Zeile 108), sodass die
+Tab-Kette Vorrang hat. `baseKeymap` bindet kein `Tab`/`Shift-Tab`, also keine Kollision;
+außerhalb einer Tabelle liefert die Kette `false` und das native Tab greift wie bisher.
 
-```ts
-case 'table': {
-  const rows = node.content ?? []
-  // Colspan-bewusste Spaltenzahl — behebt Befund 0.6 (bislang: rows[0]?.content?.length,
-  // ignorierte colspan komplett; docx/writer.ts:130 macht es bereits richtig).
-  const colCount = (rows[0]?.content ?? []).reduce((sum, cell) => sum + Number(cell.attrs?.colspan ?? 1), 0) || 1
-  const columns = Array.from({ length: colCount }, () => '<table:table-column/>').join('')
+### 6.4 KEINE Änderung: `src/formats/odt/writer.ts`, `src/formats/docx/writer.ts`, `src/formats/*/reader.ts`, `src/formats/shared/schema.ts`
 
-  // Spalten-Pending-Tracker für vertikale Merges — analog zu docx/writer.ts:133/161-163.
-  // Behebt den in zeile-einfuegen-code.md Abschnitt 1 dokumentierten Bug: ohne dieses
-  // Array fehlt jeder von einem rowspan überdeckten Rasterzelle das laut ODF-Standard
-  // erforderliche <table:covered-table-cell/>-Füllelement.
-  const pending: number[] = Array.from({ length: colCount }, () => 0)
-
-  const rowsXml = rows
-    .map((row) => {
-      const cellsXml: string[] = []
-      let col = 0
-      let cellIndex = 0
-      const rowCells = row.content ?? []
-      while (col < colCount) {
-        if (pending[col] > 0) {
-          pending[col] -= 1
-          cellsXml.push('<table:covered-table-cell/>')
-          col += 1
-          continue
-        }
-        const cell = rowCells[cellIndex]
-        cellIndex += 1
-        if (!cell) {
-          col += 1
-          continue
-        }
-        const colspan = Number(cell.attrs?.colspan ?? 1)
-        const rowspan = Number(cell.attrs?.rowspan ?? 1)
-        const spanAttrs = [
-          colspan > 1 ? `table:number-columns-spanned="${colspan}"` : '',
-          rowspan > 1 ? `table:number-rows-spanned="${rowspan}"` : '',
-        ]
-          .filter(Boolean)
-          .join(' ')
-        const inner = (cell.content ?? []).map((child) => blockToOdt(child, styles, images)).join('')
-        cellsXml.push(`<table:table-cell ${spanAttrs}>${inner || '<text:p/>'}</table:table-cell>`)
-        if (rowspan > 1) {
-          for (let c = col; c < col + colspan; c++) pending[c] = rowspan - 1
-        }
-        col += colspan
-      }
-      return `<table:table-row>${cellsXml.join('')}</table:table-row>`
-    })
-    .join('')
-  const tableName = `Table${Math.round(Math.random() * 1_000_000)}`
-  return `<table:table table:name="${tableName}">${columns}${rowsXml}</table:table>`
-}
-```
-
-Kein Import-Änderungsbedarf (keine neuen Abhängigkeiten). Kein Änderungsbedarf an
-`src/formats/odt/reader.ts` — der bestehende Filter auf `'table-cell'`
-(`reader.ts:192`) überspringt `<table:covered-table-cell>`-Elemente bereits korrekt
-(siehe Abschnitt 1, Begründung „Warum das bisher nicht auffiel").
-
-### 6.5 `src/formats/docx/writer.ts` — keine Änderung nötig
-
-`tableToDocx` (Zeile 128-171) behandelt `pending[]`/vMerge/colspan bereits korrekt
-(Abschnitt 1). Ein neu über `addRowBefore`/`addRowAfter` erzeugter oder ein per Grenzfall
-2 verlängerter rowspan-Bereich durchläuft exakt denselben, bereits funktionierenden Pfad
-wie eine beim Import bereits vorhandene Struktur — aus Sicht des Writers ist eine
-programmatisch eingefügte Zeile nicht von einer importierten unterscheidbar (siehe
-Abschnitt 5). Muss dennoch mit dem Regressionstest aus Abschnitt 8.3 (Grenzfall 5,
-DOCX-Seite) bestätigt werden, nicht nur angenommen werden.
-
-### 6.6 `src/formats/shared/schema.ts` — keine Änderung nötig
-
-Siehe Abschnitt 5.
+Der ODT-Writer schreibt `<table:covered-table-cell/>` und colspan-bewusstes `colCount`
+bereits korrekt (Abschnitt 1, Zeile 110–174) — **die in der früheren Fassung als 6.4
+geforderte „Pflichtänderung" entfällt vollständig und darf nicht durchgeführt werden**
+(sie würde die deterministische `TableNameSequence` durch `Math.random()` ersetzen und die
+`blockToOdt`-Signatur brechen). DOCX-Writer, beide Reader und das Schema sind unverändert
+korrekt (Abschnitte 1, 4.2, 5). Der einzige Auftrag hier ist **Regressionsschutz** via
+Tests (Abschnitt 8.4).
 
 ---
 
-## 7. Zusammenfassung Import/Export-Anpassungen OOXML/ODF
+## 7. Zusammenfassung Import/Export OOXML/ODF
 
 | Format | Reader | Writer |
 |---|---|---|
-| DOCX | Keine Änderung. `docx/reader.ts:210-256` (`parseTable`) verarbeitet `vMerge`/`gridSpan` bereits korrekt für beliebige Zeilenzahl, unabhängig davon, ob die Zeile importiert oder zuvor per Editor eingefügt wurde. | Keine Änderung. `docx/writer.ts:128-171` (`tableToDocx`) ist bereits korrekt (Abschnitt 6.5). |
-| ODT | Keine Änderung. `odt/reader.ts:189-203` liest `number-rows-spanned`/`number-columns-spanned` direkt von der Ursprungszelle, überspringt `covered-table-cell` korrekt (das war nie das Problem). | **Pflichtänderung** (Abschnitt 1 + 6.4): `odt/writer.ts:86-111` erhält `pending[]`-Tracking für `<table:covered-table-cell/>` **und** eine colspan-bewusste `colCount`-Berechnung. Ohne diese Änderung ist Grenzfall 2/Anforderung 3.3/Feature-Rundreise 5.2 Punkt 5 für ODT nicht wirklich abnahmefähig (siehe Abschnitt 1). |
+| DOCX | **Keine Änderung.** `docx/reader.ts:316–356` liest `vMerge`/`gridSpan`, `colwidth: null` (Zeile 350). | **Keine Änderung.** `docx/writer.ts:158 ff.` (`tableToDocx`) schreibt `colCount`/`pending[]`/`vMerge` korrekt. |
+| ODT | **Keine Änderung.** `odt/reader.ts:304–315` liest `number-rows-spanned`/`number-columns-spanned`, überspringt `covered-table-cell`, `colwidth: null` (Zeile 315). | **Keine Änderung.** `odt/writer.ts:110–174` schreibt colspan-bewusstes `colCount` und `covered-table-cell` bereits ODF-konform — nur per Regressionstest absichern (Abschnitt 8.4), **nicht** ändern. |
 
 ---
 
 ## 8. Tests
 
-### 8.1 Neue Unit-Test-Datei: `src/formats/shared/editor/__tests__/tableRowCommands.test.ts`
+### 8.1 NEU: `src/formats/shared/editor/__tests__/tableRowCommands.test.ts`
 
-Direkter Test der Commands aus Abschnitt 6.1 gegen einen mit `EditorState.create`
-konstruierten Testzustand (Anforderung Abschnitt 6, Testplanhinweis 2) — unabhängig vom
-Browser, Muster analog zu `src/formats/shared/editor/__tests__/pagination.test.ts`.
-Aufbau: `wordSchema` direkt importieren, Testtabellen über `wordSchema.nodeFromJSON(...)`
-bzw. `wordSchema.nodes.table.create(...)` konstruieren, `EditorState.create({ doc,
-schema: wordSchema, plugins: [tableEditing()] })`, Command mit
-`command(state, (tr) => { state = state.apply(tr) })` ausführen.
+Direkter Command-Test gegen `EditorState.create({ doc, schema: wordSchema, plugins:
+[tableEditing()] })` (Muster analog `__tests__/pagination.test.ts`,
+`__tests__/commands.test.ts`). Testtabellen über `wordSchema.nodeFromJSON(...)`
+konstruieren; Command mit `command(state, (tr) => { state = state.apply(tr) })` ausführen.
 
 | Funktion | Testfälle |
 |---|---|
-| `insertRowBefore` | Grundfall (3.1): neue leere Zeile unmittelbar vor Zeile *Z*, `map.width` viele Zellen; Grenzfall 1 (Tabelle mit nur 1 Zeile); Grenzfall 2 (Cursor in einer Zeile, die von einem rowspan aus der Zeile darüber überdeckt wird → rowspan wird um 1 verlängert, keine neue Zelle an dieser Stelle, siehe Abschnitt 2 Punkt 1); Grenzfall 3 (Nachbarzeile hat `colspan` → neue Zeile hat trotzdem `map.width` Einzelzellen); Grenzfall 5 (Einfügen oberhalb der bisherigen ersten Zeile, alte Zeile 1 hatte `colspan` → resultierende `table.content[0].content.length` bzw. Summe der colspans der neuen Zeile 0 entspricht exakt `map.width`); Selektion bleibt in derselben logischen Zelle (Anforderung 3.4, Positionsvergleich vor/nach über den Zellinhalt, nicht die rohe Zahl); ein Undo-Schritt stellt exakten Vorzustand wieder her (Anforderung 3.6, inkl. Selektion) |
-| `insertRowAfter` | Spiegelbildlich zu `insertRowBefore` (Anforderung 3.2), inkl. Grenzfall 11 (Tabelle am Dokumentende: nach Einfügen bleibt der Editor normal weiter bedienbar — Cursor kann aus der Tabelle heraus positioniert werden) |
-| Grenzfall 6 (CellSelection über mehrere Zellen **derselben** Zeile) | Es entsteht genau **eine** neue Zeile, nicht eine pro markierter Zelle |
-| Grenzfall 7 (CellSelection markiert **eine ganze** Zeile) | Verhalten identisch zum Grundfall |
-| Grenzfall 8 (CellSelection über **mehrere Zeilen**) | Bestätigt die in Abschnitt 4.1 getroffene Entscheidung: **genau eine** neue Zeile relativ zur obersten/untersten Zeile der Selektion, expliziter Test mit einer 3×3-Selektion über eine 5-Zeilen-Tabelle |
-| Grenzfall 10 (verschachtelte Tabelle in einer Zelle) | Zeile in der **äußeren** Tabelle einfügen lässt die innere Tabelle in der betroffenen Zelle strukturell unverändert; Zeile **innerhalb** der inneren Tabelle einfügen wirkt sich nicht auf die äußere aus |
-| `goToTableCell`/`insertRowOnTabAtTableEnd` (Tab-Kette) | Tab in einer beliebigen Nicht-Endzelle → Selektion bewegt sich zur nächsten Zelle, **keine** neue Zeile; Tab in der letzten Zelle der letzten Zeile → neue Zeile wird angehängt, Cursor landet in deren erster Zelle (Grenzfall 4), alles in **einem** Undo-Schritt; Shift-Tab in der ersten Zelle → `false` (kein Crash, keine Zeile) |
-| Grenzfall 9 (strukturell inkonsistente Tabelle) | Eine absichtlich unregelmäßige Tabelle wird direkt per `wordSchema.nodeFromJSON` (unter Umgehung von `fixTables`, um den worst case zu testen) konstruiert; nach dem ersten `state.apply(tr)` mit `tableEditing()`-Plugin aktiv wird geprüft, dass `fixTables` (Abschnitt 2, Punkt 7) sie normalisiert **bevor** `insertRowBefore`/`insertRowAfter` aufgerufen wird — kein Crash, Struktur bleibt valide |
-| Grenzfall 12 (schnelles wiederholtes Auslösen) | Zwei aufeinanderfolgende `insertRowAfter`-Aufrufe erzeugen zwei separate Zeilen (keine verlorene/doppelte Zeile durch geteilten `state`) |
-| Grenzfall 15 (Einfügen → Undo → Redo → erneut Einfügen) | Exakter Zwischenzustand nach jedem Schritt |
+| `insertRowBefore` | Grundfall 3.1 (neue leere Zeile vor Zeile *Z*, `map.width` Zellen); Grenzfall 1 (1-Zeilen-Tabelle → danach 2 Zeilen); Grenzfall 2 (Cursor in einer von rowspan überdeckten Zeile → rowspan +1, keine neue Zelle dort); Grenzfall 3 (Nachbarzeile colspan → neue Zeile trotzdem `map.width` Einzelzellen); Grenzfall 5 (Einfügen oberhalb Zeile 0 mit colspan → Summe colspans neue Zeile 0 = `map.width`); Selektion bleibt in derselben logischen Zelle (3.4, Vergleich über Zellinhalt); ein Undo stellt exakten Vorzustand her (3.6) |
+| `insertRowAfter` | Spiegelbildlich (3.2); Grenzfall 11 (Tabelle am Dokumentende, Editor danach bedienbar) |
+| Grenzfall 6 | `CellSelection` über mehrere Zellen **derselben** Zeile → genau **eine** neue Zeile |
+| Grenzfall 7 | `CellSelection` markiert **eine ganze** Zeile → wie Grundfall |
+| Grenzfall 8 | `CellSelection` über **mehrere Zeilen** (3×3-Selektion in 5-Zeilen-Tabelle) → **genau eine** neue Zeile relativ zur obersten/untersten Zeile (Variante (a), Abschnitt 4.1) |
+| Grenzfall 10 | Verschachtelte Tabelle: Zeile in **äußerer** Tabelle lässt innere unverändert; Zeile in **innerer** wirkt nicht nach außen |
+| Tab-Kette | Tab in Nicht-Endzelle → Selektion rückt weiter, **keine** neue Zeile; Tab in letzter Zelle → neue Zeile unten, Cursor in deren erster Zelle (Grenzfall 4), **ein** Undo-Schritt; `Shift-Tab` in erster Zelle → `false`, kein Crash; außerhalb Tabelle: beide Kettenglieder `false` |
+| Grenzfall 9 | Absichtlich unregelmäßige Tabelle per `nodeFromJSON`; nach erstem `apply` mit aktivem `tableEditing()` prüfen, dass `fixTables` normalisiert, danach `insertRowBefore`/`After` ohne Crash |
+| Grenzfall 12 | Zwei aufeinanderfolgende `insertRowAfter` → zwei separate Zeilen |
+| Grenzfall 15 | Einfügen → Undo → Redo → erneut Einfügen: exakter Zwischenzustand je Schritt |
 
-### 8.2 Ergänzung `tests/e2e/selection-regression.spec.ts` (Pflicht laut Anforderung Abschnitt 2/6.3)
+### 8.2 Ergänzung `tests/e2e/selection-regression.spec.ts` (Pflicht, Anforderung Abschnitt 2/6.3)
 
-Neuer `test()` **im bestehenden** `describe`-Block (nicht in einer neuen Datei, damit er
-Teil der dauerhaften Regressions-Suite bleibt — Anforderung verlangt explizit
-Wiederverwendung dieser Datei):
+Neuer `test()` **im bestehenden `describe`-Block** (dessen `beforeEach` das Privacy-Banner
+via „verstanden" wegklickt und über die ODT-Karte „Neu erstellen" ein Dokument anlegt —
+Muster aus der Datei übernehmen):
 
 ```ts
 test('insert-row toolbar action followed by typing lands in the right cell', async ({ page }) => {
@@ -706,7 +656,7 @@ test('insert-row toolbar action followed by typing lands in the right cell', asy
 
   const cells = page.locator('.ProseMirror td')
   await cells.nth(2).click() // untere linke Zelle der 2×2-Tabelle
-  await page.getByTitle('Zeile oberhalb einfügen').click()
+  await page.getByRole('button', { name: 'Zeile oberhalb einfügen' }).click()
   await page.keyboard.type('Nach Einfügen')
 
   await expect(editor).toContainText('Nach Einfügen')
@@ -714,77 +664,50 @@ test('insert-row toolbar action followed by typing lands in the right cell', asy
 })
 ```
 
-### 8.3 Neue E2E-Datei: `tests/e2e/zeile-einfuegen.spec.ts`
+### 8.3 NEU: `tests/e2e/zeile-einfuegen.spec.ts`
 
-Aufbau wie `tests/e2e/docx.spec.ts`/`odt.spec.ts` (Privacy-Banner wegklicken, Karte per
-Formatname auswählen, Muster `docxCard`/`odtCard` aus den bestehenden Dateien
-übernehmen). Zentrale Technik laut Anforderung Abschnitt 6.1: Tabelle über den
-bestehenden `⊞ Tabelle`-Button einfügen, Zelle per `page.locator('.ProseMirror
-td').nth(n).click()` selektieren, neuen Button klicken, `page.locator('.ProseMirror
-tr')`/`td` auszählen statt nur visuell zu prüfen.
+Setup wie `docx.spec.ts`/`odt.spec.ts` (Privacy-Banner, Karten-Auswahl). Technik laut
+Anforderung 6.1: Tabelle über „⊞ Tabelle" einfügen, Zelle per
+`.ProseMirror td` `.nth(n).click()` wählen, Button klicken, `tr`/`td` **auszählen**
+statt nur visuell zu prüfen. Testfälle:
 
-Testfälle (Nummerierung folgt `zeile-einfuegen-req.md`):
+1. **Freigabekriterium Abschnitt 7:** Beide Buttons über echte Interaktion auslösbar
+   (`getByRole('button', { name: 'Zeile oberhalb/unterhalb einfügen' })`), erzeugen sichtbar
+   je eine weitere `<tr>`.
+2. **# 5:** Cursor in normalem Absatz → beide Buttons `await expect(...).toBeDisabled()`.
+3. **3.1/3.2:** Zeile oberhalb erster / unterhalb letzter Zeile einer 3×2-Tabelle →
+   `tr`-Anzahl und Zellinhalt-Reihenfolge stimmen.
+4. **3.4:** Nach „Zeile oberhalb einfügen" direkt weitertippen landet im unveränderten
+   logischen Zellinhalt, nicht in der neuen leeren Zeile.
+5. **3.6:** Strg+Z → `tr`-Anzahl wie vorher; Strg+Y → wie nach Einfügen.
+6. **Grenzfall 4:** Alle Zellen einer 2×2-Tabelle per Tab durchlaufen; letzter Tab (Zelle 4)
+   erzeugt 3. Zeile, Cursor tippt darin.
+7. **Grenzfall 11:** Dokument beginnt mit der Tabelle → Zeile oberhalb einfügen → Editor
+   bleibt bedienbar (per `gapCursor`/Klick vor die Tabelle).
+8. **Grenzfall 12/13:** Button zweimal schnell → genau 2 neue Zeilen; direkt danach „Fett"
+   auf die neue Zeile → funktioniert (Bezug Hauptspezifikation Abschnitt 2).
+9. **Grenzfall 16 (Touch):** dieselben Kernprüfungen (Einfügen + Undo + Selektions-
+   konsistenz) laufen auf den `playwright.config.ts`-Projekten **Mobile** (Pixel 7) und
+   **Tablet** (iPad Mini), nicht nur Desktop Chrome.
 
-1. **Abschnitt 1, # 1/# 2:** Beide Buttons sind über echte Browser-Interaktion auslösbar
-   (Freigabekriterium Abschnitt 7, erster Punkt) — Klick auf „Zeile oberhalb einfügen"
-   bzw. „Zeile unterhalb einfügen" erzeugt sichtbar eine weitere `<tr>`.
-2. **Abschnitt 1, # 5:** Außerhalb einer Tabelle (Cursor in einem normalen Absatz) sind
-   beide Buttons `disabled` (`await expect(button).toBeDisabled()`).
-3. **3.1/3.2 Grundfall:** Zeile oberhalb der ersten Zeile bzw. unterhalb der letzten Zeile
-   einer 3×2-Tabelle einfügen → `tr`-Anzahl und Zellinhalt-Reihenfolge stimmen.
-4. **3.4 Cursor-Verhalten:** Nach „Zeile oberhalb einfügen" direkt weitertippen landet im
-   erwarteten (unveränderten logischen) Zellinhalt, nicht in der neuen leeren Zeile.
-5. **3.6 Undo/Redo:** Strg+Z nach Einfügen → `tr`-Anzahl wieder wie vorher; Strg+Y →
-   wieder wie nach dem Einfügen.
-6. **Grenzfall 4 (Tab in letzter Zelle):** Alle Zellen einer 2×2-Tabelle nacheinander per
-   Tab durchlaufen, im letzten Tab-Druck (in Zelle 4) prüfen, dass eine 3. Zeile entsteht
-   und der Cursor darin tippen lässt.
-7. **Grenzfall 11 (Tabelle am Dokumentanfang/-ende):** Dokument beginnt direkt mit der
-   Tabelle (kein Absatz davor) → Zeile oberhalb der ersten Zeile einfügen → Editor bleibt
-   bedienbar, Cursor kann per Klick vor die Tabelle gesetzt werden.
-8. **Grenzfall 12/13 (schnelle Wiederholung + Formatierung danach):** Button zweimal
-   schnell hintereinander klicken → genau 2 neue Zeilen; direkt danach „Fett" auf die neue
-   Zeile anwenden → funktioniert wie auf jeder anderen Selektion (Bezug Hauptspezifikation
-   Abschnitt 2).
-9. **Rundreise DOCX** (Anforderung 5.2, Punkt 1-3, 7): Zeile einfügen → Export →
-   `JSZip`/`document.xml` prüfen (Muster `docx.spec.ts:76-82`) → reimportieren → Struktur
-   erhalten.
-10. **Rundreise ODT** (Anforderung 5.2, analog): Export → `content.xml` prüfen — **explizit
-    auch für den Grenzfall-2-Fall (rowspan-Verlängerung)**: nach dem Export wird die rohe
-    ODF-XML auf die korrekte Anzahl `<table:table-cell` + `<table:covered-table-cell`
-    pro Zeile geprüft (nicht nur nach dem Reimport auf JSON-Ebene) — das ist der Test, der
-    den Abschnitt-1-Bug **vor** der Behebung rot und danach grün werden lässt.
+### 8.4 Ergänzung/Absicherung der Unit-Roundtrip-Tests
 
-### 8.4 Ergänzung bestehender Unit-Roundtrip-Tests
-
-- `src/formats/docx/__tests__/roundtrip.test.ts` (`describe('DOCX round trip: tables')`,
-  Zeile 173-249): neuer Testfall **Grenzfall 5** — Tabelle mit `colspan: 2` in Zeile 0,
-  Reader→Editor-Transaktion simuliert „Zeile oberhalb der bisherigen Zeile 0 einfügen"
-  (per `addRowBefore` auf einem `EditorState`, dann `state.doc.toJSON()` als neuer
-  `original` in `roundTrip(...)` verwendet) → Export → `colCount`/Zellenzahl über die
-  gesamte Tabelle konsistent (Pflicht-Regressionstest laut Anforderung Abschnitt 6,
-  Testplanhinweis 6, darf nicht im allgemeinen Rundreise-Testfall „untergehen" — deshalb
-  ein eigener, benannter `it(...)`-Block, nicht Teil eines bestehenden Tests).
-- `src/formats/odt/__tests__/roundtrip.test.ts` (`describe('ODT round trip: tables')`,
-  Zeile 162-210):
-  - Ergänzung eines **echten** zweizeiligen `rowspan`-Testfalls (fehlte bisher, siehe
-    Abschnitt 0, Punkt 5/Abschnitt 1) — Fixture identisch zum DOCX-Pendant
-    (`docx/__tests__/roundtrip.test.ts:223-248`), nur mit `writeOdt`/`readOdt`.
-  - Zusätzlicher Test, der **nicht** über `readOdt` reimportiert, sondern die von
-    `writeOdt` erzeugte Zip-Datei direkt mit `JSZip.loadAsync` öffnet und `content.xml`
-    als Text prüft: für eine Zeile, die eine von `rowspan` überdeckte Spalte enthält,
-    muss die Anzahl `<table:table-cell` + `<table:covered-table-cell` in dieser Zeile
-    exakt `colCount` ergeben — das ist der einzige Testtyp, der den in Abschnitt 1
-    beschriebenen Bug tatsächlich aufdeckt (ein reiner Reader-Rückweg-Test würde ihn
-    verdecken, siehe Begründung dort).
-  - Analoger Grenzfall-5-Test wie beim DOCX-Pendant oben.
-- **Cross-Format-Tests** (Anforderung 5.2, siehe Abschnitt 4.4 für die Begründung, warum
-  nur auf dieser Ebene testbar): neue Testfälle in einer der beiden
-  `roundtrip.test.ts`-Dateien (oder einer neuen gemeinsamen Datei
-  `src/formats/shared/__tests__/cross-format-tablerow.test.ts`), die `readDocx(...)` →
-  Zeile per `addRowBefore`/`addRowAfter` auf dem resultierenden `body`-JSON einfügen (über
-  `wordSchema.nodeFromJSON` → Transaktion → `toJSON()`) → `writeOdt(...)` → `readOdt(...)`
-  aufrufen, und umgekehrt.
+- **Bereits vorhanden — muss grün bleiben (Baseline-Regressionsschutz, Anforderung 5.1):**
+  - `odt/__tests__/roundtrip.test.ts:275` (colspan, Roh-content.xml) und `:310` (rowspan,
+    Roh-content.xml, Zeile 2 beginnt mit `covered-table-cell`).
+  - `docx/__tests__/roundtrip.test.ts:261` (colspan) und `:279` (rowspan).
+  - **Kein** Neuschreiben dieser Tests; die frühere Fassung hielt sie irrig für fehlend.
+- **NEU (Grenzfall 5, dedizierter benannter Regressionstest — Anforderung 6, Hinweis 6):**
+  je ein eigener `it(...)` in **beiden** `roundtrip.test.ts`, der eine Tabelle mit
+  `colspan`/`rowspan` in Zeile 0 nimmt, per `addRowBefore` auf einem `EditorState` eine
+  Zeile **oberhalb der bisherigen Zeile 0** einfügt (`state.doc.toJSON()` als neuer
+  `body`), exportiert und die **Roh-XML** prüft: jede Zeile deklariert exakt `colCount`
+  Zellen (`<w:tc>` bzw. `<table:table-cell>`+`<table:covered-table-cell>`), Merge-Struktur
+  erhalten. Muss ein eigener, nicht im allgemeinen Rundreise-Test versteckter Block sein.
+- **NEU (Cross-Format, Abschnitt 4.4):** `src/formats/shared/__tests__/cross-format-tablerow.test.ts`:
+  `readDocx(...)` → `addRowBefore`/`addRowAfter` auf dem `body`-JSON (via
+  `wordSchema.nodeFromJSON` → Transaktion → `toJSON()`) → `writeOdt(...)` → `readOdt(...)`,
+  und umgekehrt; Struktur/Text erhalten.
 
 ---
 
@@ -792,79 +715,127 @@ Testfälle (Nummerierung folgt `zeile-einfuegen-req.md`):
 
 | # | Grenzfall | Umsetzung |
 |---|---|---|
-| 1 | Tabelle mit nur einer Zeile | Kein Zusatzcode — `addRow` funktioniert unabhängig von der Ausgangszeilenzahl, Test 8.1 |
-| 2 | Einfügen innerhalb eines rowspan-Bereichs | Bereits in `addRow` eingebaut (Abschnitt 2, Punkt 1), Test 8.1 + 8.3 #10 (echte ODT-XML-Prüfung nach Abschnitt-1-Fix) |
-| 3 | Nachbarzeile hat colspan | Automatisch korrekt (Abschnitt 2, Punkt 2), Test 8.1 |
-| 4 | Tab in letzter Zelle | `insertRowOnTabAtTableEnd` (Abschnitt 6.1/6.3), Test 8.1 + 8.3 #6 |
-| 5 | Spaltenzahl-Kollaps beim Export | Automatisch unkritisch für den konkreten Insert-Fall (Abschnitt 2, Punkt 3), zugrunde liegender ODT-Bug dennoch behoben (Abschnitt 1/6.4), dedizierter Test 8.4 |
-| 6 | CellSelection über mehrere Zellen derselben Zeile | Automatisch: genau eine neue Zeile (`selectedRect` liefert `top===bottom-1`), Test 8.1 |
-| 7 | CellSelection markiert eine ganze Zeile | Wie Grundfall, Test 8.1 |
-| 8 | CellSelection über mehrere Zeilen | Verbindlich auf Variante (a) festgelegt (Abschnitt 4.1), Test 8.1 |
-| 9 | Strukturell inkonsistente Fremdtabelle | `fixTables`/`tableEditing()` bereits aktiv (Abschnitt 2, Punkt 7) + defensiver try/catch in `Toolbar.tsx` (Abschnitt 4.3/6.2) für den unwahrscheinlichen Restfall, Test 8.1 |
-| 10 | Verschachtelte Tabelle | Schema erlaubt es strukturell bereits (Abschnitt 5), Test 8.1 |
-| 11 | Tabelle am Dokumentanfang/-ende | Kein Zusatzcode, Test 8.3 #7 |
-| 12 | Schnelles wiederholtes Auslösen | Jede Transaktion unabhängig, kein gemeinsamer Zwischenzustand in den neuen Commands, Test 8.1 + 8.3 #8 |
-| 13 | Einfügen + Formatierung danach | Regressionstest aus Hauptspezifikation Abschnitt 2, Test 8.2 + 8.3 #8 |
-| 14 | Sehr große Tabelle, Zeile in der Mitte | Kein Sondercode nötig (ProseMirror-Transaktionen sind grössenunabhängig linear), manuelle Beobachtung „bleibt reaktionsfähig" empfohlen, kein separater automatisierter Performance-Test in diesem Ticket |
-| 15 | Einfügen → Undo → Redo → erneut einfügen | Test 8.1 |
+| 1 | 1-Zeilen-Tabelle | Kein Zusatzcode (`addRow`), Test 8.1 |
+| 2 | Einfügen im rowspan-Bereich | In `addRow` eingebaut (2/#1), Test 8.1 + Roh-XML 8.4 (Bestand `:310`) |
+| 3 | Nachbarzeile colspan | Automatisch `map.width` Zellen (2/#2), Test 8.1 |
+| 4 | Tab in letzter Zelle | `insertRowOnTabAtTableEnd` (6.1/6.3), Test 8.1 + 8.3 #6 |
+| 5 | Export-Spaltenzahl/Merge | Für den Insert-Fall automatisch unkritisch (2/#3); Writer bereits korrekt (Abschnitt 1); dedizierter Roh-XML-Regressionstest 8.4 |
+| 6 | CellSelection mehrere Zellen einer Zeile | Genau eine Zeile, Test 8.1 |
+| 7 | CellSelection ganze Zeile | Wie Grundfall, Test 8.1 |
+| 8 | CellSelection mehrere Zeilen | Variante (a) (4.1), Test 8.1 |
+| 9 | Inkonsistente Fremdtabelle | `fixTables`/`tableEditing()` (2/#7) + try/catch + `rowError` (4.3/6.2), Test 8.1 |
+| 10 | Verschachtelte Tabelle | Schema deckt ab (5), Test 8.1 |
+| 11 | Tabelle am Dokumentanfang/-ende | Kein Zusatzcode, Test 8.1/8.3 #7 |
+| 12 | Schnelles Wiederholen | Je Transaktion unabhängig, Test 8.1 + 8.3 #8 |
+| 13 | Einfügen + Formatierung danach | Regressionstest Hauptspez. Abschnitt 2, Test 8.2 + 8.3 #8 |
+| 14 | Sehr große Tabelle, Mitte | Kein Sondercode (Transaktionen linear); manuelle Beobachtung, kein eigener Perf-Test |
+| 15 | Einfügen → Undo → Redo → Einfügen | Test 8.1 |
+| 16 | Touch/Mobile | Test 8.3 #9 (Projekte Mobile/Tablet) |
 
 ---
 
 ## 10. Reihenfolge der Umsetzung
 
-1. **Bugfix zuerst, unabhängig vom Rest** (Abschnitt 1/6.4): `odt/writer.ts`s
-   `case 'table':` ersetzen, dazugehörige Unit-Tests (Abschnitt 8.4, rowspan + raw-XML-
-   Check) ergänzen. `npm run build` danach ausführen (TypeScript-`tsc -b`-Schritt prüft
-   nicht durch `npm test`/`npm run test:e2e` abgedeckte Fehler wie unbenutzte Variablen).
-2. `commands.ts` um `insertRowBefore`/`insertRowAfter`/`goToTableCell`/
-   `insertRowOnTabAtTableEnd` ergänzen (Abschnitt 6.1) + Unit-Tests (Abschnitt 8.1).
-3. `Toolbar.tsx` um die zwei Buttons, den Fehlerbanner und die `run()`-Rückgabewert-
-   Änderung ergänzen (Abschnitt 6.2).
-4. `WordEditor.tsx` um die Tab/Shift-Tab-Keymap-Einträge ergänzen (Abschnitt 6.3).
-5. E2E-Tests: neue Datei `zeile-einfuegen.spec.ts` (Abschnitt 8.3) + Ergänzung
-   `selection-regression.spec.ts` (Abschnitt 8.2).
-6. Rundreise- und Cross-Format-Unit-Tests (Abschnitt 8.4).
-7. Grenzfälle-Restliste (Abschnitt 9) einzeln abhaken, insbesondere Grenzfall 9
-   (strukturell inkonsistente Tabelle) mit einer echten oder aus
-   `tests/fixtures/external/{docx,odt}/` entnommenen unregelmäßigen Tabelle
-   gegenprüfen (Korpus laut `tests/fixtures/external/README.md` — Apache-POI-/
-   odftoolkit-Testdateien, die gezielt Edge-Case-Strukturen enthalten).
-8. Baseline-Rundreise (Anforderung 5.1) erneut laufen lassen — insbesondere
-   `docx.spec.ts`/`odt.spec.ts`/beide `roundtrip.test.ts` müssen nach Schritt 1 (ODT-
-   Writer-Änderung betrifft **jede** Tabelle mit rowspan, nicht nur neu eingefügte
-   Zeilen) weiterhin grün sein.
+1. `commands.ts`: `insertRowBefore`/`insertRowAfter`/`goToTableCell`/
+   `insertRowOnTabAtTableEnd` + Import (6.1) **und** Unit-Tests (8.1) — insbesondere die
+   Positions-Arithmetik von `insertRowOnTabAtTableEnd` zuerst absichern.
+2. `Toolbar.tsx`: `run()`-Rückgabewert (mit `view`-Arg), zwei SVG-Buttons, `rowError`-Prop,
+   Fehler-`span` (6.2).
+3. `WordEditor.tsx`: `chainCommands`-Import, `rowError`-State + Auto-Ausblendung,
+   additive `Tab`/`Shift-Tab`-Bindung, Toolbar-Props (6.3).
+4. E2E: `zeile-einfuegen.spec.ts` (8.3) + Ergänzung `selection-regression.spec.ts` (8.2).
+5. Grenzfall-5-Roh-XML-Tests (beide Formate) + Cross-Format-Unit-Tests (8.4).
+6. Grenzfälle-Restliste (Abschnitt 9) einzeln abhaken; Grenzfall 9 zusätzlich gegen eine
+   unregelmäßige Struktur aus `tests/fixtures/external/{docx,odt}/` (Korpus laut
+   `tests/fixtures/external/README.md`).
+7. `npm run build` (tsc -b) + `npm test` + `npm run test:e2e`. **Baseline-Rundreise
+   (5.1)** erneut prüfen — die vorhandenen ODT-/DOCX-Merge-Tests (8.4, Bestand) müssen
+   grün bleiben. Da **keine** Writer-/Reader-Änderung erfolgt, ist hier kein
+   Format-Regressionsrisiko durch dieses Ticket zu erwarten; trotzdem verifizieren.
+
+**Kein „Bugfix-zuerst"-Schritt** wie in der früheren Fassung (der beschriebene ODT-Bug
+existiert im aktuellen Code nicht).
 
 ---
 
-## 11. Abnahme-Checkliste und offene Punkte (Bezug: `zeile-einfuegen-req.md` Abschnitt 7)
+## 11. Abnahme-Checkliste (Bezug: `zeile-einfuegen-req.md` Abschnitt 7)
 
-- [ ] Beide Toolbar-Buttons (Abschnitt 1, # 1/# 2 der Anforderung) über echte
-      Browser-Interaktion auslösbar (Test 8.3 #1).
-- [ ] Alle Testfälle aus Abschnitt 8.1-8.4 automatisiert vorhanden und grün.
-- [ ] Jeder Grenzfall aus Abschnitt 9 einzeln befundet.
-- [ ] Baseline-Rundreise (Anforderung 5.1) läuft vor **und** nach den Code-Änderungen
-      weiterhin grün — **besonders zu beachten:** der ODT-Writer-Bugfix (Abschnitt 1)
-      ändert das Exportformat für **jede** Tabelle mit `rowspan`, nicht nur für neu
-      eingefügte Zeilen; bestehende ODT-Tests mit rowspan (falls in
-      `external-fixtures.test.ts` vorhanden) müssen erneut geprüft werden.
-- [ ] Feature-Rundreise (Anforderung 5.2) für DOCX und ODT über echte Bedienung grün;
-      Cross-Format-Richtungen **nur auf Unit-Test-Ebene** möglich (Abschnitt 4.4) — dieser
-      Punkt ist eine dokumentierte, strukturelle Einschränkung der App, kein
-      unvollständiger Teil dieses Tickets, muss aber im Freigabe-Status ausdrücklich so
-      vermerkt werden, nicht stillschweigend als „E2E getestet" behauptet werden.
-- [ ] Selection-Sync-Regressionstest mit Zeilen-Einfügen-Sequenz (Abschnitt 8.2) grün und
-      dauerhaft Teil von `selection-regression.spec.ts`.
-- [ ] Grenzfall 8 (mehrzeilige Selektion) — Verhalten ist in Abschnitt 4.1 verbindlich
-      festgelegt (Variante a, Bibliotheksverhalten übernommen) und getestet (Abschnitt
-      8.1), nicht offengelassen.
-- [ ] Grenzfall 5 (Export-Spaltenzahl) — dedizierter Regressionstest (Abschnitt 8.4) für
-      **beide** Formate grün; zugrunde liegender ODT-Bug (Abschnitt 1) behoben, nicht nur
-      der eine ausgelöste Spezialfall.
-- [ ] `npm run build` läuft nach allen Änderungen fehlerfrei durch (insbesondere nach dem
-      `odt/writer.ts`-Bugfix, Abschnitt 10, Schritt 1).
+- [ ] Beide Toolbar-Buttons (# 1/# 2) über echte Browser-Interaktion auslösbar (8.3 #1),
+      mit korrektem `disabled`-Zustand außerhalb einer Tabelle (# 5, 8.3 #2) und
+      SVG-Icon + aussagekräftigem `aria-label` (# 8).
+- [ ] Alle Tests aus 8.1–8.4 automatisiert und grün.
+- [ ] Jeder Grenzfall aus Abschnitt 9 einzeln befundet; insbesondere Grenzfall 8
+      (Variante (a), verbindlich) und Grenzfall 5 (dedizierter Roh-XML-Test **beide**
+      Formate).
+- [ ] Grenzfall 16 (Touch) auf Mobile und Tablet nachgewiesen (8.3 #9).
+- [ ] Baseline-Rundreise (5.1) vor **und** nach der Änderung grün — die vorhandenen
+      ODT-`covered-table-cell`-Tests (`roundtrip.test.ts:275/310`) und der
+      DOCX-Rowspan-Test (`:279`) bleiben grün. **Regressionsschutz, kein Fix** — es wird
+      kein Writer/Reader angefasst.
+- [ ] Feature-Rundreise (5.2) für DOCX und ODT über echte Bedienung grün; Cross-Format
+      **nur auf Unit-Ebene** (4.4) — als dokumentierte strukturelle Einschränkung im
+      Freigabe-Vermerk nennen, nicht als „E2E getestet" ausgeben.
+- [ ] Selection-Sync-Regressionstest mit Zeilen-Einfügen-Sequenz (8.2) grün und dauerhaft
+      Teil von `selection-regression.spec.ts`.
+- [ ] `npm run build` fehlerfrei.
 
 Erst wenn alle Punkte erfüllt sind, darf der Backlog-Status von `zeile-einfuegen` von
-„fehlt" auf **vorhanden** wechseln — mit der in Abschnitt 4.4 dokumentierten Einschränkung
-zur Cross-Format-Testbarkeit, die auch im Freigabe-Vermerk selbst genannt werden sollte,
-analog zur in der Anforderungsdatei referenzierten Vorgehensweise in
-`FEATURE-SPEC-DOCX-ODT.md` Abschnitt 17/21 sowie `specs/einfuegen-req.md` Abschnitt 7.
+„fehlt" auf **vorhanden** wechseln — mit der in 4.4 dokumentierten Cross-Format-
+Einschränkung, analog zu `FEATURE-SPEC-DOCX-ODT.md` Abschnitt 17/21 und
+`specs/einfuegen-req.md` Abschnitt 7.
+
+---
+
+## 12. Korrekturen gegenüber der früheren Fassung dieses Dokuments
+
+Damit die bidirektionale Kette (PO/QA/Leiter) die Änderung nachvollziehen kann — die
+frühere Fassung (~13:45) wurde gegen einen älteren Code-Stand geschrieben und ist in
+mehreren Punkten überholt:
+
+1. **ODT-Writer-„Bug" entfällt.** Die frühere Abschnitt 1/6.4-„Pflichtänderung"
+   (`case 'table'` in `odt/writer.ts` ersetzen) ist gegenstandslos: `colCount` ist
+   colspan-bewusst (Zeile 115–116), `<table:covered-table-cell/>` wird bereits geschrieben
+   (Zeile 135–139/160–162), und beides ist getestet (`roundtrip.test.ts:275/310`). Die
+   damalige Ersatz-Implementierung würde heute **nicht kompilieren** (sie ruft
+   `blockToOdt(child, styles, images)` mit 3 statt 4 Argumenten auf — der aktuelle
+   `blockToOdt` erwartet zusätzlich `tableNames`, Zeile 85) und würde die
+   **Byte-Determinismus-Korrektur regressieren** (sie setzt `Table${Math.round(
+   Math.random()...)}` statt `tableNames.next()`, `speichern-exportieren` Testfall 11).
+2. **`run()`-Änderung korrigiert.** Der dritte Parameter `view` bleibt erhalten
+   (`command(view.state, view.dispatch, view)`); die frühere Fassung ließ ihn weg, was
+   `cutSelection` gebrochen hätte.
+3. **Keymap additiv.** `Tab`/`Shift-Tab` werden zum bestehenden Keymap **hinzugefügt**; die
+   früher gezeigte gekürzte Keymap hätte `'Shift-Enter': insertHardBreak()`,
+   `'Shift-Delete': cutSelection(...)` und den Mod-c/x/v-Kommentar gelöscht.
+4. **Fehler-Feedback über das `cutError`-Muster** (WordEditor-State + Props +
+   Auto-Ausblendung) statt lokalem `useState` mit manuellem Schließen-Button.
+5. **`disabled` ist kein neues Muster** — der Ausschneiden-Button nutzt es bereits
+   (`Toolbar.tsx:147/153`); Klassen wörtlich übernehmen.
+6. **Icon: SVG** (Hausmuster `ScissorsIcon`) statt Unicode-Pfeil, gemäß Anforderung # 8.
+7. **Zeilennummern aktualisiert** auf den tatsächlichen Ist-Stand (schema `tableNodes`
+   154; Reader `colwidth: null` 315/350; `insertTable` 92–102; `tableToDocx` 158;
+   `run()` 28–31; Keymap 85–107; Toolbar-Tabellenbutton 277–289).
+8. **Auto-Ausblendung nutzt jetzt den vorhandenen Hook, kein dupliziertes `useEffect`
+   (neu in dieser Prüfrunde gefunden).** `WordEditor.tsx` hat die 4-Sekunden-Ausblendung
+   seit der letzten Fassung in einen wiederverwendbaren Hook
+   `useAutoDismiss(value, setValue, ms = 4000)` (Zeile 57–63) ausgelagert, der für
+   `cutError` in Zeile 74 aufgerufen wird. Der Plan (4.3/6.3, Punkt 3) baut die
+   `rowError`-Ausblendung deshalb per zusätzlichem `useAutoDismiss(rowError, setRowError)`
+   statt — wie zuvor beschrieben — per eigenem, inline duplizierten Timeout-`useEffect`.
+   Weil dieser Helper die Datei um ~9 Zeilen wachsen ließ, wurden alle
+   `WordEditor.tsx`-Zeilenverweise neu synchronisiert: `cutError`-State 71 (vorher 58),
+   `history()` 84 (76), Keymap-Objekt 85–107 (77–99), `Mod-c/x/v`-Kommentar 86–92 (78–84),
+   `'Shift-Enter'` 97 (89), `'Shift-Delete'` 106 (98), `keymap(baseKeymap)` 108 (100),
+   `columnResizing()/tableEditing()` 109–110 (101–102), natives Kontextmenü 117–121
+   (109–113), `dispatchTransaction` 125 (117/123), Toolbar-Render 170 (162).
+9. **Entwickler-Zweitprüfung (2026-07-05, neu in dieser Prüfrunde):** Alle Zeilen-/
+   Abschnittsangaben dieses Dokuments wurden erneut gegen den (inzwischen
+   Git-versionierten) Ist-Code nachgezählt — keine Abweichung, kein Zeilen-Drift seit
+   2026-07-04. Zusätzlich wurde die zuvor nur aus dem Quelltext abgeleitete Kernarithmetik
+   (`insertRowOnTabAtTableEnd`, rowspan-Verlängerung, mehrzeilige `CellSelection`,
+   verschachtelte Tabellen) mit einem Wegwerf-Testskript gegen die echte, installierte
+   `prosemirror-tables@1.8.5` und `wordSchema` tatsächlich ausgeführt (nicht nur gelesen) —
+   siehe neuer Abschnitt 2.1. Ergebnis: **keine Korrektur nötig**, alle geprüften Fälle
+   verhalten sich exakt wie in Abschnitt 2/6.1 angenommen. Keine Zeile Produktivcode wurde
+   in dieser Prüfrunde geändert; die Wegwerf-Tests wurden nach Gebrauch wieder gelöscht
+   (`git status` zeigt keine neuen Dateien unter `src/formats/shared/editor/__tests__/`).

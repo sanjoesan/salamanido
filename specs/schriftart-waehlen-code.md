@@ -37,6 +37,210 @@ Reader/Writer-Unit-Tests.
 
 ---
 
+## 0.1 Re-Verifikation gegen den aktuellen Code-Stand (dieser Durchgang)
+
+Alle in Abschnitt 1 genannten Dateien wurden für diesen Durchgang erneut vollständig gegen
+den **aktuellen** Baum gelesen (nicht aus der Erstfassung übernommen). Ergebnis: Architektur
+und Design-Entscheidungen dieses Plans (Schema-Mark `fontFamily`, Stored-Mark-Commands,
+`fonts.ts`, selbstgebaute Combobox, DOCX-`w:rFonts`, ODT-`office:font-face-decls` mit je einer
+`FontFaceRegistry` pro Dokumentteil) sind **weiterhin korrekt und umsetzbar**. Zwei inhaltliche
+Korrekturen und mehrere seit der Erstfassung gewanderte Zeilennummern sind unten und in den
+betroffenen Abschnitten eingearbeitet.
+
+**Inhaltliche Korrektur 1 (Blocker — in Abschnitt 9.3 eingearbeitet): `blocksToOdt`/`blockToOdt`
+haben inzwischen einen vierten Parameter `tableNames: TableNameSequence`.** `odt/writer.ts`
+erzeugt in `writeOdt` heute `const tableNames = new TableNameSequence()` (Klasse Zeile 54–60)
+und reicht ihn durch jeden `blocksToOdt(...)`-Aufruf (deterministische `table:name`-Vergabe,
+siehe Determinismus-Kommentar dort). Der ursprüngliche `writeOdt`-Rewrite in 9.3 ließ dieses
+Argument weg — wörtlich übernommen bräche der **Tabellen-Export**. Der korrigierte Code in 9.3
+reicht `tableNames` unverändert weiter.
+
+**Inhaltliche Korrektur 2 (Empfehlung — in Abschnitt 8.2 eingearbeitet): `<w:rFonts>` als
+_erstes_ Kind von `<w:rPr>` ausgeben.** Im OOXML-Schema `CT_RPr` ist `rFonts` das zweite
+Element der Sequenz (direkt nach dem selten genutzten `rStyle`) und muss `w:b`/`w:i`/… vorangehen.
+Ein `props.push` am Schleifenende (so der ursprüngliche 8.2-Entwurf) platzierte `rFonts` hinter
+`w:shd` und verletzt damit die Schema-Reihenfolge. **Kein harter Blocker:** Der Suite-Validator
+ist `mammoth` (`docx/__tests__/external-validation.test.ts`, reihenfolge-tolerant), und der
+bestehende Writer gibt ohnehin bereits `w:u` vor `w:strike`/`w:color` aus, ist also schon
+reihenfolge-lax. Für Testfall 23 („von einem unabhängigen OOXML-Parser als Schriftart erkannt")
+ist die schemakorrekte Erst-Position dennoch die risikoärmere und kostenlose Wahl.
+
+**Gewanderte Zeilennummern (nur Anker-Korrektur, keine inhaltliche Änderung).** Anker sind **per
+Symbolname** zu suchen; die folgenden Werte ersetzen die im Fließtext genannten. `styleRegistry.ts`
+und `xmlUtil.ts` sind **unverändert** und ihre in der Erstfassung genannten Nummern damit weiterhin
+korrekt.
+
+| Symbol / Fundstelle | im Plan zitiert | aktuell (verifiziert) |
+|---|---|---|
+| `schema.ts` `marks`-Objekt (fontFamily anhängen) | 109–148 | **157–196** (nach `highlight` 195, vor `}` 196) |
+| `commands.ts` Datei / `applyMarkColor`+`clearMarkColor` | 108 Z. / 90–106 | **168 Z.** / **106–113 + 115–122**; neue Exporte nach `clearMarkColor` (122), vor `canCut` (124) |
+| `Toolbar.tsx` Datei / Absatzformat-`<select>` / erster `MarkButton` / `<option>Standard` | 247 Z. / 116–133 / 135 / 125 | **298 Z.** / **165–180** / **184** / **174** |
+| `docx/reader.ts` `marksFromRunProperties` | 99–114 | **100–115** (Einschub vor `return marks`, 114) |
+| `docx/writer.ts` `runPropertiesXml` / `inlineToRuns` / Mark-Vergleich | 18–31 / 39–65 / 52 | **20–33** / **41–67** / **54** |
+| `odt/reader.ts` `RunStyle` / `parseAutomaticStyles` / `marksFor` / `readOdt` (2 Aufrufe) | 13–20 / 36–77 / 82–94 / 239–285 | **14–21** / **37–78** / **100–112** / **357–409** (Aufrufe 364, 374) |
+| `odt/styleRegistry.ts` `RunProps` / `isEmpty` / `TextStyleRegistry` / Dedup-Key / `buildTextStyleXml` | 3–10 / 12–14 / 22–44 / 30 / 46–59 | **unverändert korrekt** |
+| `odt/writer.ts` `runPropsFromMarks` / `buildContentXml` / `buildStylesXml` / `writeOdt` / `blocksToOdt` | 25–36 / 129–137 / 139–156 / 183–210 / — | **32–43** / **206–214** / **216–233** / **260–305** / **197–204 (4 Params inkl. `tableNames`)** |
+| `odt/xmlUtil.ts` `svg` / `office` / `NAMESPACE_DECLARATIONS` (enthält `svg`) | 18 / 11 / 24 | **unverändert korrekt** |
+| `WordEditor.tsx` `forceRender`-Aufrufe / `if (tr.docChanged)` | 60,97,101 / 94 | **70,131,136** / **128**; `Enter: splitListItem` (96) → `baseKeymap`/`splitBlock` |
+| `DocumentWorkspace.tsx` `dirty:true` via Editor-`onChange` / `dirty:false` bei Export | 69 | **146** / **84** |
+
+**Zusätzliche Bestätigungen aus diesem Durchgang:**
+- `docx/__tests__/styleDefs.test.ts` prüft inzwischen **zusätzlich** zu „`Normal` ohne `w:rFonts`",
+  dass `styleDefs.ts` ein **leeres** `<w:docDefaults/>` erzeugt („no product-wide font/size
+  standard is enforced") und `Normal` auch kein `w:sz` trägt. Das stützt Design-Entscheidung 1 /
+  Anforderung 2.4 zusätzlich — es existiert nachweislich **kein** eingeschleuster Schriftart-Default.
+  `styleDefs.ts` bleibt in diesem Ticket **unangetastet**, der Test bleibt grün.
+- Fixture `FruitDepot-SeasonalFruits4.odt` real entpackt und geprüft: `office:font-face-decls`
+  enthält u. a. `style:name="Arial1" svg:font-family="Arial"`, `style:name="Arial2"
+  svg:font-family="Arial"`, `style:name="Tahoma1"` sowie `&apos;`-gequotete Mehrwort-/Nicht-Latein-
+  Namen (`&apos;Times New Roman&apos;`, `&apos;ヒラギノ角ゴ Pro W3&apos;`, `&apos;Open Sans Light&apos;`).
+  Bestätigt sowohl die Notwendigkeit der `office:font-face-decls`-Auflösung (9.1) als auch das
+  `unquoteFontFamily`-Handling (Single-Quote-Dekodierung) und den `svg`-Namespace in
+  `NAMESPACE_DECLARATIONS`.
+- `Bug54771a.docx` real entpackt: **ausschließlich** `w:asciiTheme="majorHAnsi"` (10×) /
+  `"minorHAnsi"` (1×), **kein** literales `w:ascii` → Theme-only, wie in 12.1/13.1 beschrieben.
+- `bug57031.docx`: die „eastAsia-only"-Variante `<w:rFonts w:eastAsia="Times New Roman"/>` kommt
+  real **~60×** vor (Erstfassung nannte 63) — Zahl korrigiert, Aussage (Grenzfall 3.14 real belegt)
+  unverändert; daneben literale `w:ascii="Arial"/"Times New Roman"/"Cambria Math"/"Courier New"`.
+- `bug59058.docx`: literale exotische `w:ascii="MinionPro-bold"/"MinionPro-Regular"/"MinionPro-It"/"Times"/"Lucida Sans Unicode"` real vorhanden (Grenzfall 3.5).
+- Keine `tests/e2e/font-family.spec.ts` vorhanden (Neuanlage bestätigt); `docxCard`/`odtCard`-Helfer
+  liegen in `tests/e2e/fixtures.ts` (39/43), `docx.spec.ts` definiert zusätzlich einen lokalen
+  `docxCard` (59) — beim neuen Spec konsistent einen Weg wählen.
+
+---
+
+## 0.2 Kritische Nachprüfung dieses Durchgangs — konkrete Verbesserungen
+
+Zusätzlich zur Anker-/Struktur-Verifikation (0.1) wurde dieser Durchgang genutzt, um den
+Plan **kritisch gegen die eigenen Anforderungen** (insbesondere ARIA-Abschnitt 4.6) zu
+prüfen. Dabei fielen vier konkrete, mit der bisherigen Fassung noch nicht vollständig
+gedeckte Punkte auf; alle sind unten in den betroffenen Code-Snippets (Abschnitt 7.1 und
+11.2) bereits eingearbeitet:
+
+1. **`aria-live` für „Keine Schriftart gefunden" fehlte im Snippet (Blocker gegen 4.6).**
+   Anforderung 4.6 verlangt den Leer-Treffer-Hinweis ausdrücklich in einer
+   `aria-live="polite"`-Region. Der ursprüngliche Combobox-Entwurf gab ihn als schlichtes
+   `<li>` **innerhalb** des `role="listbox"` aus — Screenreader hätten das leere
+   Filterergebnis nicht angesagt, und ein Nicht-`option`-`<li>` im Listbox verletzt zudem
+   die Listbox-Semantik. Korrigiert: eigener `role="status" aria-live="polite"`-Container
+   **außerhalb** des `<ul>`, dauerhaft gemountet solange die Liste offen ist (aria-live
+   sagt nur Änderungen zuverlässig an, wenn die Region bereits im DOM steht).
+2. **`<li>`-Zwischenrolle zwischen `listbox` und `option` (4.6).** `role="listbox"` →
+   implizites `listitem` (`<li>`) → `role="option"` schiebt eine fremde `listitem`-Rolle
+   dazwischen. Korrigiert: `role="presentation"` auf den `<li>`-Wrappern, damit die
+   Optionen direkte Listbox-Kinder im Accessibility-Baum bleiben.
+3. **`aria-activedescendant` fehlte (Vervollständigung des Combobox-Patterns, 4.6).** Da
+   der Fokus im `<input>` bleibt und die Hervorhebung nur über React-State läuft, braucht
+   ein Screenreader `aria-activedescendant` auf dem `role="combobox"`, das auf die `id`
+   des hervorgehobenen `role="option"` zeigt — sonst ist der per Pfeiltaste hervorgehobene
+   Eintrag für assistive Technik unsichtbar. Korrigiert: stabile `id={`font-opt-${i}`}` je
+   Option + `aria-activedescendant` am Input. Der Entfernen-Button trägt jetzt zusätzlich
+   zum `title` auch das von 4.6 geforderte `aria-label="Schriftart entfernen"`.
+4. **E2E-`getByLabel('Schriftart')` ist nach Punkt 3 nicht mehr eindeutig.** Sobald der
+   Entfernen-Button `aria-label="Schriftart entfernen"` trägt, matcht Playwrights
+   `getByLabel('Schriftart')` (Teilstring-Default) **beide** Elemente → Strict-Mode-Verstoß.
+   Alle E2E-Locator auf das Eingabefeld sind deshalb mit `{ exact: true }` zu qualifizieren
+   (`page.getByLabel('Schriftart', { exact: true })`); im Snippet in 11.2 eingearbeitet.
+
+Nachrichtlich (keine Code-Änderung nötig, aber dokumentiert): `parseFirstFontFamily`
+(Abschnitt 6) zerteilt den `font-family`-CSS-Wert am ersten Komma. Für einen
+Schriftartnamen, der selbst ein Komma enthält (Grenzfall 3.22), liefert der
+**parseDOM**-Pfad (reines Clipboard-HTML-Einfügen) dadurch nur den Namensteil vor dem
+Komma. Das ist folgenlos für die DOCX/ODT-Rundreise (die den `family`-Attributwert direkt
+aus der Mark schreibt/liest, **nicht** über `parseFirstFontFamily`) und für den Export
+(dort greift `escapeXml`); es betrifft ausschließlich das nicht-testpflichtige Copy/Paste
+(Grenzfall 3.20, in Abschnitt 4 bereits als „kostenlos miterledigt, nicht Testgegenstand"
+markiert). Wird Copy/Paste später testpflichtig, ist `parseFirstFontFamily` auf einen
+anführungszeichen-/komma-bewussten Parser umzustellen.
+
+---
+
+## 0.3 Erneute Re-Verifikation gegen den aktuellen Code-Stand (dieser Durchgang)
+
+Dieser Durchgang hat **jede** in Abschnitt 1 gelistete Datei erneut vollständig gegen den
+tatsächlichen Baum gelesen (nicht die Zahlen aus 0.1/0.2 übernommen) und zusätzlich per
+Skript aus den echten Fixture-ZIPs nachgerechnet, statt sich auf die im Plan behaupteten
+Zahlen zu verlassen. Ergebnis: **Architektur, Design-Entscheidungen und sämtliche
+DOCX/ODT-XML-Strukturvorschläge dieses Plans bleiben unverändert korrekt** — es wurde
+keine einzige inhaltliche/technische Unstimmigkeit gefunden. Bestätigt wurden insbesondere:
+
+- `schema.ts` (`marks`-Objekt exakt Zeile 157–196), `commands.ts` (168 Zeilen,
+  `applyMarkColor`/`clearMarkColor` exakt Zeile 106–113/115–122), `Toolbar.tsx` (298
+  Zeilen, `<select>` exakt 165–180, erster `MarkButton` 184, `<option>Standard` 174),
+  `docx/reader.ts` (`marksFromRunProperties` exakt 100–115), `docx/writer.ts`
+  (`runPropertiesXml` 20–33, `inlineToRuns` 41–67, Mark-Vergleich Zeile 54), `docx/styleDefs.ts`
+  (unverändert, `styleDefs.test.ts` prüft weiterhin sowohl leeres `w:docDefaults` als auch
+  „`Normal` ohne `w:rFonts`/`w:sz`"), `odt/reader.ts` (`RunStyle` 14–21,
+  `parseAutomaticStyles` 37–78, `marksFor` 100–112, `readOdt`-Aufrufe 364/374),
+  `odt/writer.ts` (`runPropsFromMarks` 32–43, `buildContentXml` 206–214, `buildStylesXml`
+  216–233, `writeOdt` 260–305, `blocksToOdt` mit 4 Parametern inkl. `tableNames` 197–204),
+  `odt/styleRegistry.ts` und `odt/xmlUtil.ts` (beide unverändert) sind **exakt** wie in der
+  Anker-Tabelle in 0.1 angegeben — diese Tabelle war bis auf die unten korrigierte
+  `WordEditor.tsx`-Zeile weiterhin zutreffend.
+- Alle Fixture-Fakten aus Abschnitt 12 wurden per Skript (JSZip, nicht nur Handaufmaß)
+  gegengerechnet und sind **exakt** zutreffend: `Bug54771a.docx` enthält ausschließlich
+  `w:asciiTheme="majorHAnsi"`/`"minorHAnsi"`, kein literales `w:ascii`; `bug59058.docx`
+  enthält literal `w:ascii="MinionPro-bold"/"MinionPro-Regular"/"MinionPro-It"`; die
+  „eastAsia-only"-Zeile `<w:rFonts w:eastAsia="Times New Roman"/>` kommt in
+  `bug57031.docx` **exakt 60×** vor (nachgerechnet, deckt sich mit der bereits in 0.1
+  korrigierten Zahl); `FruitDepot-SeasonalFruits4.odt`s `office:font-face-decls` enthält
+  wortgleich `style:name="Arial1"`/`"Arial2"` → `svg:font-family="Arial"`,
+  `style:name="Tahoma1"` → `"Tahoma"` sowie die einfach-gequoteten Namen
+  `&apos;Times New Roman&apos;`/`&apos;ヒラギノ角ゴ Pro W3&apos;`/`&apos;Open Sans Light&apos;`.
+  Alle Testfixtures aus Abschnitt 12 existieren wie referenziert im Repo. `tests/e2e/fixtures.ts`
+  exportiert `docxCard`/`odtCard` exakt an Zeile 39/43, `docx.spec.ts` definiert weiterhin
+  einen eigenen lokalen `docxCard` an Zeile 59, `tests/e2e/font-family.spec.ts` existiert
+  weiterhin nicht (Neuanlage bestätigt), `selection-regression.spec.ts` hat weiterhin genau
+  einen `test.describe`-Block, in den der neue Grenzfall-3.15-Test passt. `package.json`,
+  `index.css` (`.ProseMirror` ohne `font-family`, `--font-sans` Zeile 4) und die
+  Abwesenheit jeglichen Combobox-/`role="listbox"`-Musters im Repo (`grep` → 0 Treffer)
+  wurden ebenfalls erneut bestätigt.
+
+**Gefundene, in diesem Durchgang korrigierte Zeilen-Abweichungen (reine
+Anker-Korrekturen, keine inhaltliche Änderung an Architektur/Design):**
+
+1. **Die `WordEditor.tsx`-Zeile der Anker-Tabelle in 0.1 war selbst bereits wieder
+   veraltet.** Sie nannte „57,123,128 / 120" für `forceRender`/`if (tr.docChanged)` und
+   „88" für `Enter: splitListItem`. Tatsächlich (per `grep -n` nachgezählt):
+   `forceRender` steht an Zeile 70 (Deklaration), 131 und 136 (Aufrufe); `if
+   (tr.docChanged)` an Zeile 128; `Enter: splitListItem(...)` an Zeile 96. Die Tabelle in
+   0.1 ist jetzt entsprechend berichtigt — dies ist der einzige Punkt, an dem eine als
+   „aktuell (verifiziert)" markierte Zahl selbst nicht mehr stimmte.
+2. **Zwei Stellen (Design-Entscheidung 4 in Abschnitt 3, und Abschnitt 13.2) zitierten
+   `odt/writer.ts` Zeile 184–195 bzw. 188–195 als Beleg für die `bodyStyles`/
+   `chromeStyles`-Trennung bzw. die Header/Footer-Verdrahtung.** Diese Zeilen sind
+   tatsächlich `blockToOdt`s `unsupported_block`-Fallzweig (Export-Fallback für nicht
+   unterstützte Textfelder/Objekte) — inhaltlich ohne jeden Bezug zu den beiden
+   Behauptungen. Die richtigen Fundstellen sind `writeOdt` selbst: `new
+   TextStyleRegistry()` für den Body an Zeile 261, für Kopf-/Fußzeile an Zeile 268, sowie
+   die `blocksToOdt(...)`-Aufrufe für Body/Header/Footer an Zeile 266/271/272. Beide
+   Stellen sind jetzt korrigiert. Die analoge Abschnitt-13.2-Behauptung für
+   `docx/writer.ts` (dort „Zeile 234–243" zitiert) war ebenfalls falsch — das ist
+   `buildContentTypesXml`s Header/Footer-Content-Type-Override, nicht `writeDocx`s
+   `blocksToDocx`-Aufrufe (tatsächlich Zeile 256/265/270) — ebenfalls korrigiert.
+3. **Mehrere `Toolbar.tsx`-Prosa-Zitate in Abschnitt 7 waren veraltet:** `run()` wurde als
+   „Zeile 23–26" zitiert (tatsächlich 28–31), das Absatzformat-`<select>` im
+   Code-Kommentar von Abschnitt 7.2 als „Zeile 116–131" (tatsächlich 165–180 — und stand
+   damit im selben Abschnitt im Widerspruch zur unmittelbar davorstehenden, korrekten
+   Angabe „aktuell Zeile 165–180"), und das `onMouseDown`/`preventDefault()`-Muster von
+   `MarkButton`/`AlignButton` als „Zeile 49–50, 71–72" (tatsächlich 76–77 bzw. 98–99).
+   Alle drei sind jetzt korrigiert.
+4. Die Audit-Bullet-Liste in Abschnitt 2.1 zitierte `WordEditor.tsx` „Zeile 62–114" für
+   den `useEffect`-Block (tatsächlich 76–166) und `MarkButton` „Zeile 41–42" (tatsächlich
+   68–69, `const markType = wordSchema.marks[mark]` / `const active = …`) — beide
+   korrigiert.
+
+**Einordnung:** Alle vier Punkte sind reine Zeilennummer-Drift durch seitherige,
+themenfremde Code-Änderungen (z. B. Ausschneiden-Feature, siehe Commit-Historie),
+**keine** Fehler in der vorgeschlagenen Architektur oder den XML-Snippets selbst — die
+bereits in 0.1 gegebene Empfehlung, Anker **per Symbolname** statt per nackter
+Zeilennummer zu suchen, bleibt der verlässlichere Weg und wird hiermit erneut bekräftigt.
+Punkt 2 (verwechselte Fundstelle) ist der einzige Fund, der über reine Zahlendrift
+hinausgeht — er hätte eine Umsetzerin tatsächlich zum falschen Code-Abschnitt geführt,
+weshalb er hier explizit hervorgehoben ist.
+
+---
+
 ## 1. Methodik dieser Prüfung
 
 Gelesen und geprüft (Zeilennummern beziehen sich auf den Stand zum Zeitpunkt dieser
@@ -64,21 +268,23 @@ Zusätzlich wurden testweise 6 reale DOCX- und 15 reale ODT-Fixtures aus
 
 | Fundstelle laut Anforderung | Verifiziert | Anmerkung |
 |---|---|---|
-| `schema.ts` Marks `strong…highlight`, keine `fontFamily`-Mark | Ja (Zeilen 109–148) | — |
-| `Toolbar.tsx` kein Dropdown/Combobox für Schriftart | Ja (247 Zeilen, kein Treffer für „font") | Auch **kein** anderes Combobox-Muster im ganzen Repo vorhanden (`grep combobox|role="listbox"` → 0 Treffer) — es gibt keine wiederverwendbare Vorlage, die Komponente muss vollständig neu entworfen werden |
-| `commands.ts` keine Funktion für Schriftart | Ja (108 Zeilen) | Zusätzlich: `applyMarkColor`/`clearMarkColor` (Zeile 90–106) geben bei leerer Selektion `false` zurück, statt eine „stored mark" zu setzen — **nicht** als Vorlage für `applyFontFamily`/`clearFontFamily` verwenden (siehe Abschnitt 0) |
-| `docx/reader.ts` `marksFromRunProperties` liest kein `w:rFonts` | Ja (Zeile 99–114) | — |
-| `docx/writer.ts` `runPropertiesXml` schreibt kein `w:rFonts` | Ja (Zeile 18–31) | — |
-| `odt/reader.ts` `RunStyle`/`parseAutomaticStyles` ohne `style:font-name` | Ja (Zeile 13–20, 36–77) | Datei liest auch **kein** `office:font-face-decls` irgendwo — nicht mal das Element wird referenziert |
+| `schema.ts` Marks `strong…highlight`, keine `fontFamily`-Mark | Ja (aktuell Zeilen 157–196) | — |
+| `Toolbar.tsx` kein Dropdown/Combobox für Schriftart | Ja (aktuell 298 Zeilen, kein Treffer für „font") | Auch **kein** anderes Combobox-Muster im ganzen Repo vorhanden (`grep combobox|role="listbox"` → 0 Treffer) — es gibt keine wiederverwendbare Vorlage, die Komponente muss vollständig neu entworfen werden |
+| `commands.ts` keine Funktion für Schriftart | Ja (aktuell 168 Zeilen) | Zusätzlich: `applyMarkColor`/`clearMarkColor` (aktuell Zeile 106–122) geben bei leerer Selektion `false` zurück, statt eine „stored mark" zu setzen — **nicht** als Vorlage für `applyFontFamily`/`clearFontFamily` verwenden (siehe Abschnitt 0) |
+| `docx/reader.ts` `marksFromRunProperties` liest kein `w:rFonts` | Ja (aktuell Zeile 100–115) | — |
+| `docx/writer.ts` `runPropertiesXml` schreibt kein `w:rFonts` | Ja (aktuell Zeile 20–33) | — |
+| `odt/reader.ts` `RunStyle`/`parseAutomaticStyles` ohne `style:font-name` | Ja (aktuell Zeile 14–21, 37–78) | Datei liest auch **kein** `office:font-face-decls` irgendwo — nicht mal das Element wird referenziert |
 | `odt/styleRegistry.ts` `RunProps`/`buildTextStyleXml` ohne Schriftart-Feld | Ja (Zeile 3–10, 46–59) | — |
 
 Zusätzlich gefunden, **nicht** in der Anforderungstabelle:
 
-- `src/formats/shared/editor/WordEditor.tsx`, Zeile 62–114: Die `EditorState` wird
+- `src/formats/shared/editor/WordEditor.tsx`, Zeile 76–166 (aktualisiert, siehe 0.1 —
+  Erstfassung nannte 62–114): Die `EditorState` wird
   **einmalig** in einem `useEffect` mit leerem Dependency-Array aus `doc.content.body`
   erzeugt; die Toolbar wird bei jeder Transaktion per `forceRender` neu gerendert
-  (Zeile 60, 97, 101). Das bedeutet: eine Combobox, die `view.state` direkt aus dem
-  `view`-Objekt liest (wie `MarkButton`, Zeile 41–42), zeigt bei jeder
+  (aktuell Zeile 70/131/136, siehe korrigierte Tabelle in 0.1). Das bedeutet: eine
+  Combobox, die `view.state` direkt aus dem
+  `view`-Objekt liest (wie `MarkButton`, aktuell Zeile 68–69), zeigt bei jeder
   Cursor-Bewegung/Selektionsänderung automatisch den aktuellen Wert an — **ohne**
   zusätzlichen Subscription-Mechanismus. Das deckt Anforderung 2.3 („Anzeige der
   aktiven Schriftart") strukturell bereits ab, sofern die neue Komponente exakt diesem
@@ -135,7 +341,7 @@ Zusätzlich gefunden, **nicht** in der Anforderungstabelle:
 | 1 | Basis-/Standardschriftart beim Export (2.4) | **Kein harter Produktstandard.** Text ohne explizite Nutzeraktion bleibt ohne `fontFamily`-Mark; DOCX/ODT-Export schreibt dafür **kein** `w:rFonts`/`style:font-name`. | Verhindert erfundene Schriftart bei unverändertem Re-Export (Rundreise-Kriterium 5/7) und unnötiges `dirty` (2.4). |
 | 2 | UI-Anzeige, wenn keine Mark vorhanden ist (2.3) | Combobox zeigt **leeren Eingabewert**, aber mit `placeholder="Standard"` (analog zum `<option value="normal">Standard</option>` des bestehenden Absatzformat-Selects, Zeile 125 in `Toolbar.tsx`). | Erfüllt 2.3 „niemals ein leerer, verwirrender Zustand" **ohne** eine Phantom-Schriftart ins Datenmodell zu schreiben — der Placeholder ist rein visuell, keine Mark. |
 | 3 | „Gemischt"-Anzeige (1.8) | Gleicher Mechanismus wie #2, aber `placeholder="Gemischt"`, Eingabewert ebenfalls leer. | Kein zusätzlicher State nötig; UI-seitig identisch zu #2, nur andere Beschriftung — die Unterscheidung „kein Wert" vs. „gemischt" ist rein informativ, keine Anforderung verlangt eine visuell andere Behandlung. |
-| 4 | Speicherort der ODT-`office:font-face-decls` | **Getrennt pro Dokumentteil**, analog zur bestehenden `bodyStyles`/`chromeStyles`-Trennung der `TextStyleRegistry` (`odt/writer.ts` Zeile 184–195): eine `FontFaceRegistry` für `content.xml` (Body), eine zweite für `styles.xml` (Kopf-/Fußzeile). | Automatische Stile sind laut ODF-Spezifikation nicht teil-übergreifend gültig — dieselbe Trennung, die die bestehende `TextStyleRegistry` bereits für Textstile durchsetzt, gilt identisch für Font-Face-Deklarationen. |
+| 4 | Speicherort der ODT-`office:font-face-decls` | **Getrennt pro Dokumentteil**, analog zur bestehenden `bodyStyles`/`chromeStyles`-Trennung der `TextStyleRegistry` in `writeOdt` (`odt/writer.ts`, aktuell Zeile 261 `new TextStyleRegistry()` für den Body, Zeile 268 für Kopf-/Fußzeile — **nicht** Zeile 184–195, das ist `blockToOdt`s `unsupported_block`-Fallzweig und hat mit dieser Trennung nichts zu tun, Verwechslung in einer früheren Fassung dieses Plans korrigiert): eine `FontFaceRegistry` für `content.xml` (Body), eine zweite für `styles.xml` (Kopf-/Fußzeile). | Automatische Stile sind laut ODF-Spezifikation nicht teil-übergreifend gültig — dieselbe Trennung, die die bestehende `TextStyleRegistry` bereits für Textstile durchsetzt, gilt identisch für Font-Face-Deklarationen. |
 | 5 | Caching der Local-Font-Access-Liste (Grenzfall 4.5) | Modul-globaler Cache (`let cachedSystemFonts`) plus In-Flight-Promise-Dedup, **ein** Berechtigungsdialog pro Browser-Tab-Lebensdauer. | Verhindert wiederholte Berechtigungs-Dialoge bei schnellem Öffnen/Schließen (Grenzfall 4.5). |
 | 6 | Tastaturkürzel | **Keines** — Anforderung Abschnitt 1, letzter Absatz, schließt das explizit aus. | — |
 | 7 | Freitext-Normalisierung (2.7) | Schriftartname wird **unverändert** (kein `trim()`, keine Case-Anpassung) in Mark, CSS und Export übernommen. Einzige Ausnahme: eine rein aus Leerzeichen bestehende Eingabe wird nicht übernommen (kein sinnvoller Schriftartname, keine Anforderung verlangt das explizit, aber Grenzfall „leere Eingabe" ist sonst nicht abgedeckt). | Erfüllt 2.7 wörtlich; die Leerraum-Ausnahme ist eine Robustheits-Ergänzung, kein Normalisierungsverstoß. |
@@ -144,7 +350,7 @@ Zusätzlich gefunden, **nicht** in der Anforderungstabelle:
 
 ## 4. Schema-Änderung — `src/formats/shared/schema.ts`
 
-Neue Mark **am Ende** des `marks`-Objekts (Zeile 109–148) ergänzen, **nicht** dazwischen
+Neue Mark **am Ende** des `marks`-Objekts (aktuell Zeile 157–196) ergänzen, **nicht** dazwischen
 einfügen: ProseMirror weist jeder Mark beim `Schema`-Konstruktor einen `rank` in
 Deklarationsreihenfolge zu; `Mark.addToSet` hält Mark-Arrays intern immer in
 Rang-Reihenfolge, unabhängig von der Anwendungsreihenfolge im UI (das ist der
@@ -179,7 +385,7 @@ Zirkelabhängigkeit (`fonts.ts` importiert seinerseits nichts aus `schema.ts`).
 
 ## 5. Commands — `src/formats/shared/editor/commands.ts`
 
-Drei neue Exporte, nach dem bestehenden `clearMarkColor` (nach Zeile 106) ergänzen:
+Drei neue Exporte, nach dem bestehenden `clearMarkColor` (aktuell Zeile 115–122), vor `canCut` (124), ergänzen:
 
 ```ts
 export function applyFontFamily(family: string): Command {
@@ -450,6 +656,7 @@ export function FontFamilyCombobox({ view }: { view: EditorView }) {
         aria-expanded={open}
         aria-label="Schriftart"
         aria-controls="font-family-listbox"
+        aria-activedescendant={highlight >= 0 && visible[highlight] ? `font-opt-${highlight}` : undefined}
         placeholder={mixed ? 'Gemischt' : 'Standard'}
         value={open ? query : (family ?? '')}
         onFocus={openList}
@@ -461,40 +668,59 @@ export function FontFamilyCombobox({ view }: { view: EditorView }) {
       <button
         type="button"
         title="Schriftart entfernen"
+        aria-label="Schriftart entfernen"
         onMouseDown={(e) => { e.preventDefault(); clearFontFamily()(view.state, view.dispatch); view.focus() }}
         className="px-1 text-xs text-neutral-500 hover:bg-neutral-100 dark:hover:bg-neutral-800 rounded"
       >
         ⌫
       </button>
       {open && (
-        <ul id="font-family-listbox" role="listbox" className="absolute z-20 mt-1 max-h-64 w-56 overflow-auto rounded border border-neutral-300 bg-white shadow-lg dark:border-neutral-700 dark:bg-neutral-900">
-          {visible.length === 0 && (
-            <li className="px-2 py-1 text-sm text-neutral-500">Keine Schriftart gefunden</li>
-          )}
-          {visible.map((opt, i) => (
-            <li key={`${opt.group}-${opt.name}`}>
-              <button
-                type="button"
-                role="option"
-                aria-selected={i === highlight}
-                style={{ fontFamily: cssFontFamily(opt.name) }}
-                onMouseEnter={() => setHighlight(i)}
-                // preventDefault verhindert den Blur des <input>, bevor onClick feuert —
-                // dasselbe Muster wie bei den bestehenden Toolbar-Buttons (Toolbar.tsx `run()`).
-                onMouseDown={(e) => e.preventDefault()}
-                onClick={() => commit(opt.name)}
-                className={`block w-full truncate px-2 py-1 text-left text-sm ${i === highlight ? 'bg-neutral-100 dark:bg-neutral-800' : ''}`}
-              >
-                {opt.name}
-              </button>
-            </li>
-          ))}
-        </ul>
+        <div className="absolute z-20 mt-1 w-56">
+          {/* aria-live-Region MUSS außerhalb des listbox stehen und dauerhaft (solange offen)
+              gemountet sein, damit Screenreader den Leer-Treffer ansagen (Anforderung 4.6). */}
+          <div role="status" aria-live="polite" className="sr-only">
+            {visible.length === 0 ? 'Keine Schriftart gefunden' : ''}
+          </div>
+          <ul id="font-family-listbox" role="listbox" aria-label="Schriftart" className="max-h-64 overflow-auto rounded border border-neutral-300 bg-white shadow-lg dark:border-neutral-700 dark:bg-neutral-900">
+            {visible.length === 0 && (
+              // sichtbarer (nicht-Listbox-)Hinweis; für AT übernimmt die aria-live-Region oben.
+              <li role="presentation" className="px-2 py-1 text-sm text-neutral-500 dark:text-neutral-400">Keine Schriftart gefunden</li>
+            )}
+            {visible.map((opt, i) => (
+              // role="presentation" auf dem <li>, damit zwischen role="listbox" und
+              // role="option" keine fremde listitem-Rolle steht (Anforderung 4.6).
+              <li key={`${opt.group}-${opt.name}`} role="presentation">
+                <button
+                  type="button"
+                  id={`font-opt-${i}`}
+                  role="option"
+                  aria-selected={i === highlight}
+                  style={{ fontFamily: cssFontFamily(opt.name) }}
+                  onMouseEnter={() => setHighlight(i)}
+                  // preventDefault verhindert den Blur des <input>, bevor onClick feuert —
+                  // dasselbe Muster wie bei den bestehenden Toolbar-Buttons (Toolbar.tsx `run()`).
+                  onMouseDown={(e) => e.preventDefault()}
+                  onClick={() => commit(opt.name)}
+                  className={`block w-full truncate px-2 py-1 text-left text-sm ${i === highlight ? 'bg-neutral-100 dark:bg-neutral-800' : ''}`}
+                >
+                  {opt.name}
+                </button>
+              </li>
+            ))}
+          </ul>
+        </div>
       )}
     </div>
   )
 }
 ```
+
+Hinweis zu den Optionen-`id`s: `id={`font-opt-${i}`}` indiziert bewusst über die
+**Sichtbarkeits-/Filter-Position** (`i` in `visible`), nicht über den Namen — dieselbe
+Größe, auf die sich `highlight` und `aria-activedescendant` (Abschnitt 7.1 Input) beziehen,
+sodass die drei Werte immer konsistent bleiben. Da die Combobox pro Editor-Instanz nur
+**einmal** in der Toolbar vorkommt, ist ein globaler `id`-Präfix (`font-opt-…`) eindeutig;
+käme die Komponente je mehrfach vor, wäre ein `useId()`-Präfix vorzuschalten.
 
 Designentscheidungen, die hier bewusst getroffen wurden (mit Bezug auf die
 Grenzfälle/UI-Robustheit aus Anforderung Abschnitt 3/4):
@@ -511,7 +737,7 @@ Grenzfälle/UI-Robustheit aus Anforderung Abschnitt 3/4):
 - **`onMouseDown` + `preventDefault()` auf Options-Buttons** verhindert, dass der Klick
   in die Liste den `<input>` zuerst blurred (was sonst `reset()` vor `commit()` auslösen
   würde) — dasselbe etablierte Muster wie bei den bestehenden `MarkButton`/`AlignButton`
-  (`Toolbar.tsx` Zeile 49–50, 71–72), das den Editor-Fokus bei Klicks außerhalb des
+  (`Toolbar.tsx`, aktuell Zeile 76–77 bzw. 98–99), das den Editor-Fokus bei Klicks außerhalb des
   `contentEditable` bewahrt. Erfüllt Grenzfall 4.3 („Öffnen/Bedienen der Liste darf
   Editor-Fokus/Selektion nicht vor Bestätigung zerstören") ohne zusätzlichen Code: da
   zwischen `openList()` und `commit()` **keine** Transaktion auf `view` dispatcht wird,
@@ -527,16 +753,25 @@ Grenzfälle/UI-Robustheit aus Anforderung Abschnitt 3/4):
   der gerenderten `<li>`-Elemente reicht für „hunderte" Einträge aus; sollte ein
   QA-Durchlauf mit realer Hardware (>1500 Systemschriften) spürbares Ruckeln zeigen, ist
   eine Windowing-Lösung ein separater Folge-Fix, kein Blocker für dieses Ticket.
+- **„⌫"-Glyph des Entfernen-Buttons (Anforderung 4.6):** Der Entwurf nutzt `⌫` identisch zu
+  den bestehenden Farb-Entfernen-Buttons (`Toolbar.tsx`, aktuell Zeile 209/229) und trägt
+  `title`/`aria-label="Schriftart entfernen"`. Anforderung 4.6 listet dieses Glyph als
+  potenziell unzuverlässig (leeres Rechteck/Fragezeichen auf Systemen ohne Glyphenabdeckung);
+  dieselbe offene Frage betrifft bereits die Farb-Buttons. Zeigt das QA-Rendering auf mehreren
+  Systemen ein Rechteck/Fragezeichen, ist auf ein Inline-SVG umzustellen — Vorlage ist die im
+  Repo bereits vorhandene `ScissorsIcon`-Komponente (`Toolbar.tsx`, aktuell Zeile 33–53). Die
+  Entscheidung ist konsistent mit den Farb-Buttons zu treffen, nicht als Sonderfall nur für
+  Schriftart.
 
 ### 7.2 Änderung — `src/formats/shared/editor/Toolbar.tsx`
 
 Einfügeposition: **nach** dem schließenden `</select>` des Absatzformat-Dropdowns und
-dessen Trenner (aktuell Zeile 116–133), **vor** der bestehenden `MarkButton`-Zeile
-(Zeile 135) — exakt wie in Anforderung Tabelle 1, Zeile 1 verlangt („direkt nach dem
+dessen Trenner (aktuell Zeile 165–180), **vor** der bestehenden `MarkButton`-Zeile
+(Zeile 184) — exakt wie in Anforderung Tabelle 1, Zeile 1 verlangt („direkt nach dem
 Absatzformat-Dropdown und vor den Fett/Kursiv/…-Buttons"):
 
 ```tsx
-      <select aria-label="Absatzformat" /* … unverändert, Zeile 116–131 … */>
+      <select aria-label="Absatzformat" /* … unverändert, aktuell Zeile 165–180 … */>
         {/* … */}
       </select>
 
@@ -551,7 +786,7 @@ Absatzformat-Dropdown und vor den Fett/Kursiv/…-Buttons"):
 ```
 
 Import-Ergänzung am Dateikopf: `import { FontFamilyCombobox } from './FontFamilyCombobox'`.
-Keine sonstigen Änderungen an `Toolbar.tsx` nötig — `run()` (Zeile 23–26) wird von der
+Keine sonstigen Änderungen an `Toolbar.tsx` nötig — `run()` (aktuell Zeile 28–31) wird von der
 neuen Komponente nicht wiederverwendet, weil die Combobox eigene Fokus-Rückgabe-Logik
 braucht (`view.focus()` erst nach `setOpen(false)`, nicht vor dem State-Update).
 
@@ -559,7 +794,7 @@ braucht (`view.focus()` erst nach `setOpen(false)`, nicht vor dem State-Update).
 
 ## 8. DOCX — Lese-/Schreibunterstützung
 
-### 8.1 `src/formats/docx/reader.ts` — `marksFromRunProperties` (Zeile 99–114)
+### 8.1 `src/formats/docx/reader.ts` — `marksFromRunProperties` (aktuell Zeile 100–115)
 
 Ergänzung nach der bestehenden `highlight`-Auswertung (vor `return marks`):
 
@@ -575,12 +810,27 @@ vorhanden in `bug57031.docx`, siehe Abschnitt 12.1) ergibt `family === null` →
 Mark → Text fällt auf den Basiswert zurück, kein Absturz, kein leeres Attribut. Das ist
 die in Design-Entscheidung 3.1 festgelegte, dokumentierte Fallback-Semantik.
 
-### 8.2 `src/formats/docx/writer.ts` — `runPropertiesXml` (Zeile 18–31)
+### 8.2 `src/formats/docx/writer.ts` — `runPropertiesXml` (aktuell Zeile 20–33)
+
+**Reihenfolge beachten:** `<w:rFonts>` ist im OOXML-Schema `CT_RPr` das erste
+formatierungsrelevante Kind von `<w:rPr>` (Sequenz `rStyle`, `rFonts`, `b`, `i`, …) und muss
+`w:b`/`w:i`/… vorausgehen. Deshalb wird die Schriftart **vor** der bestehenden Marker-Schleife
+behandelt, nicht per `props.push` am Schleifenende (das platzierte sie fälschlich hinter
+`w:shd`, siehe Korrektur 2 in Abschnitt 0.1):
 
 ```ts
-if (mark.type === 'fontFamily') {
-  const family = escapeXml(String(mark.attrs?.family ?? ''))
-  props.push(`<w:rFonts w:ascii="${family}" w:hAnsi="${family}" w:cs="${family}" w:eastAsia="${family}"/>`)
+function runPropertiesXml(marks: JsonNode['marks']): string {
+  const props: string[] = []
+  const fontMark = (marks ?? []).find((m) => m.type === 'fontFamily')
+  if (fontMark) {
+    const family = escapeXml(String(fontMark.attrs?.family ?? ''))
+    props.push(`<w:rFonts w:ascii="${family}" w:hAnsi="${family}" w:cs="${family}" w:eastAsia="${family}"/>`)
+  }
+  for (const mark of marks ?? []) {
+    if (mark.type === 'strong') props.push('<w:b/>')
+    // … bestehende em/underline/strike/textColor/highlight-Zweige unverändert …
+  }
+  return props.length ? `<w:rPr>${props.join('')}</w:rPr>` : ''
 }
 ```
 
@@ -588,7 +838,9 @@ if (mark.type === 'fontFamily') {
 bei `textColor`/`highlight`, deren Werte reine Hex-Codes ohne Sonderzeichen sind — aktiv
 gebraucht, weil Schriftartnamen beliebige Zeichen (Anführungszeichen, kaufmännisches Und,
 Umlaute) enthalten können (Anforderung 2.7/3.3). Alle vier Attribute erhalten denselben
-Namen, wie in Anforderung 2.8 gefordert.
+Namen, wie in Anforderung 2.8 gefordert. Der Suite-Validator `mammoth`
+(`docx/__tests__/external-validation.test.ts`) ist reihenfolge-tolerant; die schemakorrekte
+Erst-Position ist die risikoärmere Wahl für Testfall 23 (unabhängige OOXML-Erkennung).
 
 `inlineToRuns` (Zeile 39–65) braucht **keine** Änderung: Die Lauf-Zusammenführung
 funktioniert markentyp-agnostisch bereits korrekt für ein zusätzliches Mark-Objekt in der
@@ -605,7 +857,7 @@ während DOCX den Namen direkt im Textlauf trägt.
 
 ### 9.1 `src/formats/odt/reader.ts`
 
-**`RunStyle`-Interface** (Zeile 13–20) um ein Feld erweitern:
+**`RunStyle`-Interface** (aktuell Zeile 14–21) um ein Feld erweitern:
 
 ```ts
 interface RunStyle {
@@ -644,7 +896,7 @@ function unquoteFontFamily(value: string): string {
 }
 ```
 
-**`parseAutomaticStyles`** (Zeile 36–77) bekommt einen zweiten Parameter und liest
+**`parseAutomaticStyles`** (aktuell Zeile 37–78) bekommt einen zweiten Parameter und liest
 zusätzlich `style:font-name`:
 
 ```ts
@@ -661,13 +913,13 @@ Der `?? fontNameRef`-Fallback ist **exakt** Grenzfall 3.13: fehlt der zugehörig
 `style:font-name`-Wert direkt als Anzeigename übernommen — kein Absturz, keine
 stillschweigend verlorene Information.
 
-**`decodeInline` → `marksFor`** (Zeile 82–94) ergänzt:
+**`decodeInline` → `marksFor`** (aktuell Zeile 100–112) ergänzt:
 
 ```ts
 if (style.fontFamily) marks.push({ type: 'fontFamily', attrs: { family: style.fontFamily } })
 ```
 
-**`readOdt`** (Zeile 239–285): beide Aufrufstellen von `parseAutomaticStyles` bekommen
+**`readOdt`** (aktuell Zeile 357–409): beide Aufrufstellen von `parseAutomaticStyles` bekommen
 die zugehörige Font-Face-Map:
 
 ```ts
@@ -774,13 +1026,13 @@ if (props.fontFamily) attrs.push(`style:font-name="${escapeXml(props.fontFamily)
 
 ### 9.3 `src/formats/odt/writer.ts`
 
-**`runPropsFromMarks`** (Zeile 25–36) ergänzt:
+**`runPropsFromMarks`** (aktuell Zeile 32–43) ergänzt:
 
 ```ts
 if (mark.type === 'fontFamily') props.fontFamily = mark.attrs?.family as string
 ```
 
-**`buildContentXml`** (Zeile 129–137) und **`buildStylesXml`** (Zeile 139–156) bekommen
+**`buildContentXml`** (aktuell Zeile 206–214) und **`buildStylesXml`** (aktuell Zeile 216–233) bekommen
 je einen zusätzlichen `FontFaceRegistry`-Parameter, dessen `serializeDefs()`-Ausgabe
 **vor** `<office:automatic-styles>` bzw. **vor** `<office:styles>` eingefügt wird (ODF
 verlangt `office:font-face-decls` als erstes optionales Kind-Element der
@@ -809,26 +1061,30 @@ function buildStylesXml(headerXml: string | null, footerXml: string | null, styl
 }
 ```
 
-**`writeOdt`** (Zeile 183–210) verdrahtet je eine `FontFaceRegistry`-Instanz pro
-Dokumentteil (Design-Entscheidung 3.4):
+**`writeOdt`** (aktuell Zeile 260–305) verdrahtet je eine `FontFaceRegistry`-Instanz pro
+Dokumentteil (Design-Entscheidung 3.4). **Wichtig (Korrektur 1 aus 0.1):** `blocksToOdt`/
+`blockToOdt` haben inzwischen einen vierten Parameter `tableNames: TableNameSequence`
+(Klasse Zeile 54–60) für die deterministische `table:name`-Vergabe — er muss unverändert
+durchgereicht werden, sonst bricht der Tabellen-Export:
 
 ```ts
 export async function writeOdt(doc: WordDocumentContent): Promise<Blob> {
   const bodyFontFaces = new FontFaceRegistry()
   const bodyStyles = new TextStyleRegistry(bodyFontFaces)
   const images = new ImageCollector()
-  const bodyXml = blocksToOdt((doc.body as unknown as JsonNode).content, bodyStyles, images)
+  const tableNames = new TableNameSequence() // bestehend — NICHT entfernen
+  const bodyXml = blocksToOdt((doc.body as unknown as JsonNode).content, bodyStyles, images, tableNames)
 
   const chromeFontFaces = new FontFaceRegistry()
   const chromeStyles = new TextStyleRegistry(chromeFontFaces)
   const header = doc.header as unknown as JsonNode | null
   const footer = doc.footer as unknown as JsonNode | null
-  const headerXml = header ? blocksToOdt(header.content, chromeStyles, images) : null
-  const footerXml = footer ? blocksToOdt(footer.content, chromeStyles, images) : null
+  const headerXml = header ? blocksToOdt(header.content, chromeStyles, images, tableNames) : null
+  const footerXml = footer ? blocksToOdt(footer.content, chromeStyles, images, tableNames) : null
 
   const contentXml = buildContentXml(bodyXml, bodyStyles, bodyFontFaces)
   const stylesXml = buildStylesXml(headerXml, footerXml, chromeStyles, chromeFontFaces)
-  // … Rest unverändert …
+  // … Rest (metaXml, manifest, Zip-Zusammenbau, stampZipEntriesForDeterminism) unverändert …
 }
 ```
 
@@ -984,7 +1240,9 @@ test('rapid font-family switching does not corrupt content (Grenzfall 3.15)', as
   await editor.click()
   await page.keyboard.type('Test Absatz.')
   await page.keyboard.press('ControlOrMeta+a')
-  const fontInput = page.getByLabel('Schriftart')
+  // { exact: true } ist Pflicht: der Entfernen-Button trägt aria-label="Schriftart entfernen",
+  // ein Teilstring-Match auf "Schriftart" träfe sonst zwei Elemente (Strict-Mode-Verstoß) — siehe 0.2 Punkt 4.
+  const fontInput = page.getByLabel('Schriftart', { exact: true })
   for (let i = 0; i < 6; i++) {
     await fontInput.fill(i % 2 === 0 ? 'Arial' : 'Georgia')
     await fontInput.press('Enter')
@@ -1049,8 +1307,12 @@ gleichwertigen Fall zu Fließtext/Tabelle/Liste/Überschrift. Der aktuelle Codes
 (`kopfzeile-bearbeiten`/`fusszeile-bearbeiten` sind eigene, laut Backlog noch „fehlt"
 geführte Slugs). Reader/Writer dieser Anforderung behandeln `header`/`footer` dennoch
 korrekt (dieselben `blocksToOdt`/`blockToDocx`-Funktionen werden für Body und
-Kopf-/Fußzeile verwendet, siehe `docx/writer.ts` Zeile 234–243, `odt/writer.ts` Zeile
-188–195) — die Schriftart-Mark wird also bereits jetzt korrekt in importierten
+Kopf-/Fußzeile verwendet, siehe `docx/writer.ts` `writeDocx`, aktuell Zeile 256/265/270,
+`odt/writer.ts` `writeOdt`, aktuell Zeile 266/271–272 — **nicht** Zeile 234–243 bzw.
+188–195 wie in einer früheren Fassung dieses Plans fälschlich zitiert: Ersteres ist
+`buildContentTypesXml`s Header/Footer-Content-Type-Override, Letzteres `blockToOdt`s
+`unsupported_block`-Fallzweig, beides ohne Bezug zur eigentlichen Body/Header/Footer-
+Verdrahtung) — die Schriftart-Mark wird also bereits jetzt korrekt in importierten
 Kopf-/Fußzeilen erkannt und beim Re-Export erhalten, nur **keine interaktive
 Neuanwendung** über die Toolbar ist möglich, weil es dafür noch keine editierbare
 Oberfläche gibt. Der E2E-Test für 3.6/Kopf-Fußzeile beschränkt sich daher auf

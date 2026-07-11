@@ -2,262 +2,276 @@
 
 Gegenstück zu `specs/bild-einfuegen-req.md` (Anforderung). Dieses Dokument ist der
 **dateigenaue Entwicklungsplan**: was am bestehenden Code nachweislich falsch/
-unvollständig ist (durch eigene Codesichtung **und** durch tatsächliche Testläufe
-gegen den echten `wordSchema`/`insertImage`-Code verifiziert, nicht nur aus der
-Anforderung übernommen), welche Dateien sich ändern bzw. neu entstehen, und in
-welcher Reihenfolge.
+unvollständig ist (durch eigene Codesichtung des tatsächlichen Standes verifiziert,
+nicht nur aus der Anforderung übernommen), welche Dateien sich ändern bzw. neu
+entstehen, und in welcher Reihenfolge.
 
-**Methodischer Hinweis:** Für Abschnitt 1 wurden mehrere in der Anforderung als
-„Verdacht" formulierte Annahmen (insbesondere Abschnitt 3.2/2.8 der Anforderung)
-nicht nur durch Lesen des ProseMirror-Bibliothekscodes eingeschätzt, sondern durch
-tatsächliche, temporäre Vitest-Testläufe gegen `wordSchema`/`insertImage` (dann
-wieder entfernt, nicht Teil dieses Repos) empirisch verifiziert. Wo das der Fall
-ist, steht „**empirisch verifiziert**" statt „vermutlich"/„laut Bibliotheksdoku".
-Das widerlegt an zwei Stellen sogar die naheliegende Lesart des
-Transform-Quellcodes (siehe 1.6/1.7) — ein gutes Beispiel dafür, warum reine
-Code-Lektüre bei ProseMirrors Slice-Fitting-Algorithmus nicht ausreicht.
+> **Zitierweise (verbindlich, wie schon `bild-einfuegen-req.md` Abschnitt 0 fordert):**
+> Maßgeblich sind die **Symbolnamen** (Datei › Funktion/Node). Zeilennummern sind eine
+> Momentaufnahme dieses Prüfdurchlaufs und driften bei jeder Änderung. Alle unten
+> genannten Zeilen wurden für **diesen** Durchlauf gegen den aktuellen Code neu
+> verifiziert.
+
+---
+
+## Revision gegenüber der Vorfassung dieses Plans
+
+Die vorige Fassung dieser Datei war gegen einen **älteren Code-Stand** geschrieben und
+an mehreren Stellen sachlich falsch. Diese Fassung korrigiert das. Wer die Vorfassung
+kennt, findet hier die konkreten Korrekturen — sie sind der eigentliche Mehrwert dieser
+Revision und alle unten im Plan eingearbeitet:
+
+1. **Reader-Struktur veraltet (kritisch, hätte bestehende Funktion zerstört).** Der
+   DOCX-Reader hat **keinen** inline-`'drawing'`-Zweig in `decodeParagraphRuns` mehr;
+   Zeichnungen laufen jetzt über die eigene Funktion **`decodeDrawingOrPict`**
+   (`docx/reader.ts:143-168`), die Bild **vs. Textbox vs. OLE-Objekt** unterscheidet
+   und für Textboxen `unsupported_block`-Inhalte rettet. `RunLike` hat heute die Variante
+   `'unsupported'` mit `unsupportedKind`/`unsupportedBlocks`. Der von der Vorfassung
+   vorgeschlagene Ersatz (`RunLike` nur `'text' | 'break' | 'image'`, Umschreiben eines
+   inline-`'drawing'`-Falls) hätte die Textbox-/Objekt-Rettung **gelöscht**. Analog beim
+   ODT-Reader: Frames laufen über **`frameToBlocks`** (`odt/reader.ts:232-248`), das
+   zusätzlich **seitenverankerte** Frames abdeckt (direkter Aufruf aus `elementToBlocks`,
+   `odt/reader.ts:284`). Der Größen-Lesefix gehört **in `decodeDrawingOrPict` bzw.
+   `frameToBlocks`**, nicht in eine Umschreibung der Run-/Frame-Schleife — siehe 4.9/4.11.
+2. **Fehlender Muss-Fix ergänzt: eindeutige `wp:docPr/@id`.** Anforderung 3.6 und
+   Abnahmekriterium 4 verlangen **eindeutige** DrawingML-IDs je Bild; der Writer
+   verdrahtet heute fest `wp:docPr id="1"`/`pic:cNvPr id="0"` (`docx/writer.ts:87,89`).
+   Die Vorfassung hatte dazu **keinen** Fix („Rest unverändert") — das ist ein
+   blockierendes DoD-Kriterium und jetzt als **F15** enthalten (4.8/5.1).
+3. **`list_item`-Content-Modell falsch beschrieben.** Die Vorfassung behauptete
+   `list_item: 'paragraph block*'` (mit daraus abgeleiteter „1-Zeichen-Stub"-Analyse).
+   Tatsächlich ist `list_item: { content: 'block+' }` (`schema.ts:146-152`, bewusst so,
+   siehe Kommentar dort) — ein Bild darf **erstes/einziges** Kind eines `list_item` sein.
+   Abschnitt 1.6 ist entsprechend korrigiert und die Command-Testfälle (F11) sind jetzt
+   **maßgeblich** statt der überzogenen „empirisch bewiesen"-Zusicherungen der Vorfassung.
+4. **`PAGE_CONTENT_WIDTH_PX` korrigiert: 606 px** (nicht „596 px"). Nachgerechnet:
+   `round(210·96/25.4) − 2·round(25·96/25.4) = 794 − 188 = 606`. Betraf 3.4 und 9.4.
+5. **`commands.test.ts` existiert bereits** (`src/formats/shared/editor/__tests__/commands.test.ts`,
+   testet `canCut`/`cutSelection`). Die Vorfassung nannte sie „NEU" — korrekt ist
+   **erweitern** um einen `insertImage`-`describe`-Block (5.1).
+6. **Erfundene Fixture-Namen ersetzt.** `ContentTypeIsCaseInsensitive.docx`/
+   `docx4j-example.docx` existieren **nicht** im Repo. Ersetzt durch die tatsächlich
+   vorhandenen, verifiziert bildhaltigen Fixtures mit real gemessenen Größen —
+   `headerPic.docx`, `drawing.docx`, `WithGIF.docx`, `image-attributes.odt`,
+   `imageAsChar.odt`, `image.odt` (5.3).
+7. **Neu dokumentierte Grenzen ergänzt:** Alt-Text aus `@descr` vs. `@name` (F16,
+   Anforderung 2.5) und nicht-browserdarstellbare Fremd-Endungen `.emf`/`.wmf`/`.tiff`
+   (F17, Anforderung 5.2). Beide in der Vorfassung nicht erwähnt.
+8. **Externe Validierungskanäle klargestellt:** Der DOCX-Kanal ist `mammoth`
+   (`docx/__tests__/external-validation.test.ts`), **nicht** python-docx — und mammoth ist
+   tolerant (extrahiert Bilder, erzwingt **keine** eindeutige `docPr/@id`). Für
+   Abnahmekriterium 4 braucht es deshalb eine **eigene XML-Parse-Assertion**, nicht den
+   mammoth-Lauf allein. Der ODT-Kanal (RelaxNG via `xmllint-wasm`) prüft heute nur ein
+   Bild **ohne** gesetzte Größe; Abnahmekriterium 5.1.12 verlangt ausdrücklich **mit**
+   gesetzter Größe (px→cm-Pfad). Beides in 5.1 präzisiert.
+9. **Diese Fassung: vollständig gegen den aktuellen Code neu verifiziert, zwei bisher
+   fehlende Anforderungspunkte ergänzt.** Jede Zeilen-/Symbolangabe aus Abschnitt 1
+   sowie alle Fixture-Inhalte aus 5.3 wurden für diesen Durchlauf erneut gegen die
+   tatsächlichen Dateien geprüft (Quellcode gelesen, Fixture-ZIPs mit `JSZip` entpackt
+   und `wp:extent`/`svg:width`-Werte real ausgelesen, nicht nur die Vorfassung
+   übernommen) — keine Abweichung gefunden, mit zwei Ausnahmen, die jetzt neu
+   ergänzt sind: (a) **Anforderung 3.13 (EXIF-Orientierung)** hatte in jeder
+   Vorfassung dieses Plans **keine** Entsprechung — trotz expliziter Nennung in
+   Abnahmekriterium 9 der Anforderung. Jetzt als **F18** in Abschnitt 2, Kernentscheidung
+   3.5 und Umsetzungspunkt 4.13 enthalten. (b) **Anforderung 3.14 (Sonder-Bildinhalte:
+   Transparenz, animiertes GIF, CMYK, 1×1-px, Extremformate)** hatte keine eigenen
+   Testfälle — jetzt in 5.2 als Punkte 15–18 ergänzt. Außerdem neu: Die real gemessenen
+   Fixture-Werte in 5.3 wurden nicht nur übernommen, sondern durch tatsächliches
+   Entpacken der Test-Archive nachgerechnet (siehe Fußnoten dort); dabei fiel auf, dass
+   `VariousPictures.docx` bereits echte `.wmf`/`.emf`-Bilder enthält — der in 4.12 (F17)
+   sonst nur angekündigte reale Testfall ist damit **ohne neue Fixture-Beschaffung**
+   sofort umsetzbar (5.3).
 
 ---
 
 ## 0. Geltungsbereich und Abgrenzung zu Geschwister-Plänen
 
-`image` (`src/formats/shared/schema.ts:45-72`) ist ein gemeinsamer Schema-Knoten
-für **sechs** separate Backlog-Slugs mit eigenen (teils noch nicht geschriebenen)
-Anforderungsdateien:
+`image` (`src/formats/shared/schema.ts:58-85`) ist ein gemeinsamer Schema-Knoten für
+mehrere separate Backlog-Slugs mit eigenen Anforderungsdateien:
 
 | Slug | Datei | Verhältnis zu diesem Plan |
 |---|---|---|
-| `bild-einfuegen` | `specs/bild-einfuegen-req.md` | **Dieser Plan.** Einfügen einer Bilddatei per nativer Dateiauswahl an der Cursor-Position, Formatprüfung, sinnvolle Standardgröße beim Einfügen, Rundreise (DOCX+ODT) inkl. Größe, Toolbar-Bedienbarkeit/Icon. |
-| `bild-alt-text` | `specs/bild-alt-text-req.md` (noch nicht geschrieben) | Eigener Slug für **nachträglich editierbaren** Alt-Text. Dieser Plan liefert nur den bereits heute vorhandenen automatischen Startwert (`file.name`) ab, rührt ihn nicht an. |
-| `bild-groesse-aendern` | `specs/bild-groesse-aendern-req.md` | Eigene, bereits existierende, sehr ausführliche Anforderung für **nachträgliche** Größenänderung (Eingabefeld/Ziehpunkte, `setImageSize`-Command, NodeView). Jene Datei bestätigt in ihrem Abschnitt 6 exakt denselben Ist-Stand wie hier (`insertImage` setzt nie `width`/`height`) und stellt fest: „Das Datenmodell für die Größe existiert bereits vollständig — es fehlt ausschließlich die Bedienung." **Dieser Plan liefert die dafür nötige Grundlage** (siehe 4.4: `insertImage` setzt ab jetzt echte `width`/`height`; siehe 4.8/4.10: Reader lesen die Fremd-Datei-Größe korrekt ein) — baut selbst aber **keine** Ziehpunkte/kein Eingabefeld/keinen `setImageSize`-Command. `bild-groesse-aendern-code.md` (noch nicht geschrieben) kann auf den hier eingeführten `src/formats/shared/units.ts` sowie auf die Tatsache aufsetzen, dass `width`/`height` ab hier für jedes neu eingefügte und jedes aus einer Fremddatei importierte Bild bereits nicht-`null` sind. |
-| `bild-zuschneiden` | — (Backlog: fehlt, Priorität 3) | Kein Bezug, kein Code hier berührt. |
-| `bild-online` | — (Backlog: fehlt, Priorität 4) | Kein Bezug. |
-| `textumbruch-bild`/`bild-position` | — (Backlog: fehlt) | Kein Bezug — `image` bleibt `group: 'block'`, keine freie Verankerung. |
-| `bild-loeschen` | `specs/bild-loeschen-req.md` | Eigene, bereits existierende Anforderung für Markieren+Löschen. Deren Abschnitt 0 identifiziert **dieselbe** CSS-Lücke (kein `.ProseMirror-selectednode`-Stil), die auch Abschnitt 4 von `bild-einfuegen-req.md` fordert („Markiertes Bild muss sich visuell erkennbar unterscheiden"). **Dieser Plan behebt die CSS-Regel bereits** (4.6 unten), weil sie eine Ein-Zeilen-Änderung an gemeinsam genutzter Infrastruktur ist und explizit Abschnitt 4 dieser Anforderung zugeordnet ist — `bild-loeschen-code.md` (noch nicht geschrieben) sollte das als bereits erledigt voraussetzen, nicht erneut umsetzen. Alles andere aus `bild-loeschen-req.md` (Lösch-Command-Robustheit, Undo-Verhalten beim Löschen selbst) bleibt dort. |
+| `bild-einfuegen` | `specs/bild-einfuegen-req.md` | **Dieser Plan.** Einfügen per nativer Dateiauswahl an der Cursor-Position, Formatprüfung, sinnvolle Standardgröße, Rundreise (DOCX+ODT) inkl. Größe **und eindeutiger DrawingML-IDs**, Toolbar-Bedienbarkeit/Icon, Selektions-Rückmeldung. |
+| `bild-alt-text` | `specs/bild-alt-text-req.md` (noch nicht geschrieben) | **Nachträglich editierbarer** Alt-Text. Dieser Plan liefert nur den automatischen Startwert (`file.name`) und dokumentiert die `@descr`/`@name`-Grenze (F16). |
+| `bild-groesse-aendern` | `specs/bild-groesse-aendern-req.md` | **Nachträgliche** Größenänderung (Ziehpunkte/Eingabefeld, `setImageSize`, NodeView). Bestätigt in ihrem Abschnitt 6 denselben Ist-Stand (`insertImage` setzt nie `width`/`height`). **Dieser Plan liefert die Grundlage** (4.4: `insertImage` setzt echte Maße; 4.9/4.11: Reader lesen die Fremddatei-Größe) — baut aber **keine** Resize-UI. Kann auf das hier eingeführte `src/formats/shared/units.ts` aufsetzen. |
+| `bild-loeschen` | `specs/bild-loeschen-req.md` | Markieren+Löschen. Identifiziert **dieselbe** CSS-Lücke (kein `.ProseMirror-selectednode`-Stil). **Dieser Plan behebt die CSS-Regel** (4.6) als Ein-Zeilen-Änderung an gemeinsamer Infrastruktur, weil Anforderung 4 sie explizit fordert — `bild-loeschen-code.md` sollte das voraussetzen. |
+| `bild-zuschneiden` / `bild-online` / `textumbruch-bild` / `bild-position` | — (Backlog: fehlt) | Kein Bezug; `image` bleibt `group: 'block'`, keine freie Verankerung. |
 
-**Konsequenz für dieses Dokument:** Es deckt vollständig ab, was
-`bild-einfuegen-req.md` Abschnitt 1–5 fordert (Einfügen, Formatprüfung, Größe beim
-Einfügen, Alt-Text-Startwert, Undo/Redo, Zusammenspiel mit Löschen als
-Randbedingung, Geltungsbereich in der Dokumentstruktur) sowie die komplette
-Rundreise-Anforderung aus Abschnitt 5. Es liefert **keine** Resize-UI, **keinen**
-editierbaren Alt-Text, **kein** Zuschneiden, **keine** Online-Bildsuche, **keine**
-freie Verankerung/Textumbruch.
+**Konsequenz:** Dieses Dokument deckt vollständig ab, was `bild-einfuegen-req.md`
+Abschnitt 1–5 fordert, plus die komplette Rundreise aus Abschnitt 5. Es liefert
+**keine** Resize-UI, **keinen** editierbaren Alt-Text, **kein** Zuschneiden, **keine**
+Online-Bildsuche, **keine** freie Verankerung/Textumbruch, **kein** Drag&Drop/
+Zwischenablage-Rohbild (letzteres von der Anforderung selbst ausgeklammert).
 
 ---
 
-## 1. Bestätigter Ist-Stand (eigene Codesichtung + Testläufe)
+## 1. Bestätigter Ist-Stand (eigene Codesichtung)
 
 Alle Befunde aus `bild-einfuegen-req.md` Abschnitt 0 wurden gegen den tatsächlichen
-Code erneut geprüft; zusätzlich wurden mehrere in der Anforderung als offene
-„Verdachte" markierte Punkte (Abschnitt 3.1, 3.2, 2.8) durch tatsächliche
-Testläufe gegen `wordSchema`/`insertImage` geklärt (siehe Kasten oben).
+Code erneut geprüft und bestätigt. Zusätzlich unten: mehrere in der Vorfassung dieses
+Plans falsch beschriebene bzw. gar nicht erwähnte Punkte.
 
-### 1.1 Schema, Command, Toolbar — bestätigt wie in der Anforderung beschrieben
+### 1.1 Schema, Command, Toolbar — bestätigt
 
-- `src/formats/shared/schema.ts:45-72`: `image`-Node mit `src`/`alt`/`width`/
-  `height`, `group: 'block'`, `draggable: true`. **Zusatzbefund, in der
-  Anforderung nicht genannt:** `width`/`height` sind die **einzigen** Attribute
-  im gesamten Schema **ohne** `validate`-Eintrag (jedes andere Attribut in
-  `schema.ts`, z. B. `align`, `level`, `start`, `colspan`, hat `validate:
-  'string'|'number'`). Zusätzlich liest `parseDOM`s `getAttrs` (Zeile 62-63)
-  `el.getAttribute('width')`/`('height')` — das liefert laut DOM-Spezifikation
-  einen **String oder `null`**, keine Zahl, obwohl `attrs.width`/`height` an
-  anderer Stelle (DOCX-/ODT-Writer) arithmetisch verwendet werden
-  (`Number(node.attrs?.width ?? 300)`, `docx/writer.ts:76`). Funktioniert heute
-  nur, weil dort defensiv `Number(...)` aufgerufen wird — ein Inkonsistenz-Fund,
-  siehe Fix F0 unten.
-- `src/formats/shared/editor/commands.ts:66-74`: `insertImage(src, alt='')`
-  erzeugt den Node **ausschließlich** mit `src`/`alt`; `width`/`height` bleiben
-  Schema-Default `null`. Bestätigt.
-- `src/formats/shared/editor/Toolbar.tsx:241-244`: `<label>` statt `<button>`,
-  kein `title`/`aria-label`. Bestätigt.
-- `src/formats/shared/editor/Toolbar.tsx:97-108` (`handleImagePick`): keine
-  `file.type`-Prüfung, keine Signaturprüfung, keine Größenprüfung, kein
-  try/catch um die `FileReader`-Promise, `alt` wird stumpf auf `file.name`
-  gesetzt. Bestätigt.
+- `schema.ts:58-85` (`image`): `src`/`alt`/`width`/`height`, `group: 'block'`,
+  `draggable: true`. **`width`/`height` (Z. 63-64) sind die einzigen Attribute im
+  ganzen Schema ohne `validate`.** `parseDOM.getAttrs` (Z. 70-77) liest
+  `el.getAttribute('width'|'height')` → laut DOM **String oder `null`**, keine Zahl;
+  `toDOM` (Z. 81-84) gibt `['img', { src, alt, width, height }]`. Bei `width/height === null`
+  lässt ProseMirrors `DOMSerializer` das Attribut weg (kein `width="null"`) — heute
+  unschädlich, weil `insertImage` nie Maße setzt; nach Fix F1 werden echte Zahlen emittiert.
+- `commands.ts:66-74` (`insertImage(src, alt='')`): erzeugt den Node **nur** mit
+  `src`/`alt`; `width`/`height` bleiben Default `null`. `state.tr.replaceSelectionWith(node)`.
+- `Toolbar.tsx:291-294`: **`<label>`** (kein `<button>`), Text „🖼 Bild", umschließt ein
+  verstecktes `<input type="file" accept="image/*" className="hidden" onChange={handleImagePick}>`.
+  **Kein `title`/`aria-label`** — anders als jedes andere Toolbar-Element (Ausschneiden
+  `Toolbar.tsx:145-156` via `ScissorsIcon`, F/K/U/S via `MarkButton` `55-89`,
+  Ausrichtung via `AlignButton` `91-111`, Tabelle `277-289`).
+- `Toolbar.tsx:124-135` (`handleImagePick`): `event.target.value = ''` steht **bereits**
+  (Z. 126) → dieselbe Datei zweimal feuert `onChange` erneut. `FileReader.readAsDataURL`
+  in ein `Promise` mit `reader.onerror = () => reject(reader.error)` gewickelt, aber
+  **ohne `try/catch` `await`et** (Z. 128-133) → unbehandelte Promise-Ablehnung bei
+  `onerror`. **Keine `file.type`-/Signatur-/Größenprüfung.** `run(view, insertImage(dataUrl, file.name))`
+  (Z. 134) — `alt` = Dateiname inkl. Endung.
 
-### 1.2 DOCX-Export/-Import — bestätigt, mit einer Ergänzung
+### 1.2 DOCX-Export/-Import — bestätigt, mit Ergänzungen
 
-- `src/formats/docx/writer.ts:72-92` (`imageParagraphXml`): Fallback `300`/`200`
-  px, EMU-Umrechnung `x/96*914400` **inline im Writer dupliziert** (keine
-  gemeinsame Funktion mit einem künftigen Reader-seitigen Gegenstück) — genau
-  das Risiko, das eine symmetrische Rundreise gefährdet, falls Reader und Writer
-  unabhängig voneinander leicht unterschiedliche Rundungsformeln verwenden.
-  Bestätigt.
-- `src/formats/docx/reader.ts:134-138` (`decodeParagraphRuns`, Fall
-  `'drawing'`): liest `r:embed` und `wp:docPr/@name`, **nicht** `wp:extent`.
-  Bestätigt — `child.getElementsByTagNameNS(OOXML_NAMESPACES.wp, 'extent')`
-  wird an keiner Stelle im Reader aufgerufen (per Grep verifiziert: `grep -rn
-  "'extent'" src/formats/docx` liefert **keinen** Treffer).
-- **Zusatzbefund:** Die fehlende `wp:extent`-Auswertung betrifft **automatisch
-  auch** Bilder in Tabellenzellen (`parseTable`, `docx/reader.ts:236-238`, ruft
-  `paragraphToBlocks` pro `<w:tc>`-Absatz auf) und in Kopf-/Fußzeilen
-  (`readBodyChildren` wird für Body **und** Header/Footer verwendet,
-  `docx/reader.ts:346,363,372`) — der Fix in 4.9 behebt also alle drei
-  Kontexte mit **einer** Änderung, keine separate Cell-/Header-Logik nötig.
+- `docx/writer.ts:74-94` (`imageParagraphXml`): Fallback `Number(attrs.width ?? 300)` /
+  `Number(attrs.height ?? 200)` (Z. 78-79). EMU-Umrechnung **inline** (`(px/96)*914400`,
+  Z. 81-82) — nicht in einem gemeinsamen Modul mit dem (noch fehlenden) Reader-Gegenstück.
+  **`wp:docPr id="1"` (Z. 87) und `pic:cNvPr id="0"` (Z. 89) sind fest verdrahtet** ⇒ bei
+  mehreren Bildern kollidieren alle IDs. `alt` wird nach `wp:docPr/@name` **und**
+  `pic:cNvPr/@name` geschrieben, **nicht** nach `@descr`.
+- `docx/reader.ts:143-168` (**`decodeDrawingOrPict`**, aufgerufen aus `decodeRunElement`
+  `170-184` für `<w:drawing>` **und** `<w:pict>`): liest `a:blip/@r:embed` bzw. VML
+  `v:imagedata/@r:id` → Quelle, und `wp:docPr/@name` → `alt` (Z. 154-155). **`wp:extent`
+  wird nie gelesen** — der Bild-Run trägt nur `imageRelId`/`imageAlt`; `paragraphToBlocks`
+  (Z. 266-269) baut daraus `{ src, alt }`, `width`/`height` bleiben `null`. Für
+  Nicht-Bild-Zeichnungen liefert die Funktion `unsupported`-Runs (Textbox-Rettung/OLE-Platzhalter).
+- `docx/reader.ts:442-462` (`resolveImageSources`): wandelt die Relationship in eine
+  Data-URL, MIME **aus der Endung** (`ext === 'jpg' ? 'jpeg' : ext`, Z. 451-453).
+- **Ein-Fix-deckt-drei-Kontexte:** `paragraphToBlocks` wird von `readBodyChildren`
+  (Body **und** Header/Footer, `docx/reader.ts:475`, sowie Header/Footer-Aufrufe
+  `520`/`529`) **und** von `parseTable` (Zellen, `337-339`) aufgerufen. Der `wp:extent`-Fix
+  in `decodeDrawingOrPict` (4.9) deckt damit alle drei Kontexte (Absatz, Zelle, Kopf-/Fußzeile)
+  ohne Sonderlogik ab.
 
-### 1.3 ODT-Export/-Import — bestätigt, plus ein bislang nicht dokumentierter Zusatzbefund
+### 1.3 ODT-Export/-Import — bestätigt, plus Zusatzbefunde
 
-- `src/formats/odt/writer.ts:112-119` (`blockToOdt`, Fall `'image'`): Fallback
-  `6cm`/`4cm`; falls `width`/`height` gesetzt sind, wird **wörtlich**
-  `` `${node.attrs.width}px` `` als Wert von `svg:width` geschrieben. Bestätigt.
-- **Neufund (nicht in der Anforderung benannt):** `svg:width`/`svg:height` auf
-  `draw:frame` sind laut ODF-1.3-Spezifikation vom Datentyp „length" — einer
-  positiven Zahl **mit** Einheit aus der festen Menge `{cm, mm, in, pt, pc}`.
-  `"px"` gehört **nicht** zu dieser Menge. LibreOffice liest ein
-  `"300px"`-`svg:width` in der Praxis vermutlich tolerant ein (nicht in dieser
-  Sichtung an echtem LibreOffice verifiziert), aber ein **unabhängiger
-  ODF-Schema-Validator** (siehe Anforderung 5.1.12, Abnahmekriterium 4) würde
-  diesen Wert mit hoher Wahrscheinlichkeit als ungültig zurückweisen. Das ist
-  ein durch eigene Lektüre der ODF-Spezifikation identifizierter, in der
-  Anforderungsdatei nicht genannter zusätzlicher Befund — siehe Fix F8.
-- **Zweiter Neufund:** DOCX und ODT verwenden heute **unterschiedliche**
-  Ersatzgrößen, die sich **nicht** ineinander umrechnen: DOCX fällt auf 300×200
-  px zurück (Seitenverhältnis 3:2 = 1,5), ODT auf 6×4 cm (ebenfalls 3:2 = 1,5,
-  aber **6 cm ≙ 226,77 px bei 96 dpi, nicht 300 px**). Dasselbe Bild ohne
-  gespeicherte Größe würde also – unabhängig vom eigentlichen Bug, dass
-  `insertImage` nie eine Größe setzt – bei Export nach DOCX **und** nach ODT in
-  zwei **physisch unterschiedlichen** Größen erscheinen. Wird durch Fix F1/F7/F8
-  (gemeinsame `DEFAULT_IMAGE_WIDTH_PX`/`_HEIGHT_PX`-Konstante, siehe 4.3) als
-  Nebeneffekt behoben.
-- `src/formats/odt/reader.ts:144-153` (`paragraphToBlocks`, `draw:frame`-Fall):
-  liest `xlink:href` und `draw:name`, **nicht** `svg:width`/`svg:height` am
-  `draw:frame`-Element selbst. Bestätigt. Gilt — analog zu 1.2 — automatisch
-  auch für Tabellenzellen (`elementToBlocks`, `odt/reader.ts:189-203`, ruft
-  rekursiv für Zelleninhalt wieder `elementToBlocks`→`paragraphToBlocks` auf)
-  und Kopf-/Fußzeile (`readOdt`, `odt/reader.ts:262,266`).
+- `odt/writer.ts:176-183` (`blockToOdt`, Fall `'image'`): Fallback `'6cm'`/`'4cm'`
+  (Z. 179-180); bei gesetzten Maßen wird **wörtlich** `` `${attrs.width}px` `` geschrieben.
+  `draw:frame … text:anchor-type="as-char"`.
+- **Neufund A (`px`-Einheit ungültig):** `svg:width`/`svg:height` sind laut ODF 1.3 vom
+  Datentyp „length" — Zahl **mit** Einheit aus `{cm, mm, in, pt, pc}` (bzw. font-relativ
+  `em`); **`px` gehört nicht dazu**. Ein unabhängiger ODF-Schema-Validator (Anforderung
+  5.1.12 / Abnahmekriterium 4) weist `"…px"` mit hoher Wahrscheinlichkeit zurück. Behoben
+  in F8 (4.10).
+- **Neufund B (zwei nicht ineinander umrechenbare Ersatzgrößen):** DOCX fällt auf 300×200 px
+  zurück, ODT auf 6×4 cm. `6cm ≙ round(6/2.54·96) = 227 px`, **nicht** 300 px — dasselbe
+  größenlose Bild käme in DOCX und ODT physisch **unterschiedlich groß** heraus. Behoben als
+  Nebeneffekt von F7 (gemeinsame Ersatzkonstante, 4.3).
+- `odt/reader.ts:232-248` (**`frameToBlocks`**): liest `draw:image/@xlink:href` → `src` und
+  `draw:frame/@draw:name` → `alt` (Z. 235-237). **`svg:width`/`svg:height` am `draw:frame`
+  werden nie gelesen.** `frameToBlocks` deckt sowohl den in `text:p` eingebetteten Frame
+  (`paragraphToBlocks` `202-209`) als auch den **seitenverankerten** Frame als direktes
+  `office:text`-Kind (`elementToBlocks` `284`) ab — der Fix gehört hierher (4.11), nicht in
+  die `paragraphToBlocks`-Schleife (die den seitenverankerten Fall gar nicht sieht).
+- `odt/reader.ts:326-349` (`resolveImageSources`): MIME **aus der Endung** (Z. 338-340),
+  identisch zum DOCX-Pfad.
 
-### 1.4 Fehlende CSS-Selektions-Rückmeldung — bestätigter Zusatzbefund
+### 1.4 Fehlende CSS-Selektions-Rückmeldung — bestätigt
 
-`src/index.css` enthält **keine** Regel für `.ProseMirror-selectednode`.
-ProseMirror-View setzt diese Klasse automatisch auf das DOM-Element eines
-Knotens, sobald er per `NodeSelection` (z. B. durch Anklicken, da `image` kein
-`selectable: false` hat) markiert ist — **unabhängig** von einer Stylesheet-
-Definition. Ohne eigene Regel ist ein selektiertes Bild optisch **nicht** von
-einem unselektierten zu unterscheiden. Weder `src/index.css` noch irgendeine
-importierte Datei bindet das mitgelieferte `prosemirror-view/style/
-prosemirror.css` ein (per Grep verifiziert: kein Treffer für
-„ProseMirror-selectednode" oder „prosemirror.css" im gesamten `src`). Das ist
-exakt die in Abschnitt 4 (letzter Punkt) von `bild-einfuegen-req.md` geforderte
-und in `bild-loeschen-req.md` Abschnitt 0 unabhängig bestätigte Lücke.
+`src/index.css` enthält **keine** `.ProseMirror-selectednode`-Regel; das mitgelieferte
+`prosemirror-view/style/prosemirror.css` wird nirgends importiert. ProseMirror-View setzt
+diese Klasse automatisch auf das DOM-Element eines per `NodeSelection` markierten Knotens
+(ein Klick auf ein Bild erzeugt eine solche, da `image` nicht `selectable: false` ist) —
+**unabhängig** von einer Stylesheet-Definition. Ohne eigene Regel ist ein selektiertes
+Bild optisch nicht unterscheidbar. Genau die in Anforderung 4 geforderte und in
+`bild-loeschen-req.md` Abschnitt 0 unabhängig bestätigte Lücke.
 
 ### 1.5 `.ProseMirror img { max-width: 100%; height: auto }` existiert bereits
 
-`src/index.css:39-42` enthält bereits genau die in Abschnitt 4 der Anforderung
-geforderte CSS-Begrenzung. **Kein Fix nötig**, nur Testabdeckung fehlt (siehe
-5.2). Wichtige Erkenntnis für 4.4: `height: auto` überschreibt beim Rendern
-zwar das HTML-`height`-Attribut, das ist hier **erwünscht**, nicht schädlich —
-solange `width`/`height` im Node das **korrekte Seitenverhältnis** abbilden
-(was Fix F1 sicherstellt), ergibt `height: auto` bei einer durch `max-width:
-100%` erzwungenen Verkleinerung exakt die proportional korrekte Höhe, statt bei
-festem Pixel-`height` zu verzerren. Die beiden Fixes (F1 unten + bestehendes
-CSS) ergänzen sich; keiner der beiden macht den anderen überflüssig.
+`src/index.css:39-42` enthält die geforderte Begrenzung. **Kein Fix nötig**, nur
+Testabdeckung (5.1). Wichtig für 4.4: `height: auto` überschreibt beim Rendern das
+HTML-`height`-Attribut — das ist **erwünscht**. Solange `width`/`height` im Node das
+korrekte Seitenverhältnis abbilden (Fix F1), ergibt `height: auto` bei einer durch
+`max-width: 100%` erzwungenen Verkleinerung exakt die proportional richtige Höhe statt
+Verzerrung. Bestehendes CSS und F1 ergänzen sich.
 
-### 1.6 Empirisch verifiziert: Grundfall (Absatz-Teilung, Anforderung 2.1.3/3.2) funktioniert bereits korrekt auf Command-Ebene
+### 1.6 Grundfall (Absatz-Teilung, Anforderung 2.1.3/3.2): auf Command-Ebene sehr wahrscheinlich kein Bug — durch Tests zu **beweisen**, nicht zu behaupten
 
-Per temporärem Vitest-Testlauf gegen `wordSchema`/`insertImage` (`EditorState`
-mit `TextSelection` an definierter Position, `insertImage(...)( state, tr =>
-... )` aufgerufen, resultierendes `tr.doc.toJSON()` inspiziert) wurde
-**bestätigt**, dass `insertImage` in Kombination mit
-`state.tr.replaceSelectionWith(node)` für **alle** in Anforderung 3.2
-gelisteten Cursor-Positionen strukturell korrekt arbeitet:
+`insertImage` ruft `replaceSelectionWith(node)` mit einem Block-Node, während die Marke
+meist **innerhalb** eines `paragraph` steht; ProseMirrors Slice-Fitting teilt den Absatz.
+Der Verdacht „`replaceSelectionWith` verliert Text" ist auf Command-Ebene **sehr
+wahrscheinlich unbegründet** (ProseMirrors Fitting erhält beide Hälften). Das ist eine
+**Priorisierung** des wahrscheinlichsten Fehlerorts, **kein** Ersatz für den Test.
 
-| Fall (Anforderung 3.2) | Ergebnis (empirisch, `wordSchema`) |
-|---|---|
-| (a) ganz am Anfang eines nicht-leeren Absatzes | Bild wird **vor** den (unverändert vollständigen) Absatz eingefügt, kein leerer Stub-Absatz übrig. |
-| (b) ganz am Ende | Bild wird **nach** dem (unverändert vollständigen) Absatz eingefügt. |
-| (c) inmitten eines Wortes | Absatz wird an der Cursor-Position geteilt, **beide** Textteile bleiben vollständig und in eigenen Absätzen erhalten (`"Hallo"` / `"Welt"` aus `"HalloWelt"`) — **das ist exakt der von der Nutzerin gemeldete Kernfall, und er tritt auf Command-Ebene nicht als Fehler auf.** |
-| (d) inmitten bereits fett/kursiv formatierten Textteils | Beide Textteile behalten ihre Marks (`strong` blieb auf beiden Hälften erhalten); das Bild selbst erhält **keine** der umgebenden Marks (kein `<strong><img></strong>`-Wrapping, empirisch verifiziert — trotz `replaceSelectionWith`s `node.mark(...)`-Aufruf mit `inheritMarks: true`, der Standardeinstellung). |
-| (e) in einem komplett leeren Absatz | Der leere Absatz wird durch das Bild **ersetzt** (nicht: Bild + daneben übrig bleibender leerer Absatz) — sauber, kein verwaister leerer Block. |
-| (f) unmittelbar vor einem `hard_break` | Absatz wird geteilt, der `hard_break` bleibt korrekt im **zweiten** Teilabsatz erhalten, nicht verloren. |
-| Überschrift, Cursor mittig im Text | **Analog zu (c):** Überschrift wird in **zwei** Überschriften-Knoten gleichen Levels geteilt, Bild dazwischen. Kein Crash. *(Widerlegt eine eigene Vor-Analyse dieses Plans, die aus `heading: { defining: true }`, `schema.ts:23`, geschlossen hatte, dass die „Escape"-Logik in `prosemirror-transform`s `replaceRange` hier blockiert würde und ein anderes Verhalten – ggf. No-Op oder Fehler – zu erwarten sei. Der `defining`-Flag beeinflusst nur die *bevorzugte* Zieltiefe für die Slice-Passung, nicht, ob überhaupt eine gültige Zieltiefe gefunden wird; die allgemeine `targetDepths`-Suche in `replaceRange` findet unabhängig davon die Überschrift selbst als gültige, vollständig abgedeckte Zieltiefe. Bewusst als Lehrbeispiel hier dokumentiert: **Codelektüre allein hätte hier zum falschen Schluss geführt — ausschlaggebend war der tatsächliche Testlauf.*)* |
-| Überschrift, Cursor am Anfang/Ende | Bild wird **vor**/**nach** die komplette (unveränderte) Überschrift gesetzt — **kein** Teilen, anders als bei Cursor mittig im Text. |
-| `list_item` (einzige Absatz-Kind), Cursor am Anfang des Absatzinhalts | **Nicht** wie beim Top-Level-Absatz (dort: Bild vor den ganzen Block) — stattdessen wird der Absatz-Inhalt **innerhalb desselben `list_item`** an dieser Stelle geteilt (ein 1-Zeichen-Stub-Absatz plus Bild plus Rest-Absatz), weil `list_item`s Content-Ausdruck `'paragraph block*'` (`schema.ts:99`) verlangt, dass das **erste** Kind ein `paragraph` bleibt — ProseMirrors Fitting-Algorithmus verletzt das korrekt nie, auch nicht am Anfang. Kein Schema-Crash, keine aus der Liste „ausgestoßene" Bildposition, **kein** Vertauschen zwischen benachbarten Listenpunkten (separat mit zwei `list_item`s getestet). |
-| `list_item`, Cursor mittig/am Ende | Analog (c)/(b), Bild bleibt **innerhalb** desselben `list_item`. |
-| `table_cell` (einzige Absatz-Kind), Cursor mittig | Analog (c) — Zelle bleibt danach `[paragraph, image, paragraph]`, weiterhin gültig laut `cellContent: 'block+'` (`schema.ts:106`). |
+> **Korrektur gegenüber der Vorfassung:** Die Vorfassung präsentierte hierzu eine
+> Tabelle „empirisch verifiziert" — u. a. mit einer `list_item`-Analyse, die auf dem
+> **falschen** Content-Modell `'paragraph block*'` beruhte. Das tatsächliche Modell ist
+> `list_item: { content: 'block+' }` (`schema.ts:146-152`): ein Bild darf **erstes/einziges**
+> Kind eines `list_item` sein; es gibt **keinen** erzwungenen führenden „Stub"-Absatz. Die
+> konkrete Struktur nach dem Einfügen an jeder Cursor-Position ist daher **durch die neuen
+> `commands.test.ts`-Fälle (F11) festzunageln**, nicht durch eine vorab behauptete Tabelle.
 
-**Konsequenz für diesen Plan:** Es gibt **keinen** Command-seitigen Bug für den
-von der Nutzerin gemeldeten Kernfall (Textverlust bei Einfügen inmitten eines
-Absatzes). Das schließt **nicht** aus, dass das gemeldete Problem real ist —
-es verlagert den wahrscheinlichsten Fehlerort aber weg von
-„`replaceSelectionWith`/ProseMirror-Fitting" hin zu einem der folgenden, in
-Abschnitt 2 als Fixes behandelten Kandidaten:
+Zu testende Cursor-Positionen (Anforderung 3.2), jeweils Erwartung „beide Textteile inkl.
+Marks bleiben erhalten": (a) Absatzanfang, (b) Absatzende, (c) mitten im Wort,
+(d) in fett/kursiv formatiertem Text, (e) leerer Absatz, (f) vor/nach `hard_break`; plus
+Kontext-Fälle: Überschrift (Anforderung 2.8 lässt Teilen vs. Herausschieben offen — siehe
+9.3), `list_item` (Bild bleibt **innerhalb** desselben `list_item`, keine Vertauschung
+zwischen Listenpunkten), `table_cell` (Zelle bleibt gültig, `cellContent: 'block+'`).
 
-1. Das `<label>`-statt-`<button>`-Element hat kein `onMouseDown`+
-   `preventDefault()` wie jedes andere Toolbar-Element (`MarkButton`,
-   `AlignButton`, Tabellen-Button — vgl. `Toolbar.tsx:49-51,71-73,195-197` etc.)
-   — es ist unklar, ob/wie das den Fokus zwischen Klick und Dateiauswahl anders
-   behandelt als die übrigen, nachweislich funktionierenden Buttons. Fix F2
-   (Umstellung auf `<button>` + `.click()` auf verstecktes Input, siehe 3.2)
-   vereinheitlicht das Verhalten mit dem Rest der Toolbar und mit dem bereits
-   im Projekt bewährten Muster aus `FormatPicker.tsx:61-89`.
-2. Ohne gesetzte `width`/`height` rendert der Browser das `<img>` in
-   **Originalgröße** (z. B. mehrere tausend Pixel breit bei einem
-   Smartphone-Foto) — das kann den Eindruck von „Text verschwunden" erzeugen,
-   wenn der zweite Textteil weit nach unten aus dem sichtbaren Bereich
-   verdrängt wird, obwohl er tatsächlich vorhanden ist. Fix F1 (Standardgröße
-   beim Einfügen) behebt das strukturell.
-3. Eine beschädigte/falsch getypte Datei erzeugt heute ein kaputtes
-   `<img>`-Platzhaltersymbol **ohne** Fehlermeldung (bestätigt, Abschnitt 3.3
-   der Anforderung) — das könnte in der Nutzer-Wahrnehmung ebenfalls wie „das
-   Bild wurde nicht eingefügt, evtl. zusammen mit Text" wirken. Fix F3/F4.
+**Die drei plausibleren realen Ursachen** des gemeldeten „Text weg"-Eindrucks (alle in
+Abschnitt 2 als Fixes behandelt, unabhängig voneinander begründet):
 
-Diese drei Kandidaten sind **nicht gegeneinander exklusiv geprüft** (das
-erfordert den in Abschnitt 5.2 geplanten E2E-Test mit echtem
-`filechooser`-Flow) — sie werden hier als die durch Codeanalyse
-plausibelsten, konkret behebbaren Ursachen behandelt, nicht als
-abschließend bewiesen. Der Plan behebt alle drei ohnehin (unabhängig
-voneinander begründet), das ist keine unnötige Arbeit auf Verdacht.
+1. **`<label>` statt `<button>`** ohne das im Rest der Toolbar durchgängige
+   `onMouseDown`+`preventDefault()`-Muster — unklarer Fokus-/Selektionszustand zwischen
+   Klick und Dateiauswahl. Fix F2.
+2. **Ohne gesetzte `width`/`height`** rendert der Browser das `<img>` in Originalgröße
+   (Smartphone-Foto: mehrere tausend px) → der Folgetext wird weit nach unten verdrängt und
+   **wirkt** verschwunden. Fix F1.
+3. **Beschädigte/falsch getypte Datei** wird als kaputtes `<img>` **ohne** Fehlermeldung
+   eingefügt (bestätigt). Fix F3/F4.
 
-### 1.7 Empirisch verifiziert: Selektions-Timing (Anforderung 3.1)
+### 1.7 Selektions-Timing (Anforderung 3.1)
 
-`run(view, command)` (`Toolbar.tsx:23-26`) liest `view.state`/`view.dispatch`
-**zum Zeitpunkt des Aufrufs**, nicht zu einem früher zwischengespeicherten
-Zeitpunkt — `view` ist die aktuelle `EditorView`-Instanz (Prop, nicht als Kopie
-festgehalten), `handleImagePick` ruft `run(view, insertImage(...))` erst
-**nach** `await` der Dateilese-Promise auf. Das bedeutet: Der eingefügte
-Node landet immer an der Selektion, die **zum Zeitpunkt des tatsächlichen
-Einfügens** aktuell ist — nicht an einer beim Klick zwischengespeicherten,
-potenziell veralteten Position. Das ist **strukturell bereits das in
-Abschnitt 3.1 der Anforderung geforderte Verhalten** (Einfügen an der
-Position, die zum Zeitpunkt des `run(...)`-Aufrufs gilt), kein Bug. Das in
-`WordEditor.tsx:42-53` dokumentierte, separate Selection-Sync-Problem
-(`reconcileSelectionOnClick`, per `mouseup`-Listener **auf `view.dom`**
-behoben) greift hier nicht unmittelbar, weil ein Klick auf das
-Toolbar-Bedienelement kein `mouseup`-Ereignis **innerhalb** von `view.dom`
-auslöst — es bleibt aber ein aus dem Code nicht widerlegbares Restrisiko,
-**falls** vor dem Öffnen des Dateidialogs bereits eine veraltete/inkorrekte
-Selektion vorlag (z. B. genau die in `WordEditor.tsx` dokumentierte
-AllSelection-Situation) — das würde unverändert in die Bild-Einfügung
-übernommen. Dafür gibt es keinen neuen Fix in diesem Plan (die
-`reconcileSelectionOnClick`-Infrastruktur deckt normale Klicks bereits ab); es
-wird stattdessen mit einem Regressionstest analog
-`selection-regression.spec.ts` abgesichert (5.2).
+`run(view, command)` (`Toolbar.tsx:28-31`) liest `view.state`/`view.dispatch` **zum
+Aufrufzeitpunkt**; `handleImagePick` ruft `run(...)` erst **nach** `await` auf ⇒ der Node
+landet an der zum Einfügezeitpunkt aktuellen Selektion, nicht an einer beim Klick
+zwischengespeicherten. **Strukturell bereits das geforderte Verhalten**, kein Bug. Das in
+`WordEditor.tsx:43-50` behandelte `reconcileSelectionOnClick` (per `mouseup` **auf
+`view.dom`**) greift hier nicht unmittelbar, weil der Toolbar-Klick kein `mouseup`
+**innerhalb** `view.dom` auslöst. **Restrisiko:** Lag vor dem Öffnen bereits eine
+veraltete/inkorrekte Selektion vor (z. B. die dokumentierte AllSelection-Situation), wird
+sie übernommen. Kein neuer Produktionscode-Fix; abgesichert per Regressionstest (5.2).
 
 ---
 
 ## 2. Priorisierte Fehler-/Lückenliste
 
-„Muss" = blockierend für die Definition of Done aus `bild-einfuegen-req.md`
-Abschnitt 7. „Soll" = empfohlen, nicht blockierend. „Dokumentiert" = bewusst
-nicht behoben, siehe Abschnitt 6/7.
+„Muss" = blockierend für die Definition of Done (Anforderung 7). „Soll" = empfohlen,
+nicht blockierend. „Dokumentiert" = bewusst nicht behoben (Abschnitt 6/7).
 
 | # | Befund | Einstufung | Fix in Abschnitt |
 |---|---|---|---|
-| F1 | `insertImage` setzt nie `width`/`height` → Editor-Darstellung/Export-Größe divergieren (Grenzfall 3.4) | **Muss** | 3.3/3.4/4.4/4.5 |
+| F1 | `insertImage` setzt nie `width`/`height` → Editor-Darstellung/Export-Größe divergieren (3.4) | **Muss** | 3.4/4.4/4.5 |
 | F2 | Toolbar-Element ist `<label>`, kein `<button>`; kein `title`/`aria-label`; Emoji-Icon | **Muss** | 3.2/4.5 |
-| F3 | Keine Formatprüfung (MIME/Magic-Number), keine Fehlermeldung, kein try/catch (Grenzfall 3.3) | **Muss** | 3.1/4.2/4.5 |
-| F4 | Keine Größenobergrenze/Messung für sehr große Dateien (Grenzfall 3.7) | **Soll** | 4.2/9 |
-| F5 | DOCX-Reader liest `wp:extent` nicht → Größe geht bei Fremddatei-Import verloren (Grenzfall 3.5, höchste Priorität laut Anforderung) | **Muss** | 4.9 |
-| F6 | ODT-Reader liest `svg:width`/`svg:height` nicht (Grenzfall 3.5) | **Muss** | 4.11 |
-| F7 | DOCX-/ODT-Writer verwenden unterschiedliche, undokumentierte Ersatzgrößen bei fehlender Größe (Neufund 1.3) | **Soll** | 4.3/4.8/4.10 |
-| F8 | ODT-Writer schreibt `svg:width/height` mit Einheit `px`, die laut ODF-Schema für dieses Attribut ungültig ist (Neufund 1.3) | **Muss** (für Abnahmekriterium 5.1.12) | 4.10 |
-| F9 | Keine `.ProseMirror-selectednode`-Stilregel (Abschnitt 4 der Anforderung, Neufund 1.4) | **Muss** | 4.6 |
-| F10 | `width`/`height` im Schema ohne `validate`; `parseDOM` liefert Strings statt Zahlen (Neufund 1.1) | **Soll** | 4.1 |
-| F11 | Kein Unit-Test für `insertImage` selbst (nur Reader/Writer-Roundtrip mit konstruierten Node-Daten) | **Muss** | 5.1 |
-| F12 | Keine E2E-Tests für Bild-Einfügen (Abschnitt 0 der Anforderung, Testmatrix Abschnitt 21 von `FEATURE-SPEC-DOCX-ODT.md`) | **Muss** | 5.2 |
-| F13 | Keine Struktur-Assertions für `width`/`height` in bestehenden Roundtrip-Unit-Tests (Abschnitt 0 der Anforderung) | **Muss** | 5.1 |
-| F14 | Keine realen Fixture-Dateien mit bekannter Bildgröße im Test-Fixture-Verzeichnis eingebunden (Abnahmekriterium 8) | **Muss** | 5.1/9 |
+| F3 | Keine Formatprüfung (Byte-Signatur), keine Fehlermeldung, kein `try/catch` (3.3) | **Muss** | 3.1/4.2/4.5 |
+| F4 | Keine Größenobergrenze/Messung für sehr große Dateien (3.7) | **Soll** | 4.2/4.5 |
+| F5 | DOCX-Reader liest `wp:extent` nicht → Fremddatei-Größe geht verloren (3.5, höchste Priorität) | **Muss** | 4.9 |
+| F6 | ODT-Reader liest `svg:width`/`svg:height` nicht (3.5) | **Muss** | 4.11 |
+| F7 | DOCX/ODT-Writer verwenden zwei unterschiedliche, nicht umrechenbare Ersatzgrößen (Neufund B) | **Soll** | 4.3/4.8/4.10 |
+| F8 | ODT-Writer schreibt `svg:width/height` mit `px` — laut ODF-Schema ungültig (Neufund A) | **Muss** (Abnahmekriterium 5.1.12) | 4.10 |
+| F9 | Keine `.ProseMirror-selectednode`-Stilregel (Anforderung 4, Neufund 1.4) | **Muss** | 4.6 |
+| F10 | `width`/`height` im Schema ohne `validate`; `parseDOM` liefert Strings statt Zahlen | **Soll** | 4.1 |
+| F11 | Kein Unit-Test für `insertImage` selbst | **Muss** | 5.1 |
+| F12 | Keine E2E-Tests für Bild-Einfügen | **Muss** | 5.2 |
+| F13 | Keine `width`/`height`-Assertions in bestehenden Roundtrip-Unit-Tests | **Muss** | 5.1 |
+| F14 | Keine realen Fixture-Dateien mit bekannter Bildgröße im Rundreise-Test eingebunden | **Muss** | 5.1/5.3 |
+| **F15** | **DOCX-Writer verdrahtet `wp:docPr id="1"`/`pic:cNvPr id="0"` fest ⇒ ID-Kollision bei mehreren Bildern (Anforderung 3.6, Abnahmekriterium 4)** | **Muss** | 4.8/5.1 |
+| **F16** | **DOCX-Reader liest Alt-Text aus `@name`, nicht `@descr` (echter Word-Alt-Text) — Fremddatei-Alt-Text geht verloren (Anforderung 2.5)** | **Dokumentiert** (kleiner In-Scope-Fix optional) | 4.9/6 |
+| **F17** | **Reader leiten MIME aus der Endung ab; `.emf`/`.wmf`/`.tiff` ⇒ nicht darstellbares `data:image/emf` (stilles leeres Bild) (Anforderung 5.2)** | **Soll** | 4.12/6 |
+| **F18** | **EXIF-Orientierung wird nirgends betrachtet — `computeDisplaySize` speist sich aus `naturalWidth/naturalHeight`, die (in modernen Browsern) bereits die gedrehten Anzeige-Maße sind, während Writer/Reader die rohen, ungedrehten Bild-Bytes unverändert durchreichen (Anforderung 3.13)** | **Dokumentiert** (aktive Korrektur würde Anforderung 3.14 „Bytes bleiben unverändert" verletzen) | 3.5/4.13 |
 
 ---
 
@@ -265,128 +279,125 @@ nicht behoben, siehe Abschnitt 6/7.
 
 ### 3.1 Einheitliche interne Größeneinheit: Pixel bei 96 dpi
 
-DOCX arbeitet nativ in EMU (914400/Zoll), ODT nativ in `cm`/`mm`/`in`/`pt`/`pc`.
-Der Schema-Knoten (`schema.ts:50-51`) und der bereits vorhandene DOCX-Writer
-(`docx/writer.ts:76-80`, Kommentar „96px per inch by convention") legen implizit
-bereits **Pixel bei 96 dpi** als interne Einheit nahe — dieselbe Konvention, die
-auch `pageLayout.ts:4` (`PX_PER_MM = 96 / 25.4`) für die Seitenmaße verwendet.
-Dieser Plan macht das **explizit** und **einheitlich** für beide Formate über
-ein neues, gemeinsames Modul `src/formats/shared/units.ts` (4.2), damit Reader
-und Writer **dieselbe** Umrechnungsformel verwenden (behebt F7 als Nebeneffekt)
-und `bild-groesse-aendern-code.md` später dieselbe Quelle nutzen kann.
+DOCX rechnet nativ in EMU (914400/Zoll), ODT in `cm`/`mm`/`in`/`pt`/`pc`. Schema-Knoten
+und DOCX-Writer (`docx/writer.ts:80`, Kommentar „96px per inch by convention") legen
+implizit **Pixel bei 96 dpi** als interne Einheit nahe — dieselbe Konvention wie
+`pageLayout.ts:5` (`PX_PER_MM = 96/25.4`). Dieser Plan macht das **explizit und
+einheitlich** über ein neues Modul `src/formats/shared/units.ts` (4.3), damit Reader und
+Writer **dieselbe** Formel nutzen (behebt F7) und `bild-groesse-aendern-code.md` dieselbe
+Quelle verwenden kann.
 
 ### 3.2 Toolbar-Element: `<label>` → `<button>` nach bereits im Projekt bewährtem Muster
 
-Statt eines neuen Interaktionsmusters wird exakt das bereits in
-`src/app/FormatPicker.tsx:61-89` produktiv genutzte Muster übernommen: ein
-sichtbarer `<button type="button" onClick={() => fileInputRef.current?.click()}>`
-plus ein verstecktes `<input type="file" className="hidden" ref={fileInputRef}
-onChange={...} />`. Vorteile gegenüber dem aktuellen `<label>`:
-- Natives `<button>`-Element ist per Tab fokussierbar und öffnet den
-  Dateidialog bei Enter/Leertaste automatisch über den nativen `click`
-  (Browser-Standardverhalten für fokussierte Buttons) — **kein** zusätzlicher
-  `onKeyDown`-Handler nötig, im Unterschied zu den in
-  `aufzaehlungsliste-code.md` Abschnitt 4.3 für **Toggle-Commands**
-  benötigten `onKeyDown`-Ergänzungen (dort nötig, weil `onMouseDown` genutzt
-  wird, um Fokus/Selektion **nicht** zu verlieren; hier ist Fokusverlust beim
-  Öffnen des Dateidialogs ohnehin unvermeidlich, ein einfacher `onClick`
-  genügt und ist das für Datei-Buttons gemäß WAI-ARIA übliche Muster).
+Exakt das in `src/app/FormatPicker.tsx:77-104` produktiv genutzte Muster: sichtbarer
+`<button type="button" onClick={() => fileInputRef.current?.click()}>` plus verstecktes
+`<input type="file" className="hidden" ref={fileInputRef} onChange={…}>`. Vorteile:
+
+- Natives `<button>` ist per Tab fokussierbar und öffnet den Dialog bei Enter/Leertaste
+  über den nativen `click` — **kein** zusätzlicher `onKeyDown` nötig (Fokusverlust beim
+  Öffnen des Dateidialogs ist ohnehin unvermeidlich; ein einfacher `onClick` ist für
+  Datei-Buttons das WAI-ARIA-übliche Muster).
 - `title`/`aria-label="Bild einfügen"` wie jedes andere Toolbar-Element.
-- Icon als eingebettetes, generisches SVG (siehe 4.5) statt Unicode-Emoji
-  (löst F2/Anforderung Abschnitt 1, Zeile 3, sowie
-  `FEATURE-SPEC-DOCX-ODT.md` Abschnitt 20.1).
+- Icon als eingebettetes SVG (4.5) statt Emoji „🖼" (löst F2 / Anforderung 1 Zeile 3 /
+  `FEATURE-SPEC-DOCX-ODT.md` §20.1).
 
-### 3.3 Unterstützte Bildformate: explizite Entscheidung
+### 3.3 Unterstützte Bildformate
 
-Anforderung 2.3 verlangt eine **explizit festgelegte und dokumentierte**
-Formatliste. Entscheidung dieses Plans (zur Freigabe, siehe Abschnitt 9):
-**PNG, JPEG, GIF, WebP, BMP** — geprüft per Byte-Signatur
-(„Magic Number"), nicht per (fälschbarem, teils leerem) `file.type`. **SVG
-bewusst ausgeschlossen** in dieser ersten Umsetzung:
-1. SVG ist text-/XML-basiert, keine feste Byte-Signatur — passt nicht in
-   dasselbe, einheitliche Signatur-Prüfschema wie die fünf Binärformate
-   (bräuchte einen separaten XML-Parse-Pfad).
-2. Auch wenn `<img src="data:image/svg+xml...">` laut HTML-Spezifikation
-   keine Skriptausführung erlaubt (SVG-als-Bild deaktiviert Scripting), ist der
-   zusätzliche Prüfaufwand (wohlgeformtes XML, kein externer Ressourcen-Bezug)
-   für eine erste Iteration nicht gerechtfertigt.
-3. Nachrüstbar als kleiner, isolierter Folgeschritt, sobald Bedarf besteht,
-   ohne diesen Plan zu blockieren.
+Entscheidung (zur Freigabe, 9.1): **PNG, JPEG, GIF, WebP, BMP** — geprüft per
+**Byte-Signatur**, nicht per (fälschbarem/leerem) `file.type` und nicht nur per Endung.
+**SVG bewusst ausgeschlossen** (text-/XML-basiert, keine feste Signatur, zusätzlicher
+Sanitizing-Aufwand; nachrüstbar). Liste als benannte Konstante in
+`src/formats/shared/editor/imageValidation.ts`.
 
-`src/formats/shared/editor/imageValidation.ts` exportiert die Liste als
-benannte Konstante, sodass eine spätere Erweiterung (SVG, weitere Formate) eine
-Ein-Datei-Änderung bleibt.
+### 3.4 Standardgröße beim Einfügen
 
-### 3.4 Standardgröße beim Einfügen: intrinsische Auflösung ermitteln, auf Seitenbreite herunterskalieren
+Nach Laden der Data-URL `naturalWidth`/`naturalHeight` über ein `Image`-Objekt auslesen
+und – unter Beibehaltung des Seitenverhältnisses – auf `PAGE_CONTENT_WIDTH_PX`
+(`pageLayout.ts:14`, **aktuell 606 px** bei A4/25 mm Rand) **herunterskalieren**, kleine
+Bilder **nie** hochskalieren. Ergebnis **explizit** in `width`/`height` speichern (behebt
+F1). `Image.onerror` liefert zugleich die zweite Gültigkeitsprüfung (2.4 der Anforderung).
 
-Wie in Anforderung 2.4 als „empfohlene, zu bestätigende Zielvorgabe"
-beschrieben: nach dem Laden der Data-URL wird ein `Image`-Objekt erzeugt,
-`naturalWidth`/`naturalHeight` ausgelesen, und – unter Beibehaltung des
-Seitenverhältnisses – auf `PAGE_CONTENT_WIDTH_PX` (bereits vorhandene
-Konstante, `pageLayout.ts:13`, aktuell 596 px bei A4/25 mm Rand) herunterskaliert,
-**niemals hochskaliert** (ein kleines Icon-Bild bleibt in Originalgröße). Diese
-Werte werden **explizit** in `width`/`height` des Node gespeichert (behebt F1).
+### 3.5 EXIF-Orientierung (F18): rohe Bytes + browser-korrigierte Maße, bewusst nicht aktiv gedreht
+
+**Befund** (bekanntes Browser-Verhalten, hier noch **nicht** durch einen eigenen Test
+gegen ein echtes EXIF-Fixture bestätigt — kein `.jpg`/`.jpeg` mit Exif-Rotationsflag
+liegt aktuell unter `tests/fixtures/`; das ist Teil des Fixes, siehe 5.3): Moderne
+Chromium-/Firefox-/WebKit-Engines drehen ein `<img>` bereits bei der Anzeige gemäß dem
+eingebetteten JPEG-`Orientation`-Tag, **und** `HTMLImageElement.naturalWidth/
+naturalHeight` melden bereits die **gedrehten** (angezeigten) Maße, nicht die rohen
+Byte-Dimensionen. `loadImageDimensions` (4.2) liest also für ein hochkant aufgenommenes,
+aber landscape-kodiertes Smartphone-Foto bereits die **korrekten**, hochkant-Maße — im
+Editor (derselbe Browser rendert `<img>` und Node gleich) sind Anzeige und gespeicherte
+`width`/`height` daher konsistent.
+
+**Die Lücke liegt beim Export/Fremd-Reimport, nicht im Editor:** `imageCollector.add`
+und beide Writer betten die **rohen, unveränderten** Bytes ein (inkl. des originalen
+Exif-Tags) und deklarieren `wp:extent`/`svg:width|height` aus den bereits **gedrehten**
+`width`/`height`-Werten. Ob eine reale Word-/LibreOffice-Installation dasselbe Bild beim
+Öffnen ebenfalls anhand des Exif-Tags dreht (aktuelle Versionen tun das für per „Bild
+einfügen" eingefügte Fotos zunehmend, aber nicht zuverlässig über alle Versionen hinweg),
+liegt außerhalb der Kontrolle dieses Codes — falls nicht, zeigt Word ein **um 90°
+verdrehtes** Bild in einem `wp:extent`-Rahmen, der für die gedrehte Orientierung
+bemessen ist ⇒ sichtbare Verzerrung trotz technisch korrekt gelesener/geschriebener
+Maße.
+
+**Entscheidung (dokumentiert, keine aktive Korrektur in diesem Plan):** Die Bytes
+**nicht** aktiv neu kodieren (z. B. über eine `<canvas>`-Rotation vor dem Einbetten).
+Ein Re-Encode würde Anforderung 3.14 verletzen (PNG-Alpha/GIF-Bytes müssen unverändert
+bleiben; ein Re-Encode wäre ohnehin nur für JPEG mit Exif-Tag überhaupt anwendbar, nicht
+für die anderen unterstützten Formate) und zusätzliche Qualitäts-/Determinismus-Fragen
+aufwerfen (erneute JPEG-Kompression ist verlustbehaftet und nicht bit-identisch
+reproduzierbar). Bewusst akzeptierter Kompromiss: „best effort", wie in Anforderung
+3.13 als Minimalanforderung („kein Absturz, keine *offensichtliche* Verzerrung")
+formuliert — abgesichert durch einen dedizierten E2E-Test mit einem echten,
+Exif-rotierten JPEG-Fixture (5.2/5.3), der zumindest die **Editor-eigene** Rundreise
+(Einfügen → Export → Re-Import in denselben Browser) auf Verzerrungsfreiheit prüft; die
+Cross-Anwendungs-Frage (reales Word/LibreOffice) bleibt eine dokumentierte, nicht
+automatisiert prüfbare Grenze.
 
 ---
 
 ## 4. Dateigenauer Umsetzungsplan
 
-### 4.1 `src/formats/shared/schema.ts` — Fix F10 (kleine Konsistenzkorrektur)
+### 4.1 `src/formats/shared/schema.ts` — Fix F10
 
-Zeilen 45-72, `image`-NodeSpec:
+`image`-NodeSpec (Z. 58-85): `validate: 'number|null'` an `width`/`height`, und
+`parseDOM.getAttrs` in Zahlen wandeln:
 
 ```ts
-image: {
-  group: 'block',
-  attrs: {
-    src: { validate: 'string' },
-    alt: { default: '', validate: 'string' },
-    width: { default: null, validate: 'number|null' },
-    height: { default: null, validate: 'number|null' },
-  },
-  draggable: true,
-  parseDOM: [
-    {
-      tag: 'img[src]',
-      getAttrs: (dom) => {
-        const el = dom as HTMLImageElement
-        const width = el.getAttribute('width')
-        const height = el.getAttribute('height')
-        return {
-          src: el.getAttribute('src'),
-          alt: el.getAttribute('alt') || '',
-          width: width ? Number(width) : null,
-          height: height ? Number(height) : null,
-        }
-      },
-    },
-  ],
-  toDOM(node) {
-    const { src, alt, width, height } = node.attrs
-    return ['img', { src, alt, width, height }]
-  },
+attrs: {
+  src: { validate: 'string' },
+  alt: { default: '', validate: 'string' },
+  width: { default: null, validate: 'number|null' },
+  height: { default: null, validate: 'number|null' },
 },
+// getAttrs:
+const width = el.getAttribute('width')
+const height = el.getAttribute('height')
+return {
+  src: el.getAttribute('src'),
+  alt: el.getAttribute('alt') || '',
+  width: width ? Number(width) : null,
+  height: height ? Number(height) : null,
+}
 ```
 
-`validate: 'number|null'` ist ein von `prosemirror-model` selbst unterstütztes
-Format (`node_modules/prosemirror-model/dist/index.js:2294-2301`,
-`validateType` splittet den String an `"|"` und vergleicht `typeof`, wobei
-`null` als eigener „Typname" behandelt wird — **geprüft**, keine Annahme).
-Reine Härtung, kein Verhaltensunterschied für bereits korrekt eingefügte Werte;
-verhindert nur künftig, dass ein falsch getypter Wert (z. B. ein String) beim
-Parsen von per Zwischenablage eingefügtem `<img>`-HTML unbemerkt durchrutscht.
+`validate: 'number|null'` ist von `prosemirror-model` unterstützt: `validateType`
+(`node_modules/prosemirror-model/dist/index.js:2294-2300`) splittet den String an `"|"`
+und mappt `value === null` auf den Typnamen `"null"` — **geprüft**, keine Annahme. Reine
+Härtung; verhindert, dass ein falsch getypter Wert beim Parsen von per Zwischenablage
+eingefügtem `<img>`-HTML durchrutscht.
 
 ### 4.2 `src/formats/shared/editor/imageValidation.ts` — NEU
 
-Reines, DOM-freies (bis auf `loadImageDimensions`, siehe unten) Modul, isoliert
-unit-testbar:
+Isoliert unit-testbar (DOM-frei bis auf `loadImageDimensions`):
 
 ```ts
 export const SUPPORTED_IMAGE_MIME_TYPES = ['image/png', 'image/jpeg', 'image/gif', 'image/webp', 'image/bmp'] as const
 export type SupportedImageMimeType = (typeof SUPPORTED_IMAGE_MIME_TYPES)[number]
 
-/** 20 MB — großzügig genug für ein Smartphone-Foto (Anforderung nennt 10-20 MB als Referenzgröße),
- *  klein genug, um eine pathologisch große Datei nicht unbegrenzt in den Speicher zu laden. */
+/** 20 MB — großzügig für ein Smartphone-Foto, klein genug, um eine pathologische Datei nicht
+ *  unbegrenzt in den Speicher zu laden. Zur Freigabe, siehe 9.2. */
 export const MAX_IMAGE_BYTES = 20 * 1024 * 1024
 
 const SIGNATURES: Array<{ mime: SupportedImageMimeType; bytes: number[] }> = [
@@ -397,20 +408,17 @@ const SIGNATURES: Array<{ mime: SupportedImageMimeType; bytes: number[] }> = [
   { mime: 'image/bmp', bytes: [0x42, 0x4d] },
 ]
 
-/** Byte-Signatur ("Magic Number"), nicht `file.type` — das ist clientseitig fälschbar/leer,
- *  siehe bestätigter Befund in bild-einfuegen-req.md Abschnitt 3.3. */
+/** Byte-Signatur ("Magic Number"), nicht `file.type`. */
 export function sniffImageMimeType(bytes: Uint8Array): SupportedImageMimeType | null {
   for (const sig of SIGNATURES) {
     if (bytes.length >= sig.bytes.length && sig.bytes.every((b, i) => bytes[i] === b)) return sig.mime
   }
-  // WebP: RIFF-Container ('RIFF' @0, 'WEBP' @8) — kein festes Präfix wie die anderen Formate.
+  // WebP: RIFF-Container ('RIFF' @0, 'WEBP' @8).
   if (
     bytes.length >= 12 &&
     bytes[0] === 0x52 && bytes[1] === 0x49 && bytes[2] === 0x46 && bytes[3] === 0x46 &&
     bytes[8] === 0x57 && bytes[9] === 0x45 && bytes[10] === 0x42 && bytes[11] === 0x50
-  ) {
-    return 'image/webp'
-  }
+  ) return 'image/webp'
   return null
 }
 
@@ -418,13 +426,11 @@ export function arrayBufferToBase64(buffer: ArrayBuffer): string {
   const bytes = new Uint8Array(buffer)
   const CHUNK = 0x8000
   let binary = ''
-  for (let i = 0; i < bytes.length; i += CHUNK) {
-    binary += String.fromCharCode(...bytes.subarray(i, i + CHUNK))
-  }
+  for (let i = 0; i < bytes.length; i += CHUNK) binary += String.fromCharCode(...bytes.subarray(i, i + CHUNK))
   return btoa(binary)
 }
 
-/** Skaliert (nur verkleinernd, nie vergrößernd) unter Beibehaltung des Seitenverhältnisses. */
+/** Skaliert nur verkleinernd, unter Beibehaltung des Seitenverhältnisses. */
 export function computeDisplaySize(naturalWidth: number, naturalHeight: number, maxWidth: number): { width: number; height: number } {
   if (naturalWidth <= 0 || naturalHeight <= 0) return { width: maxWidth, height: Math.round(maxWidth * 0.75) }
   if (naturalWidth <= maxWidth) return { width: Math.round(naturalWidth), height: Math.round(naturalHeight) }
@@ -432,10 +438,9 @@ export function computeDisplaySize(naturalWidth: number, naturalHeight: number, 
   return { width: Math.round(maxWidth), height: Math.max(1, Math.round(naturalHeight * scale)) }
 }
 
-/** Lädt die Bilddaten über ein echtes `Image`-Element, um (a) die intrinsische Auflösung zu
- *  ermitteln und (b) eine zweite, über die Byte-Signatur hinausgehende Dekodier-Prüfung zu
- *  erhalten (fängt z. B. eine Datei ab, deren Kopf zufällig zu einer Signatur passt, deren
- *  Rumpf aber abgeschnitten/beschädigt ist). Unter jsdom nicht sinnvoll testbar, siehe 5.1. */
+/** Lädt die Data-URL über ein `Image`-Element: (a) intrinsische Auflösung, (b) zweite
+ *  Dekodier-Prüfung (fängt eine Datei ab, deren Kopf zufällig zu einer Signatur passt,
+ *  deren Rumpf aber abgeschnitten ist). Unter jsdom nicht sinnvoll testbar → nur E2E. */
 export function loadImageDimensions(dataUrl: string): Promise<{ width: number; height: number }> {
   return new Promise((resolve, reject) => {
     const img = new Image()
@@ -448,108 +453,74 @@ export function loadImageDimensions(dataUrl: string): Promise<{ width: number; h
 
 ### 4.3 `src/formats/shared/units.ts` — NEU
 
-Von `docx/writer.ts`, `docx/reader.ts`, `odt/writer.ts`, `odt/reader.ts`
-gemeinsam genutzt (behebt F7: **eine** Quelle für Umrechnung + Ersatzgröße
-statt zwei unabhängig gepflegter Formeln/Konstanten):
+Gemeinsam von `docx/writer.ts`, `docx/reader.ts`, `odt/writer.ts`, `odt/reader.ts`
+genutzt (behebt F7):
 
 ```ts
 export const PX_PER_INCH = 96
 const CM_PER_INCH = 2.54
 
-export function pxToEmu(px: number): number {
-  return Math.round((px / PX_PER_INCH) * 914400)
-}
-export function emuToPx(emu: number): number {
-  return Math.round((emu / 914400) * PX_PER_INCH)
-}
-export function pxToCm(px: number): number {
-  return (px / PX_PER_INCH) * CM_PER_INCH
-}
+export function pxToEmu(px: number): number { return Math.round((px / PX_PER_INCH) * 914400) }
+export function emuToPx(emu: number): number { return Math.round((emu / 914400) * PX_PER_INCH) }
+export function pxToCm(px: number): number { return (px / PX_PER_INCH) * CM_PER_INCH }
 
 const UNIT_TO_INCH: Record<string, number> = { in: 1, cm: 1 / CM_PER_INCH, mm: 1 / 25.4, pt: 1 / 72, pc: 1 / 6, px: 1 / PX_PER_INCH }
 
-/** Parst einen ODF-Längenwert (`svg:width`/`svg:height`, z. B. "6cm", "1in", "28.35pt")
- *  in Pixel bei 96dpi. Gibt `null` zurück bei fehlendem/nicht parsbarem Wert (defensiv
- *  gegenüber realen Fremddateien mit unerwartetem Format) statt zu werfen. */
+/** Parst einen ODF-Längenwert ("6cm", "1in", "28.35pt", auch tolerantes "300px") in px@96dpi.
+ *  `null` bei fehlendem/nicht parsbarem Wert (defensiv), statt zu werfen. */
 export function parseOdfLength(value: string | null | undefined): number | null {
   if (!value) return null
   const match = /^(-?[0-9]*\.?[0-9]+)(cm|mm|in|pt|pc|px)$/.exec(value.trim())
   if (!match) return null
-  const [, num, unit] = match
-  const inches = Number(num) * UNIT_TO_INCH[unit]
+  const inches = Number(match[1]) * UNIT_TO_INCH[match[2]]
   if (!Number.isFinite(inches) || inches <= 0) return null
   return Math.round(inches * PX_PER_INCH)
 }
 
-/** Gemeinsamer Ersatzwert für beide Formate — behebt den in Abschnitt 1.3 dokumentierten
- *  Neufund (DOCX 300×200px vs. ODT 6×4cm waren zwei unterschiedliche, nicht ineinander
- *  umrechenbare Ersatzgrößen). Nur relevant für Nodes, die (aus welchem Grund auch immer,
- *  z. B. ein sehr alter, vor diesem Fix erzeugter Dokumentzustand) weiterhin width/height
- *  `null` haben — ab diesem Plan setzt insertImage/der Reader immer echte Werte. */
+/** Gemeinsamer Ersatzwert für beide Formate (behebt Neufund B). Nur relevant für Nodes,
+ *  die weiterhin width/height `null` haben; ab diesem Plan setzen insertImage/Reader immer Werte. */
 export const DEFAULT_IMAGE_WIDTH_PX = 300
 export const DEFAULT_IMAGE_HEIGHT_PX = 200
 ```
 
 ### 4.4 `src/formats/shared/editor/commands.ts` — Fix F1
 
-Zeilen 66-74:
+`insertImage` (Z. 66-74) auf ein Options-Objekt umstellen:
 
 ```ts
-export interface InsertImageOptions {
-  alt?: string
-  width?: number | null
-  height?: number | null
-}
+export interface InsertImageOptions { alt?: string; width?: number | null; height?: number | null }
 
 export function insertImage(src: string, options: InsertImageOptions = {}): Command {
   return (state, dispatch) => {
     const node = wordSchema.nodes.image.create({
-      src,
-      alt: options.alt ?? '',
-      width: options.width ?? null,
-      height: options.height ?? null,
+      src, alt: options.alt ?? '', width: options.width ?? null, height: options.height ?? null,
     })
-    if (dispatch) {
-      dispatch(state.tr.replaceSelectionWith(node))
-    }
+    if (dispatch) dispatch(state.tr.replaceSelectionWith(node))
     return true
   }
 }
 ```
 
-Bewusst **kein** Options-Objekt-Default-Merge mit `null` vs. `undefined`
-verwechselt: `options.width ?? null` erlaubt weiterhin den expliziten Aufruf
-`insertImage(src)` ohne Maße (z. B. für einen künftigen
-Zwischenablage-/Drag&Drop-Pfad außerhalb dieses Plans), verhält sich dann exakt
-wie heute. Der einzige Aufrufer im Repo (`Toolbar.tsx:107`, siehe 4.5) wird auf
-die neue Signatur umgestellt.
+`options.width ?? null` erlaubt weiterhin `insertImage(src)` ohne Maße (verhält sich dann
+wie heute). Der einzige Produktiv-Aufrufer ist `Toolbar.tsx:134` (per Grep über `src/`
+**und** `tests/` verifiziert: nur `commands.ts` [Definition] und `Toolbar.tsx` [Aufruf];
+E2E-Specs referenzieren `insertImage` nur in Kommentaren). Der Mechanismus
+`replaceSelectionWith(node)` bleibt unverändert (1.6).
 
-Der Mechanismus selbst (`state.tr.replaceSelectionWith(node)`) bleibt
-unverändert — Abschnitt 1.6 hat empirisch bestätigt, dass er für alle
-relevanten Cursor-Positionen bereits korrekt arbeitet.
+### 4.5 `src/formats/shared/editor/Toolbar.tsx` — Fix F1(Nutzung), F2, F3, F4
 
-### 4.5 `src/formats/shared/editor/Toolbar.tsx` — Fix F2, F3
-
-Ersetzt `handleImagePick` (Zeilen 97-108) und den Bild-Kontrolleintrag (Zeilen
-241-244):
+Ersetzt `handleImagePick` (Z. 124-135) und den `<label>`-Eintrag (Z. 291-294):
 
 ```tsx
 import { useRef, useState } from 'react'
-import {
-  MAX_IMAGE_BYTES,
-  SUPPORTED_IMAGE_MIME_TYPES,
-  arrayBufferToBase64,
-  computeDisplaySize,
-  loadImageDimensions,
-  sniffImageMimeType,
-} from './imageValidation'
+import { MAX_IMAGE_BYTES, arrayBufferToBase64, computeDisplaySize, loadImageDimensions, sniffImageMimeType } from './imageValidation'
 import { PAGE_CONTENT_WIDTH_PX } from './pageLayout'
 
 const SUPPORTED_FORMATS_LABEL = 'PNG, JPEG, GIF, WebP, BMP'
 
 function ImageIcon() {
   return (
-    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" focusable="false">
       <rect x="3" y="3" width="18" height="18" rx="2" />
       <circle cx="8.5" cy="8.5" r="1.5" />
       <path d="M21 15l-5-5L5 21" />
@@ -566,23 +537,17 @@ async function handleImagePick(event: ChangeEvent<HTMLInputElement>) {
   event.target.value = ''
   if (!file) return
   setImageError(null)
-
   try {
     if (file.size === 0) throw new Error('Die ausgewählte Datei ist leer.')
     if (file.size > MAX_IMAGE_BYTES) {
       throw new Error(`Datei ist zu groß (${(file.size / (1024 * 1024)).toFixed(1)} MB). Maximal ${MAX_IMAGE_BYTES / (1024 * 1024)} MB.`)
     }
-
     const bytes = new Uint8Array(await file.arrayBuffer())
     const mime = sniffImageMimeType(bytes)
-    if (!mime || !SUPPORTED_IMAGE_MIME_TYPES.includes(mime)) {
-      throw new Error(`Nicht unterstütztes oder beschädigtes Bildformat. Unterstützt: ${SUPPORTED_FORMATS_LABEL}.`)
-    }
-
+    if (!mime) throw new Error(`Nicht unterstütztes oder beschädigtes Bildformat. Unterstützt: ${SUPPORTED_FORMATS_LABEL}.`)
     const dataUrl = `data:${mime};base64,${arrayBufferToBase64(bytes.buffer)}`
-    const { width: naturalWidth, height: naturalHeight } = await loadImageDimensions(dataUrl)
-    const { width, height } = computeDisplaySize(naturalWidth, naturalHeight, PAGE_CONTENT_WIDTH_PX)
-
+    const { width: nW, height: nH } = await loadImageDimensions(dataUrl)
+    const { width, height } = computeDisplaySize(nW, nH, PAGE_CONTENT_WIDTH_PX)
     run(view, insertImage(dataUrl, { alt: file.name, width, height }))
   } catch (err) {
     setImageError(err instanceof Error ? err.message : String(err))
@@ -590,73 +555,57 @@ async function handleImagePick(event: ChangeEvent<HTMLInputElement>) {
 }
 ```
 
-JSX (ersetzt das `<label>` am Ende der Toolbar, Zeilen 241-244):
+JSX (ersetzt `<label>` am Toolbar-Ende):
 
 ```tsx
-<button
-  type="button"
-  title="Bild einfügen"
-  aria-label="Bild einfügen"
+<button type="button" title="Bild einfügen" aria-label="Bild einfügen"
   onClick={() => fileInputRef.current?.click()}
-  className="px-2 py-1 rounded text-sm hover:bg-neutral-100 dark:hover:bg-neutral-800 text-neutral-700 dark:text-neutral-300 flex items-center gap-1"
->
-  <ImageIcon />
-  <span>Bild</span>
+  className="px-2 py-1 rounded text-sm hover:bg-neutral-100 dark:hover:bg-neutral-800 text-neutral-700 dark:text-neutral-300 flex items-center gap-1">
+  <ImageIcon /><span>Bild</span>
 </button>
-<input
-  ref={fileInputRef}
-  type="file"
-  accept={SUPPORTED_IMAGE_MIME_TYPES.join(',')}
-  className="hidden"
-  onChange={handleImagePick}
-/>
+<input ref={fileInputRef} type="file" accept="image/*" className="hidden" onChange={handleImagePick} />
 ```
 
-Und, direkt unter dem `<div role="toolbar">`-Wrapper (`Toolbar` gibt dafür
-statt eines einzelnen `<div>` ein Fragment zurück):
+Fehlerbanner: analog zum bestehenden `cutError`-`role="alert"` (`Toolbar.tsx:157-161`).
+Am einfachsten wird das `imageError`-`<span role="alert">` **direkt neben** dem
+Bild-Button gerendert (wie `cutError` neben dem Ausschneiden-Button) — dann bleibt der
+`return`-Wurzelknoten der Toolbar das bestehende einzelne `<div role="toolbar">`, **kein**
+Fragment-Umbau nötig:
 
 ```tsx
-return (
-  <>
-    <div role="toolbar" aria-label="Textformatierung" className="...">
-      {/* ... unverändert ... */}
-    </div>
-    {imageError && (
-      <div role="alert" className="px-2 py-1 text-xs text-red-700 dark:text-red-300 bg-red-50 dark:bg-red-950 border-b border-neutral-200 dark:border-neutral-800">
-        {imageError}
-      </div>
-    )}
-  </>
-)
+{imageError && (
+  <span role="alert" className="text-xs text-red-600 dark:text-red-400 max-w-[20rem] truncate" title={imageError}>
+    {imageError}
+  </span>
+)}
 ```
 
-Design-Entscheidungen, die dabei bewusst getroffen wurden:
-- **Kein try/catch-loses `FileReader`-Promise mehr:** `file.arrayBuffer()`
-  liefert ein natives Promise, das der bereits vorhandene `try`/`catch` direkt
-  abdeckt — behebt den bestätigten Befund „unbehandelte Promise-Ablehnung"
-  (Abschnitt 0/3.3 der Anforderung) strukturell, ohne eigene Fehlerbehandlung
-  um `FileReader` herum nachzurüsten.
-- **`file.type` wird nicht mehr verwendet:** Die MIME-Angabe für die Data-URL
-  kommt ausschließlich aus `sniffImageMimeType` (Byte-Signatur), stärker als
-  jeder Abgleich mit dem (fälschbaren/leeren) `file.type`.
-- **Fehlerbanner-Stil orientiert sich an bereits etablierten Mustern im
-  Projekt** (`role="alert"` + rote Fläche wie `FormatPicker.tsx:42-49`;
-  kompakte Inline-Variante wie `DocumentWorkspace.tsx:57`) — es wird
-  **keine neue Toast-/Benachrichtigungs-Infrastruktur** eingeführt (im
-  Projekt nicht vorhanden, siehe bereits in `aufzaehlungsliste-code.md`
-  Abschnitt 4.2 dokumentierten Grep-Befund „kein Treffer für
-  toast/snackbar/notification/aria-live").
-- **`ImageIcon` bewusst als generisches Rahmen+Sonne+Berg-Piktogramm**
-  (Standard-„Bild"-Glyphe), rein aus primitiven SVG-Formen (`rect`, `circle`,
-  `path`) beschrieben — kein Fremd-Icon-Set eingebunden (Projekt hat aktuell
-  keine Icon-Bibliothek als Abhängigkeit, per `package.json`-Sichtung
-  bestätigt), keine neue Abhängigkeit nötig.
-- **`onKeyDown` nicht nötig** (siehe Abschnitt 3.2 — natives Button-Verhalten
-  genügt für Enter/Leertaste).
+Bewusste Entscheidungen:
+- **Kein try/catch-loses `FileReader`-Promise mehr:** `file.arrayBuffer()` ist ein natives
+  Promise im bestehenden `try`/`catch` — behebt die unbehandelte Promise-Ablehnung
+  strukturell.
+- **`accept="image/*"` bleibt bewusst breit — NICHT auf die MIME-Whitelist verengt.**
+  Anforderung Bedienelement 2 und 2.3 („falsch-negativer Schutz") verlangen ausdrücklich,
+  dass der **Dialog-Filter** breit bleibt: eine exakte MIME-Liste als `accept` blendet
+  legitime, korrekt signierte Dateien aus, deren Betriebssystem einen abweichenden MIME
+  meldet (BMP als `image/x-ms-bmp`, JPEG als `image/pjpeg`). Verbindlich prüfend ist allein
+  die Laufzeit-Byte-Signatur (`sniffImageMimeType`), **nicht** der Dialog-Filter. Deshalb
+  wird `SUPPORTED_IMAGE_MIME_TYPES` in `Toolbar.tsx` **nicht** importiert (nur in
+  `imageValidation.ts`/Tests genutzt); die Nutzer-sichtbare Formatliste ist der separate
+  String `SUPPORTED_FORMATS_LABEL`. (Korrektur gegenüber einer früheren Fassung dieses
+  Plans, die hier fälschlich `accept={SUPPORTED_IMAGE_MIME_TYPES.join(',')}` vorsah und
+  damit gegen die Anforderung verstieß — E2E-Test 5.2 Punkt 8 sichert ab, dass eine als
+  `image/x-ms-bmp` gemeldete, korrekt signierte BMP wählbar bleibt und eingefügt wird.)
+- **`file.type` wird nicht verwendet:** MIME kommt ausschließlich aus `sniffImageMimeType`.
+- **Keine neue Toast-Infrastruktur** (im Projekt nicht vorhanden) — `role="alert"` genügt
+  und wird von Screenreadern angekündigt (Anforderung 1 Zeile 4 / 2.3).
+- **`ImageIcon`** rein aus primitiven SVG-Formen (`rect`/`circle`/`path`) im Stil des
+  vorhandenen `ScissorsIcon` — keine neue Icon-Abhängigkeit.
+- **`onKeyDown` nicht nötig** (natives Button-Verhalten, 3.2).
 
 ### 4.6 `src/index.css` — Fix F9
 
-Ergänzung nach Zeile 42 (`.ProseMirror img`-Regel):
+Nach `.ProseMirror img` (Z. 42):
 
 ```css
 .ProseMirror-selectednode {
@@ -665,34 +614,42 @@ Ergänzung nach Zeile 42 (`.ProseMirror img`-Regel):
 }
 ```
 
-Wirkt ausschließlich auf `NodeSelection`-Ziele — im aktuellen Schema praktisch
-nur auf `image` (kein anderer Node-Typ ist ähnlich als eigenständiges, per
-Klick selektierbares Blatt gedacht; Tabellenzellen-Selektion läuft über
-`CellSelection`/eigene Dekorationen aus `prosemirror-tables`, nicht über diese
-Klasse). Farbwert orientiert sich an einer neutralen Akzentfarbe, unabhängig
-von Light/Dark-Theme ausreichend kontrastreich (keine feste
-Light/Dark-Fallunterscheidung nötig, da Outline-Farbe nicht mit dem
-Seitenhintergrund verschmilzt).
+Wirkt auf `NodeSelection`-Ziele (praktisch nur `image`; Tabellenzellen-Selektion läuft
+über `CellSelection`/`prosemirror-tables`-Dekorationen, nicht über diese Klasse). Die
+Akzentfarbe kontrastiert in Light **und** Dark ausreichend gegen den weißen Seiten-
+hintergrund (`WordEditor.tsx:164-171` zeichnet die Seite weiß); keine Theme-Fallunterscheidung nötig.
 
 ### 4.7 `src/formats/shared/editor/WordEditor.tsx` — keine Änderung
 
-Kein neuer `nodeViews`-Eintrag (bewusst nicht Gegenstand dieses Plans, siehe
-Abschnitt 0 — Ziehpunkte/Resize-NodeView gehören zu `bild-groesse-aendern`).
-`dropCursor()`/`gapCursor()` (Zeilen 9-10, 83-84) bleiben unverändert; die in
-Anforderung Abschnitt 0 letzte Zeile dokumentierte Lücke (kein eigener
-`handleDrop`/`handlePaste` für Drag&Drop/Zwischenablage-Bilder) bleibt
-**bewusst außerhalb des Geltungsbereichs** dieses Plans, exakt wie in der
-Anforderung selbst als „nicht Gegenstand dieser Datei" markiert — hier nur
-noch einmal explizit bestätigt, nicht implementiert.
+Kein `nodeViews`-Eintrag (Resize-NodeView gehört zu `bild-groesse-aendern`).
+`dropCursor()` (Z. 103) bleibt rein visuell; kein eigener `handleDrop`/`handlePaste` für
+Drag&Drop/Zwischenablage-Rohbilder — von der Anforderung selbst ausgeklammert. Hier nur
+bestätigt, nicht implementiert.
 
-### 4.8 `src/formats/docx/writer.ts` — Fix F1 (Nutzung), F7
+### 4.8 `src/formats/docx/writer.ts` — Fix F1(Nutzung), F7, **F15 (eindeutige IDs)**
 
-`imageParagraphXml` (Zeilen 72-92):
+**F15 ist der neue, blockierende Kern dieses Abschnitts.** Der Writer braucht einen
+dokumentweit eindeutigen, deterministischen ID-Zähler für Zeichnungen — exakt nach dem
+bereits im Repo etablierten Muster von `TableNameSequence` (`odt/writer.ts:54-60`,
+eingeführt, um `Math.random()` und dessen Nicht-Determinismus zu ersetzen):
 
 ```ts
 import { pxToEmu, DEFAULT_IMAGE_WIDTH_PX, DEFAULT_IMAGE_HEIGHT_PX } from '../shared/units'
 
-function imageParagraphXml(node: JsonNode, images: ImageCollector, rels: RelationshipRegistry): string {
+/** Dokumentweit eindeutige, deterministische DrawingML-Objekt-IDs. wp:docPr/@id muss je
+ *  Zeichnung eindeutig und > 0 sein; geteilt über Body/Header/Footer, damit auch ein Bild
+ *  in der Fußzeile keine ID mit einem Body-Bild teilt. */
+class DrawingIdSequence {
+  private count = 0
+  next(): number { this.count += 1; return this.count }
+}
+```
+
+`imageParagraphXml` (Z. 74-94) erhält die Sequence als Parameter und emittiert dieselbe
+eindeutige `id` für `wp:docPr` **und** `pic:cNvPr`:
+
+```ts
+function imageParagraphXml(node: JsonNode, images: ImageCollector, rels: RelationshipRegistry, ids: DrawingIdSequence): string {
   const src = String(node.attrs?.src ?? '')
   const fileName = images.add(src)
   const relId = rels.add(RELATIONSHIP_TYPES.image, `media/${fileName.split('/').pop()}`)
@@ -700,51 +657,79 @@ function imageParagraphXml(node: JsonNode, images: ImageCollector, rels: Relatio
   const heightPx = Number(node.attrs?.height ?? DEFAULT_IMAGE_HEIGHT_PX)
   const cx = pxToEmu(widthPx)
   const cy = pxToEmu(heightPx)
-  // ... Rest unverändert (alt, XML-Aufbau) ...
+  const id = ids.next()
+  const alt = escapeXml(String(node.attrs?.alt ?? ''))
+  return (
+    `<w:p><w:r><w:drawing><wp:inline distT="0" distB="0" distL="0" distR="0">` +
+    `<wp:extent cx="${cx}" cy="${cy}"/>` +
+    `<wp:docPr id="${id}" name="${alt || 'Bild'}"/>` +
+    `<a:graphic><a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/picture">` +
+    `<pic:pic><pic:nvPicPr><pic:cNvPr id="${id}" name="${alt || 'Bild'}"/><pic:cNvPicPr/></pic:nvPicPr>` +
+    `<pic:blipFill><a:blip r:embed="${relId}"/><a:stretch><a:fillRect/></a:stretch></pic:blipFill>` +
+    `<pic:spPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="${cx}" cy="${cy}"/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom></pic:spPr>` +
+    `</pic:pic></a:graphicData></a:graphic></wp:inline></w:drawing></w:r></w:p>`
+  )
 }
 ```
 
-Kein struktureller Unterschied zur bisherigen Formel (`Math.round((px/96)*
-914400)` ist exakt `pxToEmu`), nur zentralisiert — reine DRY-Maßnahme, die die
-Symmetrie mit dem neuen `emuToPx` im Reader (4.9) garantiert.
+Der Zähler muss durch die Aufrufkette gereicht werden: `blockToDocx` (Z. 105-156, Fall
+`'image'` Z. 143-144), `tableToDocx` (Z. 158-201), `blocksToDocx` (Z. 203-205). Genau
+**eine** `DrawingIdSequence`-Instanz wird in `writeDocx` (Z. 252) erzeugt und an **alle**
+`blocksToDocx`-Aufrufe (Body Z. 256, Header Z. 265, Footer Z. 270) übergeben — analog zur
+dort schon vorhandenen gemeinsamen `ImageCollector`-Instanz. `pxToEmu` ist bitgleich zur
+bisherigen Inline-Formel (`Math.round((px/96)*914400)`), reine Zentralisierung, garantiert
+Symmetrie mit `emuToPx` im Reader (4.9).
 
-### 4.9 `src/formats/docx/reader.ts` — Fix F5
+> **Hinweis zur Signatur-Streuung:** `blockToDocx`/`tableToDocx` bekommen einen zusätzlichen
+> Parameter. Das ist derselbe mechanische Durchreiche-Aufwand wie bei `images`/`rels`
+> heute; keine Alternative mit weniger Streuung ist sinnvoll (ein modul-globaler Zähler
+> würde zwei parallele Exporte nicht-deterministisch verschränken).
 
-Erweitert `RunLike` (Zeile 116-122) um `imageWidthPx`/`imageHeightPx`, liest
-`wp:extent` in `decodeParagraphRuns` (Zeilen 124-143):
+### 4.9 `src/formats/docx/reader.ts` — Fix F5 (in `decodeDrawingOrPict`), optional F16
+
+**Der Fix gehört in die Bild-Verzweigung von `decodeDrawingOrPict` (Z. 153-156)**, nicht
+in eine Umschreibung der Run-Schleife (siehe Revision Punkt 1). `RunLike` (Z. 117-125)
+behält **alle** bestehenden Varianten (`'text' | 'break' | 'image' | 'unsupported'`) und
+bekommt nur zwei optionale Felder dazu:
 
 ```ts
 import { emuToPx } from '../shared/units'
 
 interface RunLike {
-  kind: 'text' | 'break' | 'image'
+  kind: 'text' | 'break' | 'image' | 'unsupported'
   text?: string
   marks?: Array<{ type: string; attrs?: Record<string, unknown> }>
   imageRelId?: string
   imageAlt?: string
-  imageWidthPx?: number | null
-  imageHeightPx?: number | null
-}
-
-// innerhalb decodeParagraphRuns, Fall 'drawing' (bisher Zeilen 134-139):
-} else if (child.namespaceURI === OOXML_NAMESPACES.w && child.localName === 'drawing') {
-  const blip = child.getElementsByTagNameNS(OOXML_NAMESPACES.a, 'blip')[0]
-  const relId = blip?.getAttributeNS(OOXML_NAMESPACES.r, 'embed') ?? undefined
-  const docPr = child.getElementsByTagNameNS(OOXML_NAMESPACES.wp, 'docPr')[0]
-  const extent = child.getElementsByTagNameNS(OOXML_NAMESPACES.wp, 'extent')[0]
-  const cx = extent ? Number(extent.getAttribute('cx')) : NaN
-  const cy = extent ? Number(extent.getAttribute('cy')) : NaN
-  runs.push({
-    kind: 'image',
-    imageRelId: relId,
-    imageAlt: docPr?.getAttribute('name') ?? '',
-    imageWidthPx: Number.isFinite(cx) && cx > 0 ? emuToPx(cx) : null,
-    imageHeightPx: Number.isFinite(cy) && cy > 0 ? emuToPx(cy) : null,
-  })
+  imageWidthPx?: number | null   // NEU
+  imageHeightPx?: number | null  // NEU
+  unsupportedKind?: 'textbox' | 'object'
+  unsupportedBlocks?: JsonNode[]
 }
 ```
 
-Und in `paragraphToBlocks` (Zeile 176, Bild-Block-Konstruktion):
+In `decodeDrawingOrPict`, innerhalb `if (relId) { … }` (Z. 153-156):
+
+```ts
+if (relId) {
+  const docPr = el.getElementsByTagNameNS(OOXML_NAMESPACES.wp, 'docPr')[0]
+  const extent = el.getElementsByTagNameNS(OOXML_NAMESPACES.wp, 'extent')[0]
+  const cx = extent ? Number(extent.getAttribute('cx')) : NaN   // wp:extent/@cx ist unprefixed → getAttribute, nicht …NS
+  const cy = extent ? Number(extent.getAttribute('cy')) : NaN
+  return {
+    kind: 'image',
+    imageRelId: relId,
+    // F16 (optional, kleiner In-Scope-Gewinn für Fremddatei-Rundreise): echter Word-Alt-Text
+    // steht in wp:docPr/@descr; @name ist der Objektname. @descr bevorzugen, @name als Fallback.
+    imageAlt: docPr?.getAttribute('descr') || docPr?.getAttribute('name') || '',
+    imageWidthPx: Number.isFinite(cx) && cx > 0 ? emuToPx(cx) : null,
+    imageHeightPx: Number.isFinite(cy) && cy > 0 ? emuToPx(cy) : null,
+  }
+}
+```
+
+`OOXML_NAMESPACES.wp` ist bereits definiert (`docx/xmlUtil.ts:13`). Und in
+`paragraphToBlocks`, Bild-Block-Konstruktion (Z. 266-269):
 
 ```ts
 blocks.push({
@@ -753,16 +738,18 @@ blocks.push({
 })
 ```
 
-Da `paragraphToBlocks` bereits generisch von `readBodyChildren` (Body **und**
-Header/Footer, Zeilen 346/363/372) **und** von `parseTable` (Tabellenzellen,
-Zeilen 236-238) aufgerufen wird, ist damit **Grenzfall/Rundreise-Szenario 8**
-(Bild in Tabellenzelle, Listenpunkt, Kopf-/Fußzeile) für DOCX **ohne weitere
-Codeänderung** an dieser Stelle abgedeckt — nur noch mit Tests abzusichern
-(5.1).
+Da `paragraphToBlocks` von `readBodyChildren` (Body **und** Header/Footer) **und** von
+`parseTable` (Zellen) aufgerufen wird, ist Rundreise-Szenario 8 (Bild in Zelle/Listenpunkt/
+Kopf-Fußzeile) für DOCX damit **ohne** weitere Codeänderung abgedeckt (nur Tests, 5.1).
+
+> **VML-Grenze (dokumentiert):** Für legacy `<w:pict>` (VML) steckt die Größe im
+> `v:shape/@style` (`width:…;height:…` in pt), nicht in `wp:extent`; dort greift der Fix
+> nicht und die Ersatzgröße bleibt. Seltener Fremddatei-Fall, kein Blocker — als bekannte
+> Grenze festgehalten.
 
 ### 4.10 `src/formats/odt/writer.ts` — Fix F7, F8
 
-`blockToOdt`, Fall `'image'` (Zeilen 112-119):
+`blockToOdt`, Fall `'image'` (Z. 176-183): Einheit `cm` statt `px`, gemeinsame Ersatzgröße:
 
 ```ts
 import { pxToCm, DEFAULT_IMAGE_WIDTH_PX, DEFAULT_IMAGE_HEIGHT_PX } from '../shared/units'
@@ -779,47 +766,80 @@ case 'image': {
 }
 ```
 
-Behebt F8 (`px` war kein gültiges ODF-Längenmaß für `svg:width`/`svg:height`)
-und F7 (Ersatzgröße jetzt dieselbe 300×200-px-Basis wie DOCX, nur in `cm`
-ausgedrückt: `300px ≙ 7.94cm`, `200px ≙ 5.29cm` statt der bisherigen,
-unabhängig gewählten `6cm`/`4cm`).
+Behebt F8 (`px` war kein gültiges ODF-Längenmaß ⇒ RelaxNG-Validierung, Abnahmekriterium
+5.1.12) und F7 (Ersatzgröße jetzt dieselbe 300×200-px-Basis wie DOCX: `300px ≙ 7.94cm`,
+`200px ≙ 5.29cm`, statt der bisherigen, unabhängig gewählten `6cm`/`4cm`).
 
-### 4.11 `src/formats/odt/reader.ts` — Fix F6
+### 4.11 `src/formats/odt/reader.ts` — Fix F6 (in `frameToBlocks`)
 
-`paragraphToBlocks`, `draw:frame`-Fall (Zeilen 144-153):
+**Der Fix gehört in die Bild-Verzweigung von `frameToBlocks` (Z. 233-238)**, nicht in die
+`paragraphToBlocks`-Schleife (die den seitenverankerten Frame gar nicht sieht; siehe
+Revision Punkt 1). `frameToBlocks` bekommt `frameEl` bereits übergeben:
 
 ```ts
 import { parseOdfLength } from '../shared/units'
 
-for (const child of Array.from(pEl.childNodes)) {
-  if (child.nodeType === child.ELEMENT_NODE && (child as Element).localName === 'frame' && (child as Element).namespaceURI === ODF_NAMESPACES.draw) {
-    flushText()
-    const frameEl = child as Element
-    const imageEl = firstChildNS(frameEl, ODF_NAMESPACES.draw, 'image')
-    const href = imageEl?.getAttributeNS(ODF_NAMESPACES.xlink, 'href') ?? ''
-    const width = parseOdfLength(frameEl.getAttributeNS(ODF_NAMESPACES.svg, 'width'))
-    const height = parseOdfLength(frameEl.getAttributeNS(ODF_NAMESPACES.svg, 'height'))
-    blocks.push({
-      type: 'image',
-      attrs: { src: href, alt: frameEl.getAttributeNS(ODF_NAMESPACES.draw, 'name') ?? '', width, height },
-    })
-  } else {
-    textBuffer.push(child)
-  }
+const imageEl = firstChildNS(frameEl, ODF_NAMESPACES.draw, 'image')
+if (imageEl) {
+  const href = imageEl.getAttributeNS(ODF_NAMESPACES.xlink, 'href') ?? ''
+  const alt = frameEl.getAttributeNS(ODF_NAMESPACES.draw, 'name') ?? ''
+  const width = parseOdfLength(frameEl.getAttributeNS(ODF_NAMESPACES.svg, 'width'))
+  const height = parseOdfLength(frameEl.getAttributeNS(ODF_NAMESPACES.svg, 'height'))
+  return [{ type: 'image', attrs: { src: href, alt, width, height } }]
 }
 ```
 
 `ODF_NAMESPACES.svg` ist bereits definiert (`odt/xmlUtil.ts:18`,
-`urn:oasis:names:tc:opendocument:xmlns:svg-compatible:1.0`) — dieselbe URI, die
-`NAMESPACE_DECLARATIONS` (`odt/xmlUtil.ts:24`) beim **Schreiben** unter dem
-Präfix `svg:` deklariert und die auch echte LibreOffice-Dateien für dieses
-Attribut verwenden; keine neue Namespace-Registrierung nötig.
+`urn:oasis:…:svg-compatible:1.0`) — dieselbe URI, die `NAMESPACE_DECLARATIONS`
+(`odt/xmlUtil.ts:24`) beim Schreiben unter dem Präfix `svg:` deklariert und die auch echte
+LibreOffice-Dateien verwenden. Keine neue Namespace-Registrierung nötig. Da `frameToBlocks`
+sowohl aus `paragraphToBlocks` (in `text:p` eingebettet) als auch aus `elementToBlocks`
+(seitenverankert, Z. 284) und rekursiv für Zellen/Listen (`elementToBlocks` Z. 290/307)
+sowie Kopf-/Fußzeile (`readOdt` Z. 380/384) aufgerufen wird, ist Rundreise-Szenario 8 für
+ODT ohne separate Kontext-Logik abgedeckt.
 
-Wie beim DOCX-Reader gilt: `paragraphToBlocks` wird bereits generisch von
-`elementToBlocks` (Tabellenzellen, Listenpunkte — Zeilen 189-203, 179-187) und
-von `readOdt` für Kopf-/Fußzeile (Zeilen 262, 266) verwendet — Rundreise-
-Szenario 8 ist damit für ODT ebenfalls ohne separate Cell-/List-/Header-Logik
-abgedeckt.
+### 4.12 Fremddatei-MIME-Grenze — Fix F17 (beide Reader)
+
+Beide `resolveImageSources` (`docx/reader.ts:451-453`, `odt/reader.ts:338-340`) bilden
+`data:image/${ext}`. Für `.emf`/`.wmf`/`.tiff` (in echten Word/LibreOffice-Dateien
+verbreitet) ergibt das ein vom Browser **nicht darstellbares** `data:image/emf` ⇒ stilles
+leeres Bild (Anforderung 5.2, letzter Punkt). **Mindestmaßnahme (Soll):** eine kleine
+Whitelist browserdarstellbarer Endungen; nicht darstellbare werden nicht als `<img>`-Quelle
+eingebettet, sondern als `unsupported_block` (`kind: 'object'`, Platzhalter „Bildformat
+nicht darstellbar") importiert — der Knoten existiert bereits (`schema.ts:92-113`) und wird
+von beiden Writern beim Export als Inhalt entpackt statt still verloren. Kein Absturz, kein
+leeres Bild. Als eigenständiger, klar abgegrenzter Zusatz umsetzbar; bei Zeitdruck
+mindestens als bekannte Grenze in Abschnitt 7 dokumentiert.
+
+**Bereits vorhandener realer Testfall (neu erkannt, spart eine Fixture-Beschaffung):**
+`tests/fixtures/external/docx/VariousPictures.docx` (bereits in 5.3 als Mehr-Bilder-Fixture
+gelistet) enthält laut tatsächlichem Entpacken (`word/media/`) **fünf** Bilder, davon
+**zwei** in genau den hier relevanten, nicht browserdarstellbaren Formaten —
+`image1.wmf` und `image3.emf`/`image4.emf` — neben `image2.png`/`image5.jpeg`. Diese Datei
+deckt F17 damit **unverändert, ohne handgebautes XML**, ab: Import → die beiden
+WMF/EMF-Bilder müssen als `unsupported_block`-Platzhalter (nach dem Fix) bzw. dürfen
+**nicht** als kaputtes `data:image/emf`/`data:image/wmf` (vor dem Fix, roter Regressionstest)
+im Dokument landen, während PNG/JPEG daneben normal importiert werden.
+
+### 4.13 EXIF-Orientierung — bewusste Nicht-Korrektur (F18, Anforderung 3.13)
+
+Kein Produktionscode-Fix (siehe Entscheidung 3.5) — dieser Abschnitt hält nur fest, **wo**
+das Verhalten sichtbar wird und was stattdessen zu tun ist:
+
+- **`imageValidation.ts` (4.2) bleibt unverändert.** `loadImageDimensions` liest bewusst
+  `img.naturalWidth`/`naturalHeight` ohne eigene Exif-Auswertung — genau das nutzt aus,
+  dass der Browser diese bereits gedreht liefert (3.5). Eine eigene Exif-Parsing-Bibliothek
+  wird **nicht** eingeführt.
+- **Kein Re-Encode in `handleImagePick` (4.5).** Die Bytes aus `file.arrayBuffer()` gehen
+  unverändert in `arrayBufferToBase64`/die Data-URL ein — dieselbe Data-URL, aus der auch
+  `loadImageDimensions` liest. Es gibt also nur **eine** Bytequelle, keine zwei
+  divergierenden Repräsentationen.
+- **Writer (4.8/4.10) und Reader (4.9/4.11) bleiben unverändert** — sie kennen `width`/
+  `height` nur als Zahlen, unabhängig davon, wie diese zustande kamen.
+- **Testpflicht (neu, siehe 5.2/5.3):** ein E2E-Test mit einem echten, Exif-rotierten
+  JPEG-Fixture ist die einzige Stelle, an der das oben beschriebene Browser-Verhalten
+  überhaupt **verifiziert** statt nur angenommen wird — ohne dieses Fixture bleibt F18
+  eine unbewiesene Behauptung.
 
 ---
 
@@ -827,302 +847,258 @@ abgedeckt.
 
 ### 5.1 Unit-Tests (Vitest)
 
-**NEU: `src/formats/shared/editor/__tests__/commands.test.ts`** (behebt F11 —
-sichert die in Abschnitt 1.6 empirisch ermittelten Befunde dauerhaft als
-Regressionstests, statt sie nur in diesem Plan zu dokumentieren):
-1. Cursor inmitten eines Absatzes → zwei Absätze mit vollständigem Text davor/
-   danach, Bild dazwischen (der zentrale gemeldete Fall, Anforderung 3.2/2.1.3).
-2. Cursor am Anfang/Ende eines nicht-leeren Absatzes → Bild vor/nach dem
-   unveränderten Absatz, kein leerer Stub.
-3. Cursor in einem leeren Absatz → Bild ersetzt ihn vollständig.
-4. Cursor inmitten fett-formatierten Texts → beide Textteile behalten
-   `strong`, Bild-Node erhält **keine** geerbte Mark.
-5. Cursor unmittelbar vor einem `hard_break` → `hard_break` bleibt im zweiten
-   Teilabsatz erhalten.
-6. Cursor inmitten einer Überschrift → Überschrift wird in zwei
-   gleichrangige Überschriften geteilt (dokumentiert das aktuelle, als korrekt
-   akzeptierte Verhalten, siehe Offene Entscheidung 9.3).
-7. Cursor am Anfang/Ende einer Überschrift → Bild vor/nach der unveränderten
-   Überschrift.
-8. Cursor am Anfang/Ende/inmitten des (einzigen) Absatzes eines `list_item` →
-   Bild bleibt strukturell **innerhalb** desselben `list_item`, führendes
-   `paragraph`-Kind bleibt erhalten (auch am Anfang: 1-Zeichen-Stub statt
-   Verstoß gegen `'paragraph block*'`), keine Vermischung mit einem
-   benachbarten zweiten `list_item`.
-9. Cursor inmitten des Absatzes einer `table_cell` → Zelle bleibt gültig
-   (`block+`), Bild zwischen zwei Absätzen.
-10. Bestehende Selektion (nicht-leer) beim Einfügen → wird ersetzt, nicht
-    ergänzt (Anforderung 2.2).
-11. `insertImage(src)` ohne Options-Objekt → `width`/`height` bleiben `null`
-    (Abwärtskompatibilität der neuen Signatur).
+**`src/formats/shared/editor/__tests__/commands.test.ts` — ERWEITERN** (nicht neu; die
+Datei existiert bereits und testet `canCut`/`cutSelection`). Neuer `describe('insertImage')`
+mit den 1.6-Fällen als **maßgeblichen** Regressionstests (behebt F11). Jeweils
+`EditorState.create({ doc, schema: wordSchema })`, Selektion setzen,
+`insertImage(src, opts)(state, tr => state = state.apply(tr))`, dann `state.doc.toJSON()`
+prüfen:
+1. Cursor mitten im Absatz → zwei Absätze, Text davor/danach vollständig, Bild dazwischen.
+2. Cursor am Anfang/Ende eines nicht-leeren Absatzes → Bild davor/danach, kein leerer Stub.
+3. Leerer Absatz → Bild ersetzt ihn.
+4. Mitten in fett-Text → beide Teile behalten `strong`; Bild-Node erhält **keine** Mark.
+5. Vor `hard_break` → `hard_break` bleibt im zweiten Teilabsatz.
+6. Mitten in Überschrift → aktuelles Verhalten festnageln (Teilen in zwei gleichrangige
+   Überschriften **oder** was der Testlauf real zeigt) — dokumentiert das akzeptierte
+   Verhalten (9.3).
+7. `list_item` (Content `block+`): Cursor am Anfang/Ende/Mitte → Bild bleibt **innerhalb**
+   desselben `list_item`; mit zwei `list_item`s prüfen, dass **nichts** zwischen ihnen
+   vertauscht wird. (Erwartung explizit gegen das **tatsächliche** `block+`-Modell
+   formulieren, nicht gegen das falsche `'paragraph block*'` der Vorfassung.)
+8. `table_cell` (`block+`): Cursor mittig → Zelle bleibt gültig.
+9. Nicht-leere Selektion → wird ersetzt, nicht ergänzt (Anforderung 2.2).
+10. `insertImage(src)` ohne Options → `width`/`height` bleiben `null` (Abwärtskompatibilität).
+11. `insertImage(src, { width, height })` → Node trägt exakt diese Werte.
 
-**NEU: `src/formats/shared/editor/__tests__/imageValidation.test.ts`** (F3/F4):
-1. `sniffImageMimeType`: je ein gültiges Byte-Präfix für PNG/JPEG/GIF87a/
-   GIF89a/WebP/BMP → korrekt erkannt; leerer/zu kurzer/zufälliger Byte-Puffer
-   → `null`.
-2. `computeDisplaySize`: Bild kleiner als `maxWidth` → unverändert; Bild
-   breiter → herunterskaliert, Seitenverhältnis erhalten (Toleranz durch
-   Rundung); 0×0-Eingabe (sollte real nie vorkommen) → sinnvoller
-   Fallback statt Division durch 0/NaN.
-3. `arrayBufferToBase64`: Rundreise-Test gegen `atob`/bekannten Base64-String,
-   inkl. eines Puffers > 0x8000 Bytes (deckt den Chunking-Pfad ab, der
-   `String.fromCharCode(...)`-Stack-Overflow bei großen Arrays vermeidet).
-4. `MAX_IMAGE_BYTES`/`SUPPORTED_IMAGE_MIME_TYPES`: reine Konstanten-Snapshot-
-   Tests, die eine versehentliche stille Änderung der dokumentierten
-   Formatliste/Obergrenze sofort sichtbar machen.
-5. **Nicht abgedeckt hier, bewusst:** `loadImageDimensions` (echte
-   Bilddekodierung) — jsdom dekodiert keine echten Bilddaten (bereits im
-   Projekt etabliertes, dokumentiertes Muster, vgl. `SKIP_SLOW_UNDER_JSDOM` in
-   `docx/__tests__/external-fixtures.test.ts:40`/`odt/__tests__/
-   external-fixtures.test.ts:17` für eine andere jsdom-Grenze) — wird
-   ausschließlich per E2E (5.2) mit echten Testbild-Dateien abgesichert.
+**`src/formats/shared/editor/__tests__/imageValidation.test.ts` — NEU** (F3/F4):
+`sniffImageMimeType` (je gültiges Präfix PNG/JPEG/GIF87a/GIF89a/WebP/BMP → erkannt;
+leer/zu kurz/zufällig → `null`); `computeDisplaySize` (kleiner als max → unverändert;
+breiter → herunterskaliert, Verhältnis erhalten; 0×0 → Fallback statt NaN);
+`arrayBufferToBase64` (Rundreise gegen `atob`, inkl. > 0x8000-Byte-Puffer für den
+Chunking-Pfad); Konstanten-Snapshot für `MAX_IMAGE_BYTES`/`SUPPORTED_IMAGE_MIME_TYPES`.
+`loadImageDimensions` **nicht** hier (jsdom dekodiert keine echten Bilddaten) → nur E2E.
 
-**NEU: `src/formats/shared/units.test.ts`** (Grundlage für F5/F6/F7/F8):
-1. `pxToEmu`/`emuToPx` sind zueinander inverse Rundreisen (im Rahmen der
-   Rundungsgenauigkeit).
-2. `pxToCm` gegen bekannte Referenzwerte (`96px = 2.54cm`, `300px ≈ 7.94cm`).
-3. `parseOdfLength`: `"6cm"`, `"1in"`, `"28.35pt"`, `"120mm"`, `"300px"` →
-   korrekte px-Werte; `""`, `null`, `"abc"`, `"-5cm"` → `null` (defensiv gegen
-   reale Fremddateien mit unerwartetem/fehlerhaftem Wert).
+**`src/formats/shared/units.test.ts` — NEU**: `pxToEmu`/`emuToPx` invers (Rundungstoleranz);
+`pxToCm` gegen Referenz (`96px = 2.54cm`, `300px ≈ 7.94cm`); `parseOdfLength` für
+`"6cm"`/`"1in"`/`"28.35pt"`/`"120mm"`/`"300px"` → korrekt, und `""`/`null`/`"abc"`/`"-5cm"` → `null`.
 
-**`src/formats/docx/__tests__/roundtrip.test.ts`** (behebt F13, Ergänzungen zum
-bestehenden „DOCX round trip: images"-Block, Zeilen 251-276):
-1. Bestehender erster Test (Zeile 252-259) wird um
-   `expect(image.attrs.width).toBe(100)` / `expect(image.attrs.height).toBe(80)`
-   ergänzt — **muss vor** Fix F1/F5 rot sein (Eingabe hat bereits `width:
-   100, height: 80`, Assertion fehlte bisher komplett).
-2. **Neu:** Bild ohne `width`/`height` im Eingabe-Node → Export/Reimport
-   ergibt die gemeinsame Ersatzgröße `DEFAULT_IMAGE_WIDTH_PX`/
-   `DEFAULT_IMAGE_HEIGHT_PX` (300/200), nicht `null` (da der Writer beim
-   Fehlen jetzt aktiv einen Wert schreibt, den der Reader zurückliest — anders
-   als heute, wo `null` bleibt, weil der Reader `wp:extent` nie liest).
-3. **Neu, deckt F5:** handgebautes DOCX-XML mit einem `wp:extent
-   cx="1828800" cy="1143000"` (2×1,25 Zoll = 192×120 px) → Reader liefert
-   exakt `width: 192, height: 120` — muss **vor** Fix F5 rot sein.
-4. **Neu:** Bild in Tabellenzelle (`table_cell.content = [image mit width/
-   height]`) → Rundreise erhält Größe (deckt Rundreise-Szenario 8 auf
-   Unit-Ebene ab, da laut Anforderung Abschnitt 0 bisher **nicht einmal**
-   diese Grundstruktur getestet war).
-5. **Neu:** Bild in Kopf-/Fußzeile mit Größe → Rundreise erhält sie.
-6. **Neu:** zwei unterschiedliche Bilder (verschiedene Data-URLs) an
-   unterschiedlichen Positionen mit unterschiedlicher Größe → beide bleiben
-   unterscheidbar mit je eigener Größe (Rundreise-Szenario 9).
-7. **Neu:** zweimaliges Einfügen **derselben** Data-URL an unterschiedlichen
-   Positionen → beide Vorkommen bleiben erhalten, `ImageCollector` dedupliziert
-   nur die Zip-Mediendatei, nicht die Dokumentposition (verifiziert Grenzfall
-   3.6 — bereits vorhandenes `imageCollector.ts`-Verhalten, nur bisher
-   ungetestet).
+**`src/formats/docx/__tests__/roundtrip.test.ts` — ERWEITERN** (`describe('DOCX round trip: images')`, Z. 307-332; behebt F13/F15):
+1. Bestehender Test (Z. 308-315) um `expect(image.attrs.width).toBe(100)` /
+   `.height).toBe(80)` ergänzen — **muss vor F1/F5 rot sein** (Eingabe hat bereits
+   `width: 100, height: 80`, Assertion fehlt heute komplett).
+2. Bild ohne Maße → nach Rundreise `DEFAULT_IMAGE_WIDTH_PX`/`_HEIGHT_PX` (300/200), nicht
+   `null` (Writer schreibt jetzt aktiv, Reader liest zurück).
+3. **F5:** handgebautes `document.xml` mit `wp:extent cx="1828800" cy="1143000"`
+   (2×1,25 Zoll = 192×120 px) → `readDocx` liefert `width: 192, height: 120` — **vor F5 rot**.
+4. **F15 (eindeutige IDs):** Dokument mit **drei** unterschiedlichen Bildern → exportiertes
+   `document.xml` parsen, **alle** `wp:docPr/@id` einsammeln, `new Set(ids).size === 3` und
+   jede `id > 0`; zusätzlich `pic:cNvPr/@id` == zugehörige `wp:docPr/@id`. (mammoth prüft
+   das **nicht**, daher eigene XML-Parse-Assertion — siehe externe Validierung unten.)
+5. Bild in Tabellenzelle mit Maßen → Rundreise erhält Größe (Szenario 8, Unit-Ebene).
+6. Bild in Kopf-/Fußzeile mit Maßen → Rundreise erhält Größe; die Bild-ID der Fußzeile
+   kollidiert **nicht** mit einer Body-Bild-ID (gemeinsame `DrawingIdSequence`).
+7. Zwei **identische** Data-URLs an verschiedenen Positionen → beide Vorkommen bleiben,
+   `ImageCollector` dedupliziert nur die Mediendatei (`docx/imageCollector.ts:15-28`), nicht
+   die Position; Content-Types deklarieren die Endung genau einmal.
 
-**`src/formats/odt/__tests__/roundtrip.test.ts`** (Ergänzungen analog zum
-bestehenden „ODT round trip: images"-Block, Zeilen 212-245):
-1. Analog Punkt 1-2/4-7 oben, ODT-Äquivalent.
-2. **Neu, deckt F6:** handgebautes ODT-`content.xml` mit
-   `<draw:frame svg:width="5cm" svg:height="3cm">` → Reader liefert
-   `width`/`height` in px (5cm ≈ 189px, 3cm ≈ 113px, mit Rundungstoleranz) —
-   muss **vor** Fix F6 rot sein.
-3. **Neu, deckt F8:** exportiertes `content.xml` enthält **keine**
-   `svg:width="...px"`-Zeichenkette mehr (Regex-Assertion gegen den
-   generierten XML-String) — hält den behobenen Neufund als Regressionstest
-   fest.
+**`src/formats/odt/__tests__/roundtrip.test.ts` — ERWEITERN** (`describe('ODT round trip: images')`, Z. 341ff.):
+1. Analog DOCX-Punkte 1-2/5-7.
+2. **F6:** handgebautes `content.xml` mit `<draw:frame svg:width="5cm" svg:height="3cm">`
+   → Reader liefert px (5cm ≈ 189px, 3cm ≈ 113px, Toleranz) — **vor F6 rot**.
+3. **F8:** exportiertes `content.xml` enthält **keine** `svg:width="…px"`-Zeichenkette mehr
+   (Regex-Assertion) — hält den Neufund als Regression fest.
 
-**`src/formats/docx/__tests__/external-fixtures.test.ts` /
-`src/formats/odt/__tests__/external-fixtures.test.ts`** (F14, Teilabdeckung —
-siehe auch Abschnitt 9 zu fehlenden, mit bekannter Größe versehenen
-Fixture-Dateien): Ergänzung um eine **strukturelle** Prüfung zusätzlich zur
-bestehenden „importiert ohne Absturz"-Prüfung: für Fixtures, die laut
-Dateiname/POI-/ODF-Toolkit-Dokumentation Bilder enthalten (z. B. `ContentType-
-IsCaseInsensitive.docx`, `docx4j-example.docx` bzw. ODT-Äquivalente – exakte,
-tatsächlich bildhaltige Namen erst nach Sichtung der 127/202 Fixture-Dateien
-final auszuwählen, siehe Abschnitt 9), mindestens: gefundene `image`-Knoten
-haben `width`/`height` **nicht** `null` (kein Rückfall auf den früheren
-Nur-`src`-Zustand).
+**Externe Validierung — ERWEITERN, nicht neu:**
+- `src/formats/docx/__tests__/external-validation.test.ts` (mammoth): einen **Mehr-Bilder**-
+  Fall ergänzen, der von mammoth ohne `error`-Message akzeptiert wird und dessen HTML die
+  `<img>` enthält. **Wichtig (Klarstellung):** mammoth ist tolerant und prüft die
+  `wp:docPr/@id`-Eindeutigkeit **nicht** — die eigentliche Eindeutigkeits-Assertion ist der
+  XML-Parse-Test in roundtrip.test.ts Punkt 4 (Abnahmekriterium 4).
+- `src/formats/odt/__tests__/external-validation.test.ts` (RelaxNG/xmllint-wasm): der
+  bestehende Fall nutzt ein Bild **ohne** gesetzte Größe (Fallback → früher `px`, jetzt
+  `cm`). Für Abnahmekriterium **5.1.12** einen zweiten Fall **mit** gesetzten
+  `width`/`height` ergänzen (exerziert den px→cm-Pfad) und gegen das ODF-1.3-Schema
+  validieren — beweist, dass der geschriebene `svg:width`/`svg:height`-Wert ein
+  schemagültiger Längenwert ist (schlägt mit dem alten `px` fehl).
 
-### 5.2 Neu: `tests/e2e/images.spec.ts` (behebt F12)
+### 5.2 `tests/e2e/images.spec.ts` — NEU (behebt F12)
 
-Folgt den bestehenden Konventionen aus `tests/e2e/docx.spec.ts`/`odt.spec.ts`/
-`selection-regression.spec.ts` (`docxCard`/`odtCard`-Locator-Helfer, `page.
-getByRole('button', ...)`-Selektoren, `input[type="file"].setInputFiles(...)`
-für den echten `filechooser`-Flow analog zu `docx.spec.ts:85-97`,
-`page.waitForEvent('download')` + `JSZip` für Export-Prüfung). Deckt **beide**
-Formate über echten Datei-Upload/-Download ab. Testbilder: mehrere kleine,
-fest eingebettete PNG/JPEG-Fixtures mit **bekanntem, nicht-3:2-Seitenverhältnis**
-(z. B. 40×40 px quadratisch, 160×90 px 16:9) direkt als Buffer im Testcode
-(analog `buildSampleDocx()` in `docx.spec.ts:7-48`, keine zusätzlichen
-Binärdateien im Repo nötig für die synthetischen Fälle). Mindestens:
+Folgt den Konventionen aus `tests/e2e/docx.spec.ts`/`odt.spec.ts`/
+`selection-regression.spec.ts`. Der echte `filechooser`-Flow (`input[type="file"]`
+`.setInputFiles(...)`) ist im Repo bereits erprobt — u. a. `clipboard.spec.ts:~283`
+(Bild-Upload als Vorbedingung fürs Kopieren) und `cut.spec.ts`; ein **dedizierter** Test
+für das Einfügen selbst fehlt. Testbilder als Buffer im Testcode, mit **bekanntem
+nicht-3:2-Seitenverhältnis** (z. B. 40×40 quadratisch, 160×90 = 16:9). Mindestens:
 
-1. **Grundfall (höchste Priorität, Anforderung 3.2/2.1.3):** Editor fokussieren,
-   Text eingeben, Cursor mitten im Text platzieren (`page.keyboard.press`-
-   Sequenz oder `evaluate` auf die DOM-Selektion), Klick auf „Bild einfügen",
-   `input[type="file"].setInputFiles(...)` mit Test-PNG → Bild sichtbar im
-   DOM (`page.locator('.ProseMirror img')`), **beide** Textteile davor/danach
-   unverändert vorhanden.
-2. **Undo (Anforderung 2.6):** direkt im Anschluss an 1 → `Strg+Z` → Bild
-   verschwindet, ursprünglicher, **wieder zusammengeführter** Absatz exakt wie
-   vor der Einfügung (ein Absatz, nicht zwei leere).
-3. **Redo:** danach `Strg+Y`/`Strg+Umschalt+Z` → Bild inkl. Attribute
-   identisch wieder da.
-4. **Formatprüfung (Anforderung 3.3/2.3):** `.txt`-Datei mit Endung `.png`
-   umbenannt (oder MIME-Typ `text/plain` mit `setInputFiles`) auswählen →
-   `role="alert"`-Fehlermeldung sichtbar, **kein** `<img>` im DOM eingefügt,
-   keine Konsolen-Fehler durch unbehandelte Promise-Ablehnung
-   (`page.on('pageerror', ...)`-Assertion).
-5. **Abbrechen des Dialogs:** `setInputFiles([])`/kein Datei-Event → keine
-   Änderung am Dokument (Anforderung 2.3, expliziter Test für den bereits
-   korrekten `if (!file) return`-Pfad).
-6. **Toolbar-Bedienbarkeit (Anforderung Abschnitt 1):** Button per `Tab`
-   fokussieren (nicht klicken), Enter/Leertaste drücken → Dateidialog-Event
-   (`page.on('filechooser', ...)`) wird ausgelöst; `title`/`aria-label`
-   per `page.getByRole('button', { name: 'Bild einfügen' })` auffindbar.
-7. **Bestehende Selektion wird ersetzt (Anforderung 2.2):** Text markieren,
-   Bild einfügen → markierter Text ist weg, Bild an seiner Stelle.
-8. **Größe/Seitenverhältnis (Grenzfall 3.4):** 16:9-Testbild einfügen → export-
-   tieren (DOCX **und** ODT) → mit `JSZip` das exportierte `wp:extent`
-   (`cx`/`cy`) bzw. `svg:width`/`svg:height` auslesen, Seitenverhältnis gegen
-   das Quellbild prüfen (Toleranz durch Rundung) — direkter Nachweis, dass
-   **keine** Verzerrung auftritt.
-9. **Rundreise DOCX/ODT (Anforderung 5.1.1/5.1.2):** Bild einfügen → echten
-   Download auslösen → Datei erneut über echten Upload-Weg importieren →
-   Bild weiterhin an derselben Stelle sichtbar, unverzerrt.
-10. **Selektions-Regression, Bild als dritte Aktion (Anforderung 3.1/6.7):**
-    neue Erweiterung von `selection-regression.spec.ts` (oder eigener Block
-    hier, mit identischem Muster wie die bestehenden zwei Tests dort): Text
-    eingeben → Bild einfügen → Klick zur Neupositionierung → Enter → weiter
-    tippen → nichts geht verloren.
-11. **Geltungsbereich Dokumentstruktur (Anforderung 2.8):** Bild in Tabellen-
-    zelle einfügen (Tabelle einfügen → in Zelle klicken → Bild einfügen) →
-    Zelle bleibt bedienbar, Text davor/danach in derselben Zelle möglich;
-    Bild in Listenpunkt einfügen (analog) → Liste bleibt intakt (kein
-    Abbruch der Aufzählung).
-12. **Bild am Dokumentanfang/-ende (Grenzfall 3.8):** leeres neues Dokument,
-    Cursor im einzigen leeren Absatz, Bild einfügen → Editor bleibt bedienbar,
-    Text davor/danach eingebbar.
-13. **Mehrfaches schnelles Einfügen (Grenzfall 3.10):** drei verschiedene
-    Testbilder nacheinander ohne Zwischenklick auf den Editor einfügen →
-    alle drei an unterschiedlichen, korrekten Positionen.
-14. **Großdatei (Grenzfall 3.7, Testplan-Hinweis 10):** ein bewusst nahe an
-    `MAX_IMAGE_BYTES` liegendes, aber gültiges Testbild (mehrere MB) einfügen,
-    Zeit bis zur sichtbaren Darstellung messen und protokollieren
-    (`console.log` im Test, kein hartes Zeitlimit als Assertion, um Flakiness
-    auf CI-Runnern zu vermeiden), UI bleibt währenddessen bedienbar (z. B.
-    Toolbar weiterhin klickbar direkt danach getestet).
+1. **Grundfall (höchste Priorität, 3.2/2.1.3):** Text tippen, Cursor mittig setzen, Bild
+   über `setInputFiles` einfügen → `.ProseMirror img` sichtbar, **beide** Textteile
+   unverändert.
+2. **Tippen nach Einfügen (3.12/2.1.4):** direkt nach 1 tippen → prüfen, was passiert
+   (Bild bleibt + Text dahinter **oder** — falls die NodeSelection-auf-Bild belassen wird —
+   dokumentiertes Alternativverhalten). Ergebnis gemäß Freigabeentscheidung 9.3/Anforderung
+   2.1.4 festhalten.
+3. **Undo (2.6):** `Strg+Z` → Bild weg, Absatz **wieder zusammengeführt** (ein Absatz).
+4. **Redo:** Bild inkl. Attribute identisch zurück.
+5. **Formatprüfung (3.3/2.3):** `text/plain`-Datei mit `.png`-Namen wählen →
+   `role="alert"` sichtbar, **kein** `<img>` im DOM, **keine** `pageerror`
+   (`page.on('pageerror', …)`-Assertion für die beseitigte Promise-Ablehnung).
+6. **Dialog-Abbruch:** kein File-Event → Dokument unverändert.
+7. **Dieselbe Datei zweimal:** zweimal dieselbe Datei → beide Male eingefügt (Regression
+   für das `input.value = ''`-Reset).
+8. **Bedienelement (Abschnitt 1):** `getByRole('button', { name: 'Bild einfügen' })`
+   auffindbar; per `Tab` fokussierbar, Enter/Leertaste löst `filechooser` aus. **Zusätzlich
+   (falsch-negativer Schutz, Anforderung 2.3):** eine korrekt PNG/BMP-signierte Datei mit
+   leerem oder untypischem `file.type` (via `setInputFiles` mit explizit gesetztem
+   `mimeType: 'image/x-ms-bmp'` bzw. `''`) wird trotzdem eingefügt — beweist, dass allein die
+   Byte-Signatur entscheidet und der breite `accept="image/*"`-Filter nichts Gültiges
+   ausschließt.
+9. **Bestehende Selektion (2.2):** Text markieren → Bild → Text weg, Bild an seiner Stelle.
+10. **Größe/Verhältnis (3.4):** 16:9-Bild einfügen → DOCX **und** ODT exportieren
+    (`waitForEvent('download')` + `JSZip`) → `wp:extent`-`cx/cy` bzw. `svg:width/height`
+    auslesen, Verhältnis gegen die Quelle prüfen (Toleranz) — Nachweis: keine Verzerrung.
+11. **Rundreise DOCX/ODT (5.1.1/5.1.2):** Bild einfügen → Download → erneut importieren →
+    Bild an derselben Stelle, unverzerrt.
+12. **Selektions-Regression (3.1):** Text → Bild → Klick-Neupositionierung → Enter →
+    weiter tippen → nichts verloren (Erweiterung von `selection-regression.spec.ts`).
+13. **Struktur (2.8):** Bild in Tabellenzelle und in Listenpunkt einfügen → Kontext bleibt
+    intakt.
+14. **Großdatei (3.7):** Bild nahe `MAX_IMAGE_BYTES` einfügen, Zeit protokollieren (kein
+    hartes Limit, gegen CI-Flakiness), Toolbar bleibt danach bedienbar; Datei **über** der
+    Grenze → `role="alert"`, keine Einfügung.
+15. **EXIF-Orientierung (3.13/F18, neues Fixture `exif-rotated.jpg` aus 5.3):** Hochkant-
+    Foto mit Exif-Rotation einfügen → im Editor sichtbar **hochkant**, nicht seitenverkehrt
+    gestaucht (Screenshot- oder Bounding-Box-Vergleich `naturalWidth < naturalHeight` vs.
+    gerendertes Seitenverhältnis); danach als DOCX **und** ODT exportieren und wieder in
+    denselben Editor importieren → weiterhin hochkant, unverzerrt. Deckt nur die
+    **Editor-eigene** Rundreise ab (3.5 begründet, warum die reale-Word/LibreOffice-Frage
+    außerhalb automatisierter Tests bleibt).
+16. **Transparenz (3.14):** PNG mit Alpha-Kanal einfügen, als DOCX/ODT exportieren,
+    reimportieren → Data-URL-Bytes vor/nach identisch (kein Flatten auf Weiß) — Byte-
+    Vergleich, nicht nur „Bild sichtbar".
+17. **Animiertes GIF (3.14):** vorhandenes `WithGIF.docx` (5.3) oder ein eigenes
+    Mehrbild-GIF einfügen/importieren → Bytes bleiben exakt erhalten (kein Umkodieren in
+    ein Standbild); Animation selbst ist **kein** Prüfkriterium.
+18. **Extremformate (3.14):** ein 1×1-px-Bild → bleibt bei `computeDisplaySize` in
+    Originalgröße (kollabiert nicht auf 0×0, siehe 4.2-Fallback); ein sehr breites
+    Bild (z. B. 5000×50) → Herunterskalierung auf `PAGE_CONTENT_WIDTH_PX` erhält das
+    Seitenverhältnis (keine Stauchung in der Höhe). CMYK-JPEG: nur „kein Absturz,
+    kein `pageerror`" — Farbdarstellung ist explizit „best effort" (Anforderung 3.14),
+    keine Pixel-genaue Assertion.
 
-### 5.3 Reale Fixture-Dateien (Anforderung Abschnitt 6.9, Abnahmekriterium 8)
+### 5.3 Reale Fixture-Dateien (Anforderung 6.10, Abnahmekriterium 8)
 
-Wie in `bild-einfuegen-req.md` Abschnitt 0 (letzte Zeile) selbst vermerkt:
-`tests/fixtures/external/README.md` erwähnt Bilder in den vorhandenen
-127 DOCX-/202 ODT-Fixtures aus `apache/poi`/`tdf/odftoolkit`, aber es ist
-**nicht verifiziert**, welche konkreten Dateien tatsächlich Bilder mit
-bekannter, von den Ersatzwerten abweichender Größe enthalten. Vor Abschluss
-dieses Plans muss das per Sichtung der `word/media/`- bzw. `Pictures/`-Ordner
-in den bereits vorhandenen Fixture-Zip-Dateien geklärt werden (kein Netzwerk-
-zugriff nötig — die Dateien liegen bereits lokal in
-`tests/fixtures/external/{docx,odt}/`). Diese Sichtung ist **nicht** Teil
-dieses Plans (reine Bestandsaufnahme, kein Code), wird aber als Voraussetzung
-für 5.1 (`external-fixtures.test.ts`-Ergänzung) und Abnahmekriterium 8
-festgehalten — siehe Offene Entscheidung 9.5. Zusätzlich (Anforderung
-Testplan-Hinweis 9) werden mindestens je eine mit echtem Microsoft Word bzw.
-LibreOffice Writer neu erzeugte Datei mit einem bewusst auf eine unübliche
-Größe (z. B. 5×5 cm) gesetzten Bild benötigt, falls die vorhandenen Korpora
-keine geeignete Datei enthalten — das erfordert einen manuellen Schritt
-außerhalb dieses automatisiert geplanten Codes.
+Die vorhandenen Korpora unter `tests/fixtures/external/` wurden für diesen Plan
+**tatsächlich gesichtet** (`unzip -l`); die folgenden Dateien sind verifiziert bildhaltig
+mit real gemessenen Größen und ersetzen die in der Vorfassung erfundenen Namen:
+
+| Fixture | Verifizierter Inhalt | Nutzung im Test |
+|---|---|---|
+| `docx/headerPic.docx` | Bild in **`word/header1.xml`**, `wp:extent cx=cy=763270` EMU (**quadratisch**, ≈ 80×80 px) | **F5 real + Szenario 8 (Kopfzeile).** Quadratisch ⇒ die alte 3:2-Ersatzgröße hätte verzerrt; beweist, dass die reale Größe gelesen wird. |
+| `docx/drawing.docx` | 10 Medien, u. a. `wp:extent 2466975×781050` (≈ 259×82 px, ~3,16:1) | **Mehrere Bilder + Verzerrungsfreiheit + F15** (viele unterschiedliche `docPr/@id`). |
+| `docx/WithGIF.docx` | 1 GIF-Medium | **Content-Type-Treue GIF** (Anforderung 5.2/3.14). |
+| `docx/VariousPictures.docx` | 5 Medien: `image1.wmf`, `image2.png`, `image3.emf`, `image4.emf`, `image5.jpeg` (Dateinamen real durch Entpacken verifiziert) | Zusätzlicher gemischter Mehr-Bilder-Fall **und der reale, sofort verfügbare F17-Testfall** (4.12): zwei der fünf Bilder sind `.wmf`/`.emf` — genau die Endungen, die die heutige endungs-basierte MIME-Ableitung zu einem unrenderbaren `data:image/emf` macht. |
+| `odt/image-attributes.odt` | 3 `draw:frame` mit realem `svg:width/height` (`2.147cm`, `3.383cm`, `3.494cm`) | **F6 real** (2.147cm ≈ 81 px). |
+| `odt/imageAsChar.odt` | `text:anchor-type="as-char"` (= unser Writer), `svg:width` bis `6.507cm` | Quer-Check des As-char-Ankers + Größe. |
+| `odt/image.odt` | 1 Bild in `Pictures/` | Minimaler ODT-Bild-Import. |
+
+**Ergänzung von `docx/__tests__/external-fixtures.test.ts` /
+`odt/__tests__/external-fixtures.test.ts`:** zusätzlich zur bestehenden „importiert ohne
+Absturz"-Prüfung für die o. g. Dateien assertieren, dass gefundene `image`-Knoten
+`width`/`height` **nicht** `null` haben (kein Rückfall auf den Nur-`src`-Zustand).
+
+**Manuell zu beschaffen (Testplan-Hinweis 9, außerhalb des automatisierbaren Codes):**
+1. Je eine mit echtem Word bzw. LibreOffice erzeugte Datei mit bewusst unüblicher
+   Bildgröße (z. B. 5×5 cm), falls die vorhandenen Korpora für die Cross-Format-Rundreise
+   (5.1.5/5.1.6) nicht genügen. Die o. g. Fixtures decken die Import-Größen-Fälle bereits ab.
+2. **Neu (F18/3.5):** ein reales, mit einem Smartphone aufgenommenes JPEG mit
+   Exif-`Orientation`-Tag ≠ 1 (z. B. Hochkant-Foto, dessen Byte-Dimensionen landscape
+   sind) — im Repo aktuell **keine** `.jpg`/`.jpeg`-Datei mit Exif-Rotation vorhanden
+   (geprüft: `tests/fixtures/` enthält aktuell keine `.jpg`/`.jpeg`-Fixtures überhaupt).
+   Ablage-Vorschlag: `tests/fixtures/images/exif-rotated.jpg`, referenziert vom neuen
+   E2E-Test (5.2 Punkt 15).
 
 ---
 
 ## 6. Bewusste Nicht-Umsetzung
 
-Folgende, in `bild-einfuegen-req.md` erwähnte oder naheliegende Punkte werden
-**nicht** in diesem Plan umgesetzt:
-
-1. **Resize-Ziehpunkte/Eingabefeld, `setImageSize`-Command, NodeView.** Eigener
-   Slug `bild-groesse-aendern` (siehe Abschnitt 0). Dieser Plan liefert nur die
-   Voraussetzung (echte `width`/`height` ab Einfügen/Import).
-2. **Editierbarer Alt-Text nach dem Einfügen.** Eigener Slug `bild-alt-text`.
-3. **Zuschneiden, Online-Bilder, Textumbruch/freie Verankerung.** Eigene,
-   separate Slugs, laut Backlog alle „fehlt", nicht Gegenstand dieser Datei.
-4. **Drag & Drop / Zwischenablage-Bild-Einfügen (Screenshot, Strg+V roher
-   Bilddaten).** Explizit von der Anforderung selbst als „bewusst außerhalb
-   des Geltungsbereichs dieser Datei" markiert (Abschnitt 0, letzte Zeile).
-   `dropCursor()` bleibt rein visuell, kein eigener `handleDrop`/`handlePaste`.
-5. **Kontextmenü-Eintrag.** Kein Kontextmenü im Projekt vorhanden
-   (projektweite Lücke, nicht feature-spezifisch, wie bereits in
-   `aufzaehlungsliste-code.md` Abschnitt 7 für Listen festgestellt).
-6. **SVG als unterstütztes Format.** Bewusste Entscheidung, siehe 3.3 — als
-   kleiner Folgeschritt nachrüstbar, nicht Teil dieser Umsetzung.
-7. **Verhalten „Bild in Überschrift" aktiv unterbinden/umleiten.** Anforderung
-   2.8 fragt, ob das „überhaupt sinnvoll zugelassen werden soll". Dieser Plan
-   lässt das empirisch bestätigte, schema-konforme Verhalten (Überschrift wird
-   bei Cursor mittig im Text in zwei Überschriften geteilt) **unverändert** —
-   siehe Offene Entscheidung 9.3 zur ausdrücklichen Bestätigung/Ablehnung
-   dieser Entscheidung vor Freigabe.
+1. **Resize-Ziehpunkte/Eingabefeld, `setImageSize`, NodeView** — Slug
+   `bild-groesse-aendern`. Dieser Plan liefert nur die Grundlage (echte Maße ab
+   Einfügen/Import).
+2. **Editierbarer Alt-Text** — Slug `bild-alt-text`. Der automatische Startwert `file.name`
+   überlebt die Rundreise; die `@descr`/`@name`-Import-Grenze (F16) ist in 4.9 als kleiner
+   optionaler In-Scope-Gewinn beschrieben und ansonsten dort dokumentiert.
+3. **Zuschneiden, Online-Bilder, Textumbruch/freie Verankerung** — eigene Slugs, „fehlt".
+4. **Drag & Drop / Zwischenablage-Rohbild** — von der Anforderung selbst ausgeklammert.
+   `dropCursor()` bleibt rein visuell.
+5. **Kontextmenü-Eintrag** — kein Kontextmenü im Projekt (projektweite Lücke).
+6. **SVG als Format** — bewusst ausgeschlossen (3.3), nachrüstbar.
+7. **„Bild in Überschrift" aktiv umleiten** — offen gelassen (9.3); aktuelles schema-
+   konformes Verhalten bleibt, bis Referenzverhalten geklärt ist.
+8. **Exif-Rotation aktiv umkodieren (bake-in via `<canvas>`)** — Slug-übergreifend bewusst
+   nicht gebaut (F18/3.5): würde Anforderung 3.14 (Byte-Erhalt für PNG/GIF) verletzen und
+   wäre ohnehin nur für Exif-tragendes JPEG anwendbar. Es bleibt beim „best effort" aus
+   Anforderung 3.13.
 
 ---
 
 ## 7. Bewusst nicht behobene, aber dokumentierte Punkte
 
-- **Restrisiko aus Abschnitt 1.7:** Falls **vor** dem Öffnen des Datei-Dialogs
-  bereits eine inkorrekte/veraltete `view.state.selection` vorlag (unabhängig
-  vom Bild-Feature, z. B. die in `WordEditor.tsx:18-41` beschriebene
-  AllSelection-Situation), übernimmt die Bild-Einfügung diese unverändert.
-  Kein neuer Fix hier (die bestehende `reconcileSelectionOnClick`-
-  Infrastruktur deckt normale Klicks bereits ab) — abgesichert durch
-  Regressionstest 5.2 Punkt 10, nicht durch zusätzlichen Produktionscode.
-- **Kein hartes Verhalten für „Bild in Überschrift" definiert** — siehe
-  Abschnitt 6, Punkt 7.
-- **Reale Fixture-Sichtung noch offen** — siehe 5.3, Offene Entscheidung 9.5.
+- **Restrisiko Selektion (1.7):** Eine bereits vor dem Dialog vorliegende inkorrekte
+  Selektion wird übernommen. Kein neuer Produktionscode; abgesichert durch Regressionstest
+  5.2 Punkt 12.
+- **VML-`<w:pict>`-Größe (4.9):** kein `wp:extent` ⇒ Ersatzgröße; seltener Fremddatei-Fall.
+- **F17 (`.emf`/`.wmf`/`.tiff`)** — falls nicht als Fix umgesetzt, mindestens hier als
+  bekannte Grenze: solche Fremd-Endungen dürfen nicht zum stillen leeren Bild führen (4.12
+  beschreibt die Mindestmaßnahme; `VariousPictures.docx`, 5.3, liefert dafür bereits eine
+  reale Fixture mit echtem `.wmf`/`.emf`-Inhalt, keine neue Beschaffung nötig).
+- **„Bild in Überschrift"** — kein hartes Sollverhalten definiert (9.3).
+- **F18 (Exif-Orientierung, 3.5):** Bytes bleiben roh, Maße kommen aus dem bereits
+  browser-korrigierten `naturalWidth/naturalHeight`. Ob eine reale Word-/LibreOffice-
+  Installation dieselbe Korrektur beim Öffnen anwendet, ist außerhalb automatisierter
+  Tests dieses Projekts und bleibt eine dokumentierte Grenze, kein Fix.
 
 ---
 
 ## 8. Phasenplan
 
-1. **Phase A (Fundament, formatunabhängig):** 4.1 (`schema.ts`), 4.2
-   (`imageValidation.ts`), 4.3 (`units.ts`), 4.4 (`commands.ts`) — inkl. Unit-
-   Tests aus 5.1 für `commands.test.ts`, `imageValidation.test.ts`,
-   `units.test.ts`. Kleinster, größenteils formatunabhängiger Schritt zuerst.
-2. **Phase B (Toolbar/UI):** 4.5 (`Toolbar.tsx`), 4.6 (`index.css`) — macht
-   das Feature im Browser überhaupt über den echten `filechooser`-Flow
-   bedienbar/beobachtbar, Voraussetzung für Phase D.
-3. **Phase C (DOCX/ODT Reader+Writer):** 4.8-4.11 — mit den Roundtrip-Tests
-   aus 5.1, insbesondere den vor dem jeweiligen Fix nachweislich roten
-   Regressionstests für F5/F6/F8.
-4. **Phase D (E2E):** 5.2 (`tests/e2e/images.spec.ts`), abhängig von A-C.
-5. **Phase E (Fixtures/Dokumentation):** 5.3 (Sichtung realer Fixtures),
-   Backlog-Status-Aktualisierung, Übergabe-Notizen an
-   `bild-groesse-aendern-code.md`/`bild-alt-text-code.md`/
-   `bild-loeschen-code.md` gemäß Abschnitt 0, sobald diese existieren.
+1. **Phase A (Fundament, formatunabhängig):** 4.1 `schema.ts`, 4.2 `imageValidation.ts`,
+   4.3 `units.ts`, 4.4 `commands.ts` — inkl. Unit-Tests (`commands.test.ts`-Erweiterung,
+   `imageValidation.test.ts`, `units.test.ts`). Härtestes zuerst: die Command-Fälle aus
+   1.6/5.1, die den gemeldeten Kernfall festnageln.
+2. **Phase B (Toolbar/UI):** 4.5 `Toolbar.tsx`, 4.6 `index.css` — macht das Feature über
+   den echten `filechooser`-Flow bedienbar/beobachtbar (Voraussetzung für Phase D).
+3. **Phase C (DOCX/ODT Reader+Writer):** 4.8-4.12 — mit den Roundtrip-Tests aus 5.1,
+   insbesondere den **vor** dem jeweiligen Fix nachweislich roten Regressionstests für
+   F5/F6/F8/F15, sowie den beiden externen Validierungen (mammoth-Mehrbild, RelaxNG-mit-Größe).
+4. **Phase D (E2E):** 5.2 `tests/e2e/images.spec.ts`, abhängig von A-C.
+5. **Phase E (Fixtures/Doku):** 5.3 (externe Fixtures einbinden, inkl. neu zu
+   beschaffendem `exif-rotated.jpg` für F18/5.2 Punkt 15), Backlog-Status aktualisieren,
+   Übergabe-Notizen an `bild-groesse-aendern`/`bild-alt-text`/`bild-loeschen`.
 
 ---
 
-## 9. Offene Entscheidungen zur Freigabe vor Umsetzungsbeginn
+## 9. Offene Entscheidungen zur Freigabe
 
-1. **Unterstützte Formatliste (3.3):** Bestätigung, dass PNG/JPEG/GIF/WebP/BMP
-   genügen und SVG bewusst in dieser Iteration ausgeschlossen bleibt.
-2. **`MAX_IMAGE_BYTES = 20 MB` (F4):** Bestätigung des Werts oder Vorgabe eines
-   anderen; alternativ Entscheidung, ob überhaupt eine harte Obergrenze
-   gewünscht ist oder nur eine Beobachtung/Protokollierung der Ladezeit
-   (Anforderung selbst lässt das offen: „zu klären, ob eine Obergrenze
-   sinnvoll ist").
-3. **Verhalten „Bild in Überschrift" (Abschnitt 6, Punkt 7):** Bestätigung,
-   dass das empirisch beobachtete, schema-korrekte Aufteilen der Überschrift
-   in zwei gleichrangige Überschriften das gewünschte Verhalten ist (Word/
-   LibreOffice-Referenzverhalten hierzu wurde in dieser Codesichtung nicht
-   unabhängig verifiziert — falls ein anderes Verhalten gewünscht ist, z. B.
-   Bild automatisch aus der Überschrift heraus vor/nach sie verschieben,
-   müsste `insertImage` um eine gezielte Sonderbehandlung für
-   `$from.parent.type.name === 'heading'` ergänzt werden — nicht in diesem
-   Plan enthalten, da die Anforderung selbst dies als offene Frage formuliert).
-4. **Standard-Maximalbreite beim Einfügen:** Bestätigung, dass
-   `PAGE_CONTENT_WIDTH_PX` (aktuell 596 px, aus `pageLayout.ts`) die richtige
-   Bezugsgröße ist (statt z. B. eines kleineren, fest gewählten Werts).
-5. **Reale Fixture-Dateien (5.3):** Freigabe, dass die Sichtung der
-   vorhandenen 127/202 Fixture-Zips auf tatsächlich bildhaltige, größenmäßig
-   geeignete Dateien vor Abschluss von Phase C/E durchgeführt wird, sowie
-   Klärung, ob zusätzlich manuell mit echtem Word/LibreOffice erzeugte
-   Dateien beschafft werden (Testplan-Hinweis 9 der Anforderung) oder ob die
-   vorhandenen Korpora ausreichen.
-6. **Icon-Design (`ImageIcon`, 4.5):** Die in diesem Plan skizzierte
-   Platzhalter-SVG (Rahmen+Sonne+Berg) ist ein generischer Vorschlag: falls
-   ein bestehendes Icon-System/Designsystem für spätere Icons eingeführt
-   werden soll, sollte das **vor** Umsetzung dieses Plans entschieden werden,
-   um die Icons der übrigen Toolbar-Elemente (aktuell durchgehend
-   Unicode-Glyphen, siehe `FEATURE-SPEC-DOCX-ODT.md` Abschnitt 20.1) nicht in
-   einem separaten Folge-Refactor ein zweites Mal anfassen zu müssen.
+1. **Formatliste (3.3):** PNG/JPEG/GIF/WebP/BMP genügt, SVG bewusst ausgeschlossen?
+2. **`MAX_IMAGE_BYTES = 20 MB` (F4):** Wert bestätigen, oder nur Beobachtung/Protokollierung
+   statt harter Grenze (Anforderung lässt es offen).
+3. **Selektion/Verhalten nach Einfügen (2.1.4/3.12) + „Bild in Überschrift" (2.8):**
+   Textcursor hinter dem Bild (Word-Verhalten) **oder** Bild markiert lassen? Und:
+   Überschrift teilen (aktuelles schema-konformes Verhalten) **oder** Bild herausschieben?
+   Beides ist eine Entscheidung am Word/LibreOffice-Referenzverhalten; der gewählte Ausgang
+   wird in `commands.test.ts` (5.1 Punkt 6) und E2E (5.2 Punkt 2) festgenagelt.
+4. **Standard-Maximalbreite:** `PAGE_CONTENT_WIDTH_PX` (**aktuell 606 px**) als Bezugsgröße
+   bestätigen (statt eines kleineren festen Werts).
+5. **F16 (`@descr`-Alt-Text-Import):** als kleiner In-Scope-Gewinn hier mitnehmen (4.9) oder
+   strikt `bild-alt-text` überlassen?
+6. **F17 (`.emf`/`.wmf`/`.tiff`):** als Fix umsetzen (4.12) oder nur dokumentieren (7)?
+7. **WebP im Export (5.2):** unverändert einbetten (empfohlen, Limitation dokumentieren)
+   oder konvertieren?
+8. **Icon-Design (`ImageIcon`):** generische SVG-Platzhalter akzeptieren oder erst ein
+   projektweites Icon-System entscheiden (die übrige Toolbar nutzt heute Unicode-Glyphen +
+   das eine `ScissorsIcon`-SVG).
+9. **F18 (Exif-Orientierung, 3.5):** „best effort" (roh einbetten, browser-korrigierte Maße
+   speichern, nur die Editor-eigene Rundreise testen) akzeptieren — oder zusätzlichen
+   Aufwand für eine echte Cross-Anwendungs-Prüfung (reales Word/LibreOffice öffnen lassen,
+   außerhalb der Playwright/Vitest-Suite) einplanen? Vorschlag: „best effort" bestätigen,
+   da eine harte Garantie ohnehin außerhalb der Kontrolle dieses Codes läge.

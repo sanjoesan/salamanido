@@ -38,6 +38,15 @@ Zwei verpflichtende, **getrennte** Testebenen, wie vom Auftrag gefordert:
    ist für diese Ebene **nicht zulässig**, siehe Abschnitt 0.3 zur direkten Konsequenz daraus für
    den ToC-Ausgangszustand in E2E-Tests).
 
+**Determinismus (verbindliche Auftragsvorgabe, siehe ausformuliert Abschnitt 2.1a):** Kein
+E2E-Test dieses Plans darf durch zu schnelle Tastatureingaben flackern. Die im Repo bereits
+grün gelöste, asynchrone Selektions-Sync-Race (`tests/e2e/selection-regression.spec.ts`,
+Kommentar Zeilen 26–33: nach einem nativen `End`/Klick erst `await page.waitForTimeout(50)`,
+dann die nächste Taste) ist die maßgebliche Vorlage und wird von **jedem** ToC-Test 1:1
+übernommen. Zustands-Prüfungen laufen ausschließlich über auto-wiederholende Web-First-
+Assertions (`expect(locator).toContainText(...)`), nie über Sofort-Lesungen direkt nach einem
+Klick.
+
 Referenz-Infrastruktur im Repo, gegen die tatsächlichen Dateien verifiziert:
 `tests/e2e/docx.spec.ts` (Helfer `buildSampleDocx()` — handgebautes DOCX per JSZip, unabhängig
 vom eigenen Writer, zum Testen des Imports), `tests/e2e/odt.spec.ts`,
@@ -329,6 +338,77 @@ von `commands.ts`/`toc.ts`/`writer.ts` innerhalb eines E2E-Specs, oder jede ande
 echten UI — siehe Abschnitt 0.3 zur direkten Konsequenz für den ToC-Ausgangszustand (echte
 Datei-Uploads statt interner Testhilfe).
 
+### 2.1a Determinismus-Disziplin (verbindlich für JEDEN Test dieser Ebene)
+
+Nicht optional. Diese fünf Regeln adressieren genau die im Repo bereits dokumentierte,
+asynchrone Selektions-Sync-Race (`tests/e2e/selection-regression.spec.ts`, Kommentar Zeilen
+26–33) sowie zwei beim Gegenlesen dieses Plans gefundene Race-/Korrektheitsfehler in den
+zuerst skizzierten Testschritten. Die dortige, bereits grüne Lösung ist die maßgebliche
+Vorlage; jeder neue ToC-Test übernimmt sie unverändert.
+
+**Regel D1 — Nach jedem nativen Cursor-/Selektionswechsel WARTEN, bevor die nächste Taste
+kommt.** ProseMirror erfährt eine native, per Tastatur/Klick ausgelöste Cursorbewegung
+(`End`, `Home`, Pfeiltasten, Klick zum Neupositionieren, Dreifachklick) nur über das
+**asynchrone** `selectionchange`-Event des Browsers. Feuert der Test die Folgetaste sofort
+(wie jede `press()`-Sequenz ohne menschliche Reaktionszeit), kann sie dem Sync zuvorkommen
+und auf der **alten** Position wirken. Zwingend deshalb zwischen einem nativen
+Positionswechsel und der nächsten wirkungsabhängigen Taste:
+
+```ts
+await editor.click()                // oder press('End')/('Home')/Dreifachklick
+await page.waitForTimeout(50)        // exakt der etablierte 50-ms-Puffer aus selection-regression.spec.ts
+await page.keyboard.press('Enter')   // erst jetzt sicher auf der neuen Position
+```
+
+Das ist **kein** willkürliches `sleep`, sondern der im Repo bereits verwendete, begründete
+50-ms-Puffer für genau diese Race — er darf nicht wegoptimiert werden. Er gilt genauso vor
+dem `F9`-Auslöser und vor dem „Aktualisieren"-Klick, wenn diesen unmittelbar ein
+Klick/Cursorwechsel vorausging.
+
+**Regel D2 — Zustands-Assertions ausschließlich über auto-wiederholende Web-First-
+Assertions.** Nach „Aktualisieren"/`F9` wird der geänderte ToC-Text nur über
+`await expect(locator).toContainText(...)`/`toHaveText(...)` geprüft (Playwright wiederholt
+bis zum Timeout), **niemals** über ein einmaliges `await locator.textContent()` unmittelbar
+nach dem Klick. Erscheinen/Verschwinden der Rückmeldung (Abschnitt 2.4) wird über
+`expect(...).toBeVisible()`/`toBeHidden({ timeout })` geprüft, nicht über feste Wartezeiten.
+Der ProseMirror-Dispatch selbst ist zwar synchron, die React-Rückmeldung und ein evtl.
+`onChange`-Round-Trip zum Eltern-Zustand sind es aber nicht — die auto-retrying Assertion
+deckt beides deterministisch ab.
+
+**Regel D3 — Vor einer Folgeaktion, die vom aktualisierten ToC abhängt, das Landen der
+Aktualisierung nachweislich abwarten.** Wo ein Test nach „Aktualisieren" **sofort** eine
+weitere Aktion auslöst (v. a. `E2E-EDGE-09`: Aktualisieren → Undo → Aktualisieren), wird
+zwischen den Schritten zuerst der sichtbare Zielzustand per `expect(...)` bestätigt (die
+Aktualisierung ist damit beweisbar im DOM angekommen), erst danach folgt `ControlOrMeta+Z`.
+Ein „sofort" ohne zwischengeschaltete Assertion ist unzulässig — es wäre exakt die Art
+Timing-Abhängigkeit, die dieser Auftrag ausschließt.
+
+**Regel D4 — Eine einzelne Überschrift umbenennen, ohne das ganze Dokument zu treffen
+(Korrektur eines Fehlers in den ersten Testskizzen).** `ControlOrMeta+a` löst in ProseMirror
+über `baseKeymap` ein `selectAll` über das **gesamte** Dokument aus (nicht zeilenweise — im
+Code gegen `WordEditor.tsx`/`baseKeymap` verifiziert). Es anschließend zu übertippen würde
+das komplette Dokument inklusive ToC und aller anderen Überschriften löschen und den Test
+sinnlos machen. Zum Umbenennen **einer** Überschrift daher zeilenweise selektieren und dabei
+D1 beachten:
+
+```ts
+await headingLine.click()
+await page.waitForTimeout(50)
+await page.keyboard.press('Home')
+await page.waitForTimeout(50)
+await page.keyboard.press('Shift+End')   // markiert nur diese eine Zeile
+await page.keyboard.type('Neuer Text')   // ersetzt nur die Überschrift, nicht das Dokument
+```
+
+Alternativ ein Dreifachklick auf die Überschrift + D1-Wartezeit; beide Wege sind
+deterministisch, `ControlOrMeta+a` ist es für diesen Zweck **nicht** und ist hier verboten.
+
+**Regel D5 — Große Eingabemengen per Fixture-Upload, nicht per Tipp-Schleife.** Tests mit
+vielen Überschriften (`E2E-EDGE-04`, 200 Stück) laden ein vorbereitetes Fixture hoch, statt
+200-mal `page.keyboard.type` zu schleifen — eine solche Schleife ist langsam und race-anfällig
+(jede Zeile erneut D1). Die Tipp-Schleife ist ausdrücklich nur als letzter Ausweg zulässig und
+dann mit D1 an jeder Iteration.
+
 ### 2.2 Wiederverwendete Infrastruktur
 
 ```ts
@@ -355,9 +435,15 @@ App).
 
 ### 2.3 Grundfunktion — Aktualisieren per Toolbar-Klick und F9
 
+Für **alle** Umbenenn-/Tipp-/Klick-Schritte dieser und der folgenden Tabellen gilt
+verbindlich die Determinismus-Disziplin aus Abschnitt 2.1a (D1 Warten nach nativem
+Cursorwechsel, D2 auto-retrying Assertions, D4 zeilenweises Selektieren statt
+`ControlOrMeta+a`). Die Tabellenzeilen benennen nur das Fachziel; die
+Race-Absicherung ist in jeder Zeile mitzudenken, nicht optional.
+
 | ID | Testfall (echte Bedienung) | Prüfung |
 |---|---|---|
-| E2E-UPDATE-01 | ODT-Karte → echten Upload von `test1.odt` (`input.setInputFiles`) → im Editor die erste Überschrift-Zeile anklicken, `page.keyboard.press('ControlOrMeta+a')` **innerhalb dieser Zeile** (oder gezielt Text markieren) → neuen Text tippen → Klick auf `page.getByRole('button', { name: 'Inhaltsverzeichnis aktualisieren' })` | DOM-Text des zugehörigen ToC-Eintrags (`.pm-toc-entry`) ändert sich sichtbar auf den neuen Überschriftentext |
+| E2E-UPDATE-01 | ODT-Karte → echten Upload von `test1.odt` (`input.setInputFiles`) → erste Überschriftzeile anklicken, **D1-Wartezeit**, dann **zeilenweise** selektieren (`Home` → D1 → `Shift+End`, **nicht** `ControlOrMeta+a`, siehe D4) → neuen Text tippen → Klick auf `page.getByRole('button', { name: 'Inhaltsverzeichnis aktualisieren' })` | DOM-Text des zugehörigen ToC-Eintrags (`.pm-toc-entry`) ändert sich sichtbar auf den neuen Überschriftentext; Prüfung via `await expect(page.locator('.pm-toc-entry').first()).toHaveText(...)` (D2), nicht via Sofort-Lesung. Übrige Überschriften/Einträge bleiben unverändert (Gegenprobe, dass D4 eingehalten wurde) |
 | E2E-UPDATE-02 | Gleicher Ablauf, aber Auslösung über `page.keyboard.press('F9')` mit Cursor **innerhalb** eines `.pm-toc-entry` statt Toolbar-Klick | Identisches DOM-Ergebnis wie E2E-UPDATE-01 — beide Auslösewege führen zum selben sichtbaren Zustand |
 | E2E-UPDATE-03 | DOCX-Karte → Upload von `buildSampleDocxWithToc(['Kapitel A', 'Kapitel B'])` → Überschrift „Kapitel A" über `page.getByLabel('Absatzformat')` erneut auf „Überschrift 1" setzen und Text ändern → „Aktualisieren" klicken | ToC-Eintrag zeigt neuen Text — Grundfunktion auch auf der DOCX-Karte (Editor ist formatunabhängig) |
 | E2E-UPDATE-04 | Neue Überschrift **zwischen** zwei bestehenden einfügen (`Enter` am Ende einer Überschrift, `Absatzformat` auf „Überschrift 2" setzen, Text tippen) → aktualisieren | Neuer Eintrag erscheint an der **richtigen Position** zwischen den beiden bestehenden Einträgen (Anforderung 3.3) |
@@ -379,12 +465,12 @@ App).
 | E2E-EDGE-01 | Handgebautes Mini-DOCX/ODT mit leerem ToC-Gerüst, **ohne** jede Überschrift, hochladen → „Aktualisieren" klicken | ToC-Bereich zeigt sichtbar Platzhaltertext („Keine Überschriften gefunden" o. ä.), kein Absturz, keine leere/verschwundene Fläche (Grenzfall 1) |
 | E2E-EDGE-02 | `test1.odt` hochladen, Cursor testweise in eine Tabellenzelle einer Überschrift setzen (falls im Dokument vorhanden) **oder** synthetisches Dokument mit Überschrift in Tabellenzelle bauen → aktualisieren | Kein Absturz der UI (Grenzfall 4) |
 | E2E-EDGE-03 | Handgebautes Dokument mit `maxLevel: 3`, danach im Editor eine Ebene-5-Überschrift hinzufügen (`Absatzformat` bietet nur bis Ebene 6, hier Ebene 5 wählen) → aktualisieren | Ebene-5-Überschrift erscheint **nicht** im ToC (Grenzfall 5) |
-| E2E-EDGE-04 | 200 Überschriften per `page.keyboard.type`-Schleife erzeugen (oder performanter: handgebautes Fixture mit 200 Überschriften hochladen) → aktualisieren | UI bleibt reaktionsfähig (Klick auf einen anderen Button unmittelbar danach funktioniert ohne merkliches Einfrieren), Aktualisierung schließt in vertretbarer Zeit ab (Grenzfall 6) |
+| E2E-EDGE-04 | 200 Überschriften **primär per handgebautem Fixture-Upload** (D5); die `page.keyboard.type`-Schleife nur als letzter Ausweg und dann mit D1 je Iteration → aktualisieren | UI bleibt reaktionsfähig (Klick auf einen anderen Button unmittelbar danach funktioniert ohne merkliches Einfrieren), Aktualisierung schließt in vertretbarer Zeit ab (Grenzfall 6) |
 | E2E-EDGE-05 | Überschrift ohne Text erzeugen (`Absatzformat` auf „Überschrift 1" setzen, keinen Text eingeben) → aktualisieren | Konsistentes, dokumentiertes Verhalten (leerer Eintrag ODER bewusst ausgelassen) tritt tatsächlich ein — kein Crash (Grenzfall 7) |
 | E2E-EDGE-06 | Zwei Überschriften mit identischem Text „Einleitung" auf unterschiedlichen Ebenen erzeugen → aktualisieren | Beide erscheinen als getrennte Einträge im DOM (`page.locator('.pm-toc-entry')` Anzahl `2` für diesen Text) — Grenzfall 8 |
-| E2E-EDGE-07 | Direkt in einen `.pm-toc-entry` hineinklicken und den Text manuell überschreiben → „Aktualisieren" klicken | Manuelle Änderung verschwindet, ursprünglicher (aus der Überschrift berechneter) Text erscheint wieder (Grenzfall 13) |
+| E2E-EDGE-07 | In einen `.pm-toc-entry` klicken (D1-Wartezeit), Eintragstext **zeilenweise** überschreiben (D4, kein `ControlOrMeta+a`) → „Aktualisieren" klicken | Manuelle Änderung verschwindet, ursprünglicher (aus der Überschrift berechneter) Text erscheint wieder; Prüfung via auto-retrying `expect(...)` (D2) — Grenzfall 13 |
 | E2E-EDGE-08 | Ebene-1-Überschrift direkt gefolgt von Ebene-4-Überschrift (keine 2/3 dazwischen) → aktualisieren | Beide Einträge im DOM mit unterschiedlichem `margin-left`/Einrückung entsprechend ihrer echten Ebene, keine künstlichen Zwischeneinträge (Grenzfall 14) |
-| E2E-EDGE-09 *(siehe 0.4)* | Aktualisieren klicken → sofort `ControlOrMeta+Z` (Undo) → erneut „Aktualisieren" klicken | Kein Crash, ToC-Einträge weiterhin inhaltlich korrekt |
+| E2E-EDGE-09 *(siehe 0.4, D3)* | Aktualisieren klicken → **zuerst per `expect(...)` bestätigen, dass der neue ToC-Text im DOM steht** (D3, kein „sofort" ohne Assertion) → `ControlOrMeta+Z` (Undo) → erneut „Aktualisieren" klicken | Kein Crash, ToC-Einträge weiterhin inhaltlich korrekt |
 | E2E-EDGE-10 | Zwei unabhängige ToCs (handgebautes Fixture oder zwei Mal `test1.odt`-artige Struktur simuliert) im selben Dokument, Cursor in ToC Nr. 1, „Aktualisieren" klicken | Nur der DOM-Inhalt von ToC Nr. 1 ändert sich, ToC Nr. 2 bleibt textlich unverändert (Grenzfall 3) |
 
 ### 2.6 Löschen einer zuvor verlinkten Überschrift (Grenzfall 15)
@@ -403,8 +489,10 @@ test('toc update + reselect + type — selection stays consistent', async ({ pag
   // Voraussetzung: Upload von test1.odt (oder DOCX-Äquivalent) als ToC-Ausgangszustand,
   // siehe 2.2/0.3 — kein page.evaluate.
   const editor = page.locator('.ProseMirror')
-  // ... Überschrift antippen, Text ändern ...
+  // ... Überschrift antippen (D1-Wartezeit), zeilenweise selektieren (D4), Text ändern ...
   await page.getByRole('button', { name: 'Inhaltsverzeichnis aktualisieren' }).click()
+  // D3: erst das Landen der Aktualisierung im DOM bestätigen, dann weiter.
+  await expect(page.locator('.pm-toc-entry').first()).toHaveText(/Neuer/)
 
   await page.keyboard.press('ControlOrMeta+a')
   await page.getByTitle('Fett').click()
@@ -413,6 +501,11 @@ test('toc update + reselect + type — selection stays consistent', async ({ pag
   // jetzt fett markierten, noch selektierten Text im Haupttext (außerhalb des ToC).
   await editor.click()
   await page.keyboard.press('End')
+  // D1 (PFLICHT, identisch zu selection-regression.spec.ts Zeilen 26–34): ProseMirror
+  // lernt den nativen "End"-Caret-Move nur über das asynchrone selectionchange-Event.
+  // Ohne diesen Puffer kann das folgende "Enter" der Sync zuvorkommen und auf der alten
+  // Position wirken — genau die Race, die dieser Auftrag ausschließt. NICHT weglassen.
+  await page.waitForTimeout(50)
   await page.keyboard.press('Enter')
   await page.keyboard.type('Neuer Absatz nach dem Aktualisieren-Klick.')
 
@@ -438,8 +531,13 @@ test('toc reflects a renamed heading after a real export + re-upload round trip 
   await input.setInputFiles({ name: 'test1.odt', mimeType: 'application/vnd.oasis.opendocument.text', buffer: original })
 
   const editor = page.locator('.ProseMirror')
-  // ... Überschrift "Abstract" per echtem Klick/Tippen umbenennen ...
+  // ... Überschrift "Abstract" umbenennen: anklicken → D1-Wartezeit → zeilenweise
+  //     selektieren (Home → D1 → Shift+End, KEIN ControlOrMeta+a, siehe D4) → tippen ...
   await page.getByRole('button', { name: 'Inhaltsverzeichnis aktualisieren' }).click()
+  // D3: erst bestätigen, dass der neue Text im ToC-DOM steht (und damit über onChange in den
+  //     zu exportierenden document.content-Zustand gelangt ist), DANN erst exportieren —
+  //     sonst könnte der Export einen noch nicht propagierten Stand serialisieren.
+  await expect(page.locator('.pm-toc-entry').first()).toContainText('Neuer')
 
   const downloadPromise = page.waitForEvent('download')
   await page.getByRole('button', { name: 'Exportieren' }).click()
@@ -579,6 +677,12 @@ Der Status „vorhanden" (Req-Abschnitt 7) darf aus QA-Sicht erst vergeben werde
       ohne Einschränkung, solange „einfügen" nicht nachgezogen ist.
 - [ ] Der Regressionstest aus Abschnitt 2.7 (Selection-Sync mit ToC-Klick-Sequenz) ist grün und
       dauerhaft in `selection-regression.spec.ts` verankert, nicht nur in der neuen Datei geführt.
+- [ ] **Determinismus-Disziplin (Abschnitt 2.1a) ist in jedem E2E-Test tatsächlich umgesetzt** —
+      insbesondere: kein `ControlOrMeta+a`-Übertippen zum Einzel-Umbenennen (D4), der 50-ms-Puffer
+      nach nativem Caret-Move vor der Folgetaste (D1), auto-retrying Web-First-Assertions statt
+      Sofort-Lesungen (D2), keine „sofort"-Folgeaktion ohne zwischengeschaltete Zustandsbestätigung
+      (D3). Der Testlauf muss über mind. 3 Wiederholungen (`--repeat-each=3`) flake-frei bleiben;
+      ein einziger sporadischer Fehlschlag gilt als Rot und ist zu beheben, nicht zu wiederholen.
 
 Andernfalls: Status „teilweise", mit Verweis auf die konkret offenen Punkte aus dieser Liste —
 analog zur in `inhaltsverzeichnis-aktualisieren-req.md` Abschnitt 7 und `seitenumbruch-req.md`

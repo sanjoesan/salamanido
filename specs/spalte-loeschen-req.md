@@ -1,565 +1,604 @@
 # Feature „Spalte löschen" — Anforderungsspezifikation & Testplan
 
-Status: **Entwurf zur Freigabe** — Backlog-Status ist „fehlt" und gilt aktuell als
-**nicht vertrauenswürdig**. Diese Datei ersetzt keine Codeaussage, sondern definiert
-verbindlich, was „fertig" für dieses Feature bedeutet. Bevor irgendein Status auf
-„vorhanden" gesetzt wird, muss jeder Punkt unten durch echte Browser-Bedienung
-(Playwright-E2E, kein isolierter Command-Aufruf) nachgewiesen sein — siehe
-Abschnitt 9 „Verifikationsauftrag".
+Status: **Entwurf zur Freigabe.** Backlog-Status ist „fehlt" und gilt laut Auftrag als
+**nicht vertrauenswürdig** — jeder Punkt unten muss durch echte Browser-Bedienung
+(Playwright-E2E, kein isolierter Command-Aufruf) nachgewiesen sein, bevor der Status auf
+„vorhanden" wechselt (siehe Abschnitt 9 „Verifikationsauftrag").
 
-Bezug zum Backlog (`E:\docs\specs\FEATURE-BACKLOG.md`, Abschnitt „3.2 Tabellen"):
+Bezug: `FEATURE-SPEC-DOCX-ODT.md` Abschnitt 6 („Tabellen", höchste Priorität) und
+Abschnitt 17 Zeile 20 („Tabellen-Kontextfunktionen … fehlt komplett in der UI — größte
+Einzellücke im gesamten Funktionsumfang").
 
-| Slug | Titel | Beschreibung | Status laut Backlog | Priorität | Teil dieser Spezifikation? |
+---
+
+## 0.0 Kritische Nachprüfung dieser Fassung (Stand 2026-07-05, zweite Nachprüfung)
+
+Diese Datei ist die **zweite** kritische Überarbeitung. Die erste Überarbeitung
+(2026-07-04, Tabelle unten) hatte bereits mehrere Punkte der ursprünglichen Fassung
+korrigiert — war aber selbst an einer zentralen Stelle noch **zu pessimistisch**: Ihr
+„Befund 8" (ODT-`covered-table-cell`-Reader) wurde als offener **Blocker** geführt, obwohl
+zum Zeitpunkt dieser zweiten Überarbeitung bereits zwei nachgelagerte, empirische
+Verifikationen vorliegen (`specs/spalte-loeschen-code.md` Abschnitt 3, drei ausgeführte
+Probe-Tests gegen echten Reader/Writer; `specs/spalte-loeschen-qa.md` Abschnitt A.4/D), die
+zeigen: **Befund 8 ist kein Bug.** Diese zweite Nachprüfung hat das **unabhängig** direkt am
+aktuellen Quelltext gegengeprüft (`src/formats/odt/reader.ts:301-321`,
+`src/formats/odt/writer.ts:110-175`, siehe korrigierte Zeile unten) und übernimmt die
+Korrektur nicht blind aus den Schwesterdokumenten. Zusätzlich wurden zwei weitere reale,
+bisher unerwähnte Sachverhalte direkt verifiziert: **kein Cross-Format-Export über die UI**
+(`src/app/DocumentWorkspace.tsx:68-95`, genau ein „Exportieren"-Button, `module.exportFile`
+ist an das beim Öffnen gewählte Formatmodul gebunden) und eine **vorbestehende,
+formatübergreifende `colCount`-aus-Zeile-0-Schwäche** in beiden Writern (relevant für reale
+Fremddatei-Tests, siehe Abschnitt 4 Grenzfall 17/18 und Abschnitt 6.1).
+
+Die erste Überarbeitung hatte ihrerseits die ursprüngliche Fassung Zeile für Zeile gegen
+den **tatsächlichen aktuellen Code** geprüft (nicht nur gegen den früheren
+`spalte-loeschen-code.md`, der teils schon veraltet war). Dabei wurden mehrere Aussagen
+der Ursprungsfassung als **falsch oder veraltet** entlarvt und korrigiert — sie dürfen nicht
+unbesehen übernommen werden. Die wichtigsten Korrekturen aus beiden Durchgängen:
+
+| Thema | Frühere Fassung behauptete | Tatsächlicher Stand (2026-07-05, im Code verifiziert) | Konsequenz |
+|---|---|---|---|
+| CellSelection-Hervorhebung (Abschn. 1) | „wird von `prosemirror-tables` bereits mit einer Standard-Hervorhebung dargestellt … zu prüfen" | **Falsch.** `grep` über `src/` nach `selectedCell`/`tableWrapper`/`prosemirror-tables/style` liefert **null Treffer**; `src/index.css` hat keine `.selectedCell`-Regel und importiert die Bibliotheks-CSS nicht. Die markierte Spalte ist **aktuell komplett unsichtbar**. | Sichtbarkeit ist eine **zu bauende** Pflichtfunktion, kein „nur zu prüfen". Siehe Befund 12. |
+| ODT-Writer `colCount` (vormals „Befund 7", offener Bug) | `odt/writer.ts` zähle nur die reine Zellenanzahl statt der `colspan`-Summe → Bug | **Bereits behoben.** `src/formats/odt/writer.ts:115-116` summiert die `colspan`-Werte (identisch zum DOCX-Writer) **und** schreibt `<table:covered-table-cell/>`-Platzhalter für `rowspan` (Zeile 137). | Kein offener Bug mehr — reduziert sich auf einen **Regressionstest**, der das so hält. Siehe Befund 7. |
+| ODT-`covered-table-cell`-Reader (vormals „Befund 8", **in der ersten Überarbeitung noch als aktueller Blocker geführt**) | „Der Reader liest weiterhin **nur** `table-cell`. Damit bricht die Spaltenzuordnung auch bei **selbst erzeugten** ODT-Dateien mit `rowspan`" — echter Blocker für 5.2.3/5.2.4 | **Widerlegt, empirisch [in `spalte-loeschen-code.md` Abschn. 3 gemessen, hier unabhängig gegengeprüft].** `odt/reader.ts:304` überspringt `covered-table-cell` tatsächlich, aber **das ist für ODF korrekt**: `table:number-rows-spanned`/`-columns-spanned` sind explizite Attribute **am Anker** (ODF 1.3 §9.1.1) — anders als OOXML, wo `rowspan` implizit über gezählte `vMerge`-Fortsetzungen rekonstruiert werden muss (daher das Anker-Array in `docx/reader.ts`). `prosemirror-tables`s `TableMap` rekonstruiert die Spaltenposition allein aus `colspan`/`rowspan` der echten Zellen — die übersprungenen `covered-table-cell` sind reiner ODF-Pflicht-Padding und werden nicht gebraucht. Selbst erzeugte `rowspan`-ODTs **und** vier reale LibreOffice-Fixtures (u. a. `tableCoveredContent.odt`, 33 covered-cells, `rowspan` bis 6) reisen fehlerfrei rund. Ein Reader-Rewrite hätte `rowspan` sogar **doppelt gezählt** (Attribut **+** Folgezellen) und diese heute funktionierenden Fälle **zerstört**. | **Kein** Blocker, **keine** Reader-Änderung. Reduziert sich auf einen **Regressionstest**, der das bereits korrekte Verhalten absichert (Abschnitt 3.5, Grenzfall 6/18, Abschnitt 5.2.3/5.2.4, Abschnitt 6.2). |
+| Kontextmenü-Frage (Abschn. 1 Zeile 4) | „offene Entscheidung, Kontextmenü-System ja/nein, null Treffer für `contextmenu`" | **Bereits entschieden.** `src/formats/shared/editor/WordEditor.tsx:117-121` dokumentiert die bewusste Projektentscheidung: **kein** eigenes Kontextmenü, **kein** `contextmenu`-`preventDefault` — das native Browser-Kontextmenü bleibt erreichbar. | Keine offene Frage mehr: Toolbar-Bedienelement, konsistent mit allen übrigen Aktionen. Siehe Befund 15. |
+| „Befund 6" (DOCX-Writer `colCount`) | „muss verifiziert werden", potenzieller Bug bei `vMerge` in Zeile 0 | `docx/writer.ts:160` summiert `colspan` korrekt; `vMerge`-Fortsetzungen werden **nie** als eigene JSON-Zellen gespeichert → Zeile 0 kann strukturell keine enthalten. **Aktuell korrekt für reguläre Tabellen** — siehe aber die neu aufgenommene, unabhängige `colCount`-aus-Zeile-0-Schwäche bei irregulären Fremddateien (Abschnitt 6.1). | Kein Bug in der eigenen Erzeugung; nur eine Invariante, die per Test festgeschrieben wird — erst mit `zeile-loeschen` überhaupt strukturell relevant. Siehe Befund 6. |
+| Cross-Format-Export über die UI (in keiner früheren Fassung erwähnt) | (implizit angenommen: Rundreise 5.1.5/5.2.5/5.3 über echten Upload/Download bedienbar) | **Nicht möglich.** `src/app/DocumentWorkspace.tsx:68-95,124-142`: genau **ein** „Exportieren"-Button, `handleExport` ruft `module.exportFile(...)` des beim Öffnen gebundenen Formatmoduls auf. Es gibt keinen Formatwähler beim Export. | Cross-Format-Rundreisen (5.1/5, 5.2/5, 5.3) sind **nicht** vollständig per echtem Browser-Upload/-Download nachweisbar, sondern nur bis zum Import in Format A per UI, dann auf Objektebene (`readX`/`writeY` direkt) fortzusetzen. Als reale Produktgrenze dokumentiert, nicht als Testlücke. |
+| Zeilennummern durchgehend | z. B. `docx/writer.ts:130`, `odt/reader.ts:192`, `Toolbar.tsx:228-239` | **Alle gedriftet (am aktuellen Stand 2026-07-05 direkt nachgeprüft):** `docx/writer.ts:160`, `odt/writer.ts:115-116`, `odt/reader.ts:304`, `Toolbar.tsx:277-289` (Tabelle) bzw. `:143-156` (Ausschneiden/`disabled`-Muster) bzw. `:33-53` (`ScissorsIcon`), `commands.ts:6`, `WordEditor.tsx:109-110` (`columnResizing()`/`tableEditing()`) bzw. `:117-121` (Kontextmenü-Kommentar), `DocumentWorkspace.tsx:68-95` (`handleExport`). | Referenzen unten aktualisiert; wo Drift wahrscheinlich ist, wird das **Symbol** genannt, nicht nur die Zeile. |
+
+Zusätzlich **neu aufgenommen**, da für eine korrekte Umsetzung und Abnahme wesentlich:
+Befund 12 (Sichtbarkeit/Overflow), Befund 13 (Falle beim „deaktiviert"-Zustand), Befund 14
+(Backspace/Entf löscht nur Zellinhalt), Befund 15 (Kontextmenü-Precedent), Befund 16 (die
+korrigierte Einordnung von Befund 8 als Nicht-Bug), Befund 17 (vorbestehende
+`colCount`-aus-Zeile-0-Schwäche, formatübergreifend, nicht durch dieses Feature
+verursacht), sowie die Barrierefreiheits-/Testbarkeits-Anforderung „stabiler Accessible
+Name" (Abschnitt 1 Zeile 7), die Basis-Rundreise ohne Änderung (Abschnitt 5.0) und die
+UI-Grenze „kein Cross-Format-Export" (Abschnitt 5, Einleitung).
+
+---
+
+## 0. Bezug zum Backlog & Scope-Abgrenzung
+
+| Slug | Titel | Beschreibung | Status | Prio | Teil dieser Datei? |
 |---|---|---|---|---|---|
-| `spalte-loeschen` | Spalte löschen | „Entfernt die markierte Tabellenspalte." | fehlt | 1 (essenziell) | **Ja — Kernumfang, Pflicht** |
-| `tabelle-einfuegen` | Tabelle einfügen | Tabelle mit wählbarer Zeilen-/Spaltenzahl einfügen | teilweise | 1 | Nein — Voraussetzung, eigener Slug/eigene Datei |
-| `zeile-einfuegen` / `zeile-loeschen` | Zeile einfügen/löschen | Analoge Zeilen-Operationen | fehlt | 1 | Nein — eigener Slug, nur als Analogie/Abgrenzung erwähnt (Abschnitt 7) |
-| `spalte-einfuegen` | Spalte einfügen (links/rechts) | Neue Spalte an gewählter Position einfügen | fehlt | 1 | Nein — eigener Slug, nur als Abgrenzung erwähnt (Abschnitt 7) |
-| `zellen-verbinden` / `zellen-teilen` | Zellen verbinden/teilen | colspan/rowspan erzeugen bzw. auflösen | fehlt | 1/2 | Nein — eigener Slug, aber **Wechselwirkung mit „Spalte löschen" ist zwingender Bestandteil dieser Datei** (Abschnitt 3.4/3.5), da eine zu löschende Spalte bereits verbundene Zellen enthalten kann |
-| `tabelle-loeschen` | Tabelle komplett löschen | Entfernt die gesamte Tabelle | fehlt | 1 | Nein — eigener Slug, aber als Grenzfall relevant, wenn die letzte verbleibende Spalte gelöscht werden soll (Abschnitt 3.6) |
-| `kopfzeile-wiederholen` | Kopfzeile auf Folgeseiten wiederholen | Wiederholt Zeile 1 auf Folgeseiten | fehlt | 2 | Nein — nicht Gegenstand, nur als Wechselwirkungshinweis (Abschnitt 3.9) |
+| `spalte-loeschen` | Spalte löschen | „Entfernt die markierte Tabellenspalte." | fehlt | 1 | **Ja — Kernumfang** |
+| `tabelle-einfuegen` | Tabelle einfügen | wählbare Zeilen-/Spaltenzahl | teilweise | 1 | Nein — Voraussetzung, eigener Slug |
+| `zeile-einfuegen` / `zeile-loeschen` | Zeile einfügen/löschen | analoge Zeilen-Operationen | fehlt | 1 | Nein — nur Abgrenzung (Abschn. 6) |
+| `spalte-einfuegen` | Spalte einfügen (links/rechts) | neue Spalte einfügen | fehlt | 1 | Nein — eigener Slug, teilt Toolbar-Bereich |
+| `zellen-verbinden` / `zellen-teilen` | Zellen verbinden/teilen | `colspan`/`rowspan` erzeugen/auflösen | fehlt | 1/2 | Nein — aber **Wechselwirkung ist Pflichtbestandteil** (Abschn. 2.4/2.5) |
+| `tabelle-loeschen` | Tabelle komplett löschen | gesamte Tabelle entfernen | fehlt | 1 | Nein — nur als Grenzfall „letzte Spalte" (Abschn. 2.6) |
+| `kopfzeile-wiederholen` | Kopfzeile auf Folgeseiten | Zeile 1 wiederholen | fehlt | 2 | Nein — nur Wechselwirkungshinweis (Abschn. 2.9) |
 
-Die Beschreibung im Aufgabenauftrag lautet wörtlich: „Entfernt die markierte
-Tabellenspalte." Kernumfang dieser Spezifikation ist daher **ausschließlich** das
-Entfernen einer (oder mehrerer markierter) Spalte(n) aus einer bereits bestehenden
-Tabelle — inklusive korrektem Verhalten bei Verbindungen (colspan/rowspan), inklusive
-Rundreise nach DOCX und ODT. Das **Einfügen** von Spalten (`spalte-einfuegen`) und
-das Löschen von **Zeilen** (`zeile-loeschen`) sind eigene Backlog-Einträge mit eigener
-Anforderungsdatei und werden hier nur zur Abgrenzung erwähnt.
+Kernumfang ist **ausschließlich** das Entfernen einer (oder mehrerer markierter) Spalte(n)
+aus einer bestehenden Tabelle — inkl. korrektem Verhalten bei bestehenden Verbindungen
+(`colspan`/`rowspan`) und inkl. Rundreise nach DOCX **und** ODT.
 
-Architektur-Grundprinzip (wie in `FEATURE-SPEC-DOCX-ODT.md` Abschnitt 6 „Tabellen"
-und Abschnitt 17 Zeile 20 „Tabellen-Kontextfunktionen … fehlt komplett in der UI —
-größte Einzellücke im gesamten Funktionsumfang"): DOCX und ODT teilen sich einen
-gemeinsamen internen Editor (`src/formats/shared/editor/`, ProseMirror-Schema +
-Seitenansicht, Tabellen-Nodes aus `prosemirror-tables` via `tableNodes(...)` in
-`src/formats/shared/schema.ts:106`). „Spalte löschen" muss deshalb **unabhängig vom
-Ursprungsformat** funktionieren und darf **niemals** die Rundreise-Fähigkeit einer
-Datei beeinträchtigen (siehe Abschnitt 6 — Rundreise-Anforderung).
+Architektur-Grundprinzip: DOCX und ODT teilen einen gemeinsamen internen Editor
+(`src/formats/shared/editor/`, ProseMirror-Schema + Seitenansicht; Tabellen-Nodes aus
+`prosemirror-tables` via `tableNodes(...)` in `src/formats/shared/schema.ts`). „Spalte
+löschen" muss deshalb **unabhängig vom Ursprungsformat** funktionieren und darf die
+Rundreise-Fähigkeit einer Datei **niemals** beeinträchtigen (Abschnitt 5).
 
 ---
 
-## 0. Ist-Stand laut Code-Analyse (Befund vor Verifikation)
+## 1. Ist-Stand laut Code-Analyse (Befund vor Verifikation, Stand 2026-07-05)
 
-**Zusammenfassung: In der Oberfläche existiert diese Funktion nicht im Ansatz.** Es
-gibt exakt **einen** tabellenbezogenen Bedienschritt in der gesamten Anwendung — den
-Button „⊞ Tabelle" zum Einfügen einer festen 2×2-Tabelle
-(`src/formats/shared/editor/Toolbar.tsx:228-239`, ruft `insertTable(2, 2)` auf,
-`src/formats/shared/editor/commands.ts:76-83`). Es gibt **keinen** Button, **kein**
-Kontextmenü (eine projektweite Suche nach `contextmenu`/`ContextMenu` liefert null
-Treffer), **keine** Tastenkombination und **keinen** Command-Export namens
-`deleteColumn` o. ä. in `commands.ts` oder `Toolbar.tsx`. Der Befund aus
-`FEATURE-SPEC-DOCX-ODT.md` Zeile 373 („Tabellen-Kontextfunktionen … fehlt komplett in
-der UI, nur Datenmodell-seitig über Tests konstruiert") ist damit für den Teilaspekt
-„Spalte löschen" vollständig bestätigt.
+**Zusammenfassung:** In der Oberfläche existiert die Funktion nicht im Ansatz. Der einzige
+tabellenbezogene Bedienschritt ist der Button „⊞ Tabelle" zum Einfügen einer festen
+2×2-Tabelle (`src/formats/shared/editor/Toolbar.tsx:277-289`, ruft `insertTable(2, 2)`,
+`commands.ts:92-102`). Es gibt **kein** eigenes Kontextmenü, **keine** Tastenkombination
+und **keinen** Command-Export `deleteColumn` in `commands.ts` (Zeile 6 exportiert nur
+`isInTable`). Der Backlog-Status „fehlt" ist damit vollständig zutreffend.
 
-Dennoch ist die Ausgangslage **nicht** „bei null anfangen", sondern eher
-„Werkzeug vorhanden, aber nicht verdrahtet und mit ungeklärten Detailfragen" — folgende
-Befunde sind für die Umsetzung und Abnahme zentral:
+Die Ausgangslage ist aber **nicht** „bei null anfangen", sondern „Werkzeug vorhanden,
+nicht verdrahtet, mit einigen Detailfallen". Die folgenden Befunde sind für Umsetzung und
+Abnahme zentral:
 
-| # | Ort | Inhalt | Befund |
+| # | Ort | Inhalt | Befund / Bedeutung |
 |---|---|---|---|
-| 1 | `package.json:29` | `"prosemirror-tables": "^1.8.5"` | Bibliothek ist bereits Abhängigkeit und liefert fix und fertig `deleteColumn`, `removeColumn`, `selectedRect`, `CellSelection`, `TableMap` (bestätigt per `node.js`-Introspektion der installierten Version). Es muss **kein** eigener Lösch-Algorithmus geschrieben werden — die Aufgabe ist im Kern **Verdrahtung + Grenzfall-Behandlung + Rundreise-Verifikation**, nicht Neuentwicklung eines Tabellen-Editiermodells. |
-| 2 | `src/formats/shared/editor/WordEditor.tsx:81-82` | `columnResizing()` und `tableEditing()` sind bereits als Plugins registriert | `CellSelection` (Auswahl mehrerer Zellen/einer ganzen Spalte durch Ziehen mit der Maus) funktioniert **bereits jetzt** rein durch diese beiden Plugins, ganz ohne eigenen Code — d. h. Nutzer:innen können schon heute eine Spalte per Maus-Drag markieren, nur die Aktion „löschen" fehlt als Anknüpfungspunkt. |
-| 3 | `node_modules/prosemirror-tables` (`deleteColumn`) | `deleteColumn(state, dispatch)`: Wenn `!isInTable(state)` → `return false`. Sonst wird über `selectedRect(state)` die von Cursor **oder** `CellSelection` betroffene Spalten-Rechteck-Range ermittelt; **`if (rect.left == 0 && rect.right == rect.map.width) return false`** — die Bibliothek verweigert das Löschen, wenn die Selektion **alle** Spalten der Tabelle umfasst (verhindert eine 0-Spalten-Tabelle) | Wird der Command bei „letzte(n) verbleibende(n) Spalte(n)" aufgerufen, passiert **gar nichts** — kein Fehler, kein Dispatch, nur `false` als Rückgabewert. Ohne eigene Behandlung dieses Rückgabewerts entsteht ein stiller Fehlschlag (Verstoß gegen `FEATURE-SPEC-DOCX-ODT.md` Abschnitt 20 „Kein stiller Fehlschlag"), siehe Abschnitt 3.6. |
-| 4 | `node_modules/prosemirror-tables` (`removeColumn`, aufgerufen aus `deleteColumn` für jede betroffene Spalte) | Iteriert **über die volle Zeilenhöhe der Tabelle** (`row < map.height`), unabhängig davon, wie hoch die tatsächliche `CellSelection` reicht | Steht der Cursor (ohne Selektion) nur in **einer** Zelle einer Spalte, oder ist nur ein Teil der Spalte markiert (z. B. 2 von 3 Zeilen), wird trotzdem die **gesamte** Spalte über alle Zeilen entfernt — kein Nutzer-Missverständnis „nur die markierten Zellen werden gelöscht" darf entstehen (siehe Abschnitt 2.1/3.1). |
-| 5 | `node_modules/prosemirror-tables` (`removeColumn`) | Bei einer Zelle mit `colspan > 1`, die über die zu löschende Spalte **hinausragt**: `tr.setNodeMarkup(..., removeColSpan(attrs, ...))` statt vollständigem Löschen der Zelle | Eine verbundene Zelle (z. B. „über 3 Spalten verbunden") verliert beim Löschen einer ihrer Spalten korrekt nur eine Einheit `colspan` (wird zu „über 2 Spalten verbunden"), der Zellinhalt bleibt erhalten — muss aber explizit mit einem Testfall nachgewiesen werden (Abschnitt 3.4), da bisher **kein einziger** Test (weder Unit noch E2E) diesen Pfad prüft. |
-| 6 | `src/formats/docx/writer.ts:130` | `const colCount = (rows[0]?.content ?? []).reduce((sum, cell) => sum + Number(cell.attrs?.colspan ?? 1), 0) || 1` | Die Anzahl der `<w:gridCol>`-Einträge in `<w:tblGrid>` wird **ausschließlich aus Zeile 0** berechnet (Summe der `colspan`-Werte der ersten Zeile). Nach einem korrekten `deleteColumn` sollte jede Zeile (inkl. Zeile 0) um dieselbe effektive Spaltenzahl kürzer sein — **muss aber verifiziert werden**, insbesondere wenn die gelöschte Spalte in Zeile 0 durch eine `vMerge`-Fortsetzungszelle (aus einer darüberliegenden Zeile stammend — bei Zeile 0 nicht möglich, aber relevant sobald diese Logik mit `zeile-loeschen` kombiniert wird) oder durch eine dort beginnende `colspan`-Zelle repräsentiert ist. |
-| 7 | `src/formats/odt/writer.ts:88` | `const colCount = rows[0]?.content?.length ?? 1` | **Abweichend vom DOCX-Writer**: Hier wird die reine **Zellenanzahl** von Zeile 0 gezählt, **nicht** die Summe der `colspan`-Werte. Enthält Zeile 0 eine verbundene Zelle (`colspan: 2`), unterschätzt `<table:table-column>` (Abschnitt „Spaltenanzahl" in `content.xml`) die tatsächliche logische Spaltenzahl der Tabelle um die Differenz. Dieser Bug ist **unabhängig von `spalte-loeschen`** bereits vorher vorhanden, wird aber durch jede Spalten-Lösch-Operation an einer Tabelle mit vorhandenen Verbindungen in Zeile 0 **zusätzlich verschärft geprüft**, da genau diese Kombination (Verbindung + Löschen) in Abschnitt 3.4/6.2 explizit gefordert wird. **Muss vor Abnahme geklärt werden, ob dieser Bug im Zuge dieses Features mitbehoben wird oder als bekannte, dokumentierte Einschränkung ausgewiesen wird.** |
-| 8 | `src/formats/odt/reader.ts:192` | `childElements(rowEl, ODF_NAMESPACES.table, 'table-cell')` — liest **ausschließlich** `<table:table-cell>`, **nicht** `<table:covered-table-cell>` | Reale, außerhalb dieser App erzeugte ODT-Dateien (LibreOffice) mit einer vertikalen Zellverbindung enthalten in den von der Verbindung „verdeckten" Folgezeilen ein `<table:covered-table-cell/>`-Platzhalterelement zur Erhaltung der Spaltenausrichtung. Der Reader überspringt dieses Element ersatzlos (keine Zählung, kein Spaltenversatz-Ausgleich) — bei einer Tabelle mit vertikaler Verbindung **verschiebt sich dadurch die Spaltenzuordnung der Zellen in den betroffenen Folgezeilen**. Da der eigene Writer (`odt/writer.ts`) ebenfalls **keine** `covered-table-cell`-Platzhalter schreibt, ist die App **intern** selbstkonsistent (eigene Dateien exportieren/importieren fehlerfrei), das Problem tritt aber bei **realen Fremddateien** mit vertikalen Verbindungen auf — genau der Fall, den Abschnitt 6.2 (Rundreise mit realer Fremddatei) prüfen muss. Dieser Befund ist eine Altlast außerhalb des `spalte-loeschen`-Scopes, aber eine **Voraussetzung**, die vor einer belastbaren Verifikation von „Spalte löschen bei importierten Fremddateien mit Verbindungen" geklärt sein muss. |
-| 9 | `src/formats/docx/reader.ts:210-256` (`parseTable`) | Verwendet `colCount` aus `<w:tblGrid>` und ein `anchors`-Array zur korrekten Zuordnung von `vMerge`-Fortsetzungszellen zur Ursprungszelle | Deutlich robuster als der ODT-Reader (Befund 8) — für DOCX-Fremddateien mit vertikalen Verbindungen ist die Spaltenzuordnung beim Import bereits korrekt gelöst. Kein Blocker, aber als Asymmetrie zwischen den Formaten zu dokumentieren. |
-| 10 | `src/formats/docx/__tests__/roundtrip.test.ts:173-247`, `src/formats/odt/__tests__/roundtrip.test.ts:162-208` | Bestehende Tabellen-Tests konstruieren Test-JSON-Dokumente **direkt** (`{ type: 'table', content: [...] }`) und prüfen nur Schreiben/Lesen. **Keiner** dieser Tests bedient die Oberfläche, keiner ruft `deleteColumn` überhaupt auf. | Bestätigt exakt den Befund aus `FEATURE-SPEC-DOCX-ODT.md` Abschnitt 6, Testfall 5 („E2E-Test über echte Toolbar-Bedienung fehlt komplett"), hier für Spalten statt Zellen-Verbinden. |
-| 11 | `tests/e2e/` (Verzeichnisinhalt: `docx.spec.ts`, `odt.spec.ts`, `lifecycle.spec.ts`, `selection-regression.spec.ts`) | Kein `table*.spec.ts` vorhanden | Es existiert **kein einziger** E2E-Test, der irgendeine Tabellen-Interaktion (Einfügen, Klicken, Tippen, geschweige denn Spalte löschen) über echte Browser-Bedienung nachweist. |
+| 1 | `package.json:29` | `"prosemirror-tables": "^1.8.5"` | Liefert `deleteColumn`, `removeColumn`, `selectedRect`, `CellSelection`, `TableMap` fertig (alle exportiert, verifiziert in `dist/index.d.ts:750`). Kein eigener Lösch-Algorithmus nötig — die Aufgabe ist **Verdrahtung + Grenzfall-Behandlung + Rundreise-Verifikation**. |
+| 2 | `WordEditor.tsx:109-110` | `columnResizing()` und `tableEditing()` sind registriert | Eine `CellSelection` (Spalte per Maus-Drag markieren) **funktioniert bereits** rein durch diese Plugins — nur die Aktion „löschen" fehlt als Anknüpfung. **Aber:** die Markierung ist derzeit **visuell unsichtbar**, siehe Befund 12. |
+| 3 | `prosemirror-tables/dist/index.js`, `deleteColumn` | Der Guard `if (rect.left == 0 && rect.right == rect.map.width) return false` steht **innerhalb** von `if (dispatch) { … }` (im Quelltext verifiziert) | Zwei Konsequenzen: (a) Wird der Command auf „alle Spalten markiert"/„letzte Spalte" **mit** `dispatch` aufgerufen, passiert **nichts** (kein Dispatch) — stiller Fehlschlag, wenn nicht abgefangen (Abschn. 2.6). (b) Ein `dispatch`-loser Aufruf `deleteColumn(state)` zur „wäre das möglich?"-Prüfung liefert **fälschlich `true`**, weil der Guard dann gar nicht durchlaufen wird — siehe Befund 13. |
+| 4 | `prosemirror-tables`, `removeColumn` | iteriert über die **volle** Zeilenhöhe (`row < map.height`) | Cursor in **einer** Zelle oder eine `CellSelection` über nur einen Teil der Spalte löscht trotzdem die **gesamte** Spalte. Erwartungskonflikt „nur markierte Zellen" — muss dokumentiert/kommuniziert werden (Abschn. 2.1). |
+| 5 | `prosemirror-tables`, `removeColumn` | für eine Zelle mit `colspan > 1`, die über die gelöschte Spalte **hinausragt**: `setNodeMarkup(..., removeColSpan(...))` statt Löschen | `colspan` wird nur um 1 reduziert, Inhalt bleibt. Muss mit Testfall belegt werden (Abschn. 2.4) — **kein** bestehender Test deckt diesen Pfad ab. |
+| 6 | `src/formats/docx/writer.ts:160` | `colCount = (rows[0]?.content ?? []).reduce((s, c) => s + Number(c.attrs?.colspan ?? 1), 0) || 1` | **Aktuell korrekt** (summiert `colspan` aus Zeile 0). `vMerge`-Fortsetzungen werden nie als eigene JSON-Zellen gespeichert → Zeile 0 kann keine enthalten. Kein Bug; nur eine per Test festzuschreibende Invariante, erst mit `zeile-loeschen` real relevant. |
+| 7 | `src/formats/odt/writer.ts:115-116` | `colCount` summiert `colspan` (identisch DOCX); Zeile 137 schreibt `<table:covered-table-cell/>` für `rowspan` | **Bereits behoben** (die Vorfassung beschrieb hier noch einen offenen Bug). Anforderung reduziert sich auf einen Regressionstest (Abschn. 5.2.2), der das korrekt hält. |
+| 8 | `src/formats/odt/reader.ts:301-321` | `childElements(rowEl, …, 'table-cell')` liest **nur** `table-cell`, **nicht** `covered-table-cell` | **Kein Blocker — empirisch als korrekt verifiziert (Befund 16).** Der Writer (Befund 7) erzeugt `covered-table-cell` als ODF-Pflicht-Padding (jede Zeile muss `colCount` Zell-Elemente deklarieren, ODF 1.3 §9.1.1); der Reader liest `rowspan`/`colspan` direkt vom Anker-Attribut und überspringt die Platzhalter zu Recht — `TableMap` braucht sie nicht. Betrifft **keinen** `rowspan`-ODT-Rundreisetest negativ (Abschn. 5.2.3/5.2.4 sind Regressionstests, kein Blocker-Nachweis). |
+| 9 | `src/formats/docx/reader.ts` (`parseTable`, `anchors`-Array) | ordnet `vMerge`-Fortsetzungszellen korrekt der Ursprungszelle zu | DOCX-Import ist bei vertikalen Verbindungen robust. **Asymmetrie** gegenüber dem ODT-Reader bleibt bestehen, ist aber **kein Bug in beiden Formaten** — sie folgt aus der unterschiedlichen Spezifikation (OOXML: `rowspan` implizit über gezählte Fortsetzungen; ODF: `rowspan` explizites Attribut, Befund 16). Als bekannter, unschädlicher Unterschied zu dokumentieren. |
+| 10 | `docx/__tests__/roundtrip.test.ts`, `odt/__tests__/roundtrip.test.ts` (Tabellen-Blöcke) | konstruieren Test-JSON **direkt**, prüfen nur Schreiben/Lesen | **Kein** Test bedient die Oberfläche, **keiner** ruft `deleteColumn` auf. Bestätigt `FEATURE-SPEC-DOCX-ODT.md` Abschn. 6 Testfall 5. |
+| 11 | `tests/e2e/` (`docx.spec.ts`, `odt.spec.ts`, `lifecycle.spec.ts`, `selection-regression.spec.ts`) | kein `table*.spec.ts` | **Kein** E2E-Test weist irgendeine Tabellen-Interaktion über echte Bedienung nach. |
+| 12 | `src/index.css` + `grep` über `src/` | keine `.selectedCell`-Regel, kein `.tableWrapper { overflow-x }`, `prosemirror-tables/style/tables.css` **nicht** importiert; `td/th` ohne `position: relative` | **Neu.** Die von `tableEditing()` gesetzte Klasse `selectedCell` ist **ungestylt** → markierte Spalte **unsichtbar** (verletzt Abschn. 1 Zeile 6). Zusätzlich kann eine breite Tabelle mangels `overflow-x` auf schmalen Viewports die Seite sprengen (relevant für Abschn. 1 Zeile 8). Beides muss gebaut werden. |
+| 13 | Folge aus Befund 3 | „wäre Löschen möglich?"-Prüfung darf **nicht** über `deleteColumn(state)` (ohne `dispatch`) laufen | **Neu.** Ein solcher Aufruf liefert `true`, sobald `isInTable` gilt — auch bei markierten **allen** Spalten. Der deaktivierte Button (Abschn. 1 Zeile 3, DoD 4) muss den Guard **selbst nachbilden**: `isInTable(state) && !(rect.left === 0 && rect.right === rect.map.width)` über das exportierte `selectedRect`. Andernfalls bleibt der Button für die letzte Spalte fälschlich aktiv und der Klick ist ein stiller No-Op. |
+| 14 | `prosemirror-tables/dist/index.js:2122-2125` | `tableEditing()` bindet `Backspace`/`Delete`/`Mod-Backspace`/`Mod-Delete` an `deleteCellSelection` (löscht nur den **Inhalt** markierter Zellen, Zeile 1841/1845) | **Neu.** Entf/Backspace auf einer markierten Spalte **leert die Zellen**, entfernt aber **nicht** die Spaltenstruktur. Muss dokumentiert werden, damit Nutzer:innen/Tester:innen das Leeren nicht mit „Spalte löschen" verwechseln — das explizite Bedienelement ist der **einzige** strukturelle Löschweg. |
+| 15 | `WordEditor.tsx:117-121` | dokumentierte Entscheidung: kein eigenes Kontextmenü, kein `contextmenu`-`preventDefault`, natives Kontextmenü bleibt erreichbar | **Neu.** Die früher „offene" Kontextmenü-Frage ist durch Projekt-Precedent **entschieden** → Toolbar-Bedienelement (Abschn. 1 Zeile 4). |
+| 16 | `odt/reader.ts:301-321` + `odt/writer.ts:110-175`, gegengeprüft mit 3 empirischen Probe-Durchläufen (`spalte-loeschen-code.md` Abschn. 3, hier unabhängig nachvollzogen) | eigen erzeugte `rowspan`-ODTs **und** vier reale LibreOffice-Fixtures (u. a. `tableCoveredContent.odt`) reisen fehlerfrei rund; ein Reader-Rewrite hätte `rowspan` doppelt gezählt | **Ersetzt den früheren „Befund 8"-Blocker.** Kein Reader-Fix nötig. Nur Regressionstests (Abschn. 5.2.3/5.2.4, 6.2), damit ein künftiger, gut gemeinter aber falscher „Fix" nicht die heute korrekte Rundreise bricht. |
+| 17 | `docx/writer.ts:160` und `odt/writer.ts:115-116` (`colCount = Summe der colspan-Werte **aus Zeile 0**`), real beobachtbar an `tests/fixtures/external/odt/tableOps.odt` | beide Writer leiten die Spaltenzahl **ausschließlich aus der ersten Zeile** ab | **Neu, vorbestehend, formatübergreifend, außerhalb des Scopes dieses Features.** Ist eine spätere Zeile einer (meist per ODF-Kompressionsattribute wie `table:number-columns-repeated` irregulär eingelesenen) Tabelle breiter als Zeile 0, werden überzählige Zellen beim Export verworfen — Datenverlust, aber **nicht** durch `deleteColumn` ausgelöst (das hält die Tabelle immer rechteckig). Muss bei realen Fremddatei-Tests (Grenzfall 17/18, Abschn. 5.1.4/5.2.4) als **bekannte, nicht diesem Feature zuzurechnende** Einschränkung erkannt und dokumentiert werden, nicht als Fehlschlag von „Spalte löschen" fehlinterpretiert. |
+| 18 | `src/app/DocumentWorkspace.tsx:68-95,124-142` | genau **ein** „Exportieren"-Button; `handleExport` ruft `module.exportFile(...)` des beim Öffnen gebundenen Formatmoduls, kein Formatwähler | **Neu.** Cross-Format-Rundreisen (Anforderung 5.1/5, 5.2/5, 5.3) sind **nicht vollständig** per echtem Browser-Upload/Klick/Download nachweisbar — es gibt keinen UI-Weg, „als anderes Format exportieren" zu wählen. Muss ab dem Export-Schritt auf Objektebene (`readX(...)`/`writeY(...)` direkt im Test) fortgesetzt werden. Reale Produktgrenze, kein Test- oder Feature-Defizit von „Spalte löschen". |
 
-**Konsequenz für die Bewertung:** Der Backlog-Status „fehlt" ist vollständig zutreffend
-— es gibt keinen benutzbaren Weg, eine Tabellenspalte zu löschen. Die zugrunde liegende
-Bibliotheksfunktion ist jedoch bereits vorhanden und funktional vielversprechend; die
-eigentliche Arbeit besteht aus (a) UI-Anbindung, (b) Klärung der in Befund 3–8
-aufgeworfenen Verhaltensfragen, und (c) Nachweis der Rundreise inklusive der bereits
-bekannten Writer/Reader-Asymmetrien.
+**Konsequenz:** Status „fehlt" ist zutreffend. Die Bibliotheksfunktion ist vorhanden und
+tragfähig; die reale Arbeit ist (a) UI-Anbindung inkl. sichtbarer Markierung und korrektem
+„deaktiviert"-Zustand, (b) Regressionsabsicherung des bereits korrekten ODT-`rowspan`-
+Verhaltens (Befund 8/16 — **kein** Reader-Fix), (c) Nachweis der Rundreise inkl. der
+bekannten Format-Asymmetrie (Befund 9) und der UI-Grenze „kein Cross-Format-Export"
+(Befund 18).
 
 ---
 
-## 1. Menüpunkte / Bedienelemente — Soll-Zustand
+## 2. Menüpunkte / Bedienelemente — Soll-Zustand
 
-| # | Zugriffsweg | Ist-Zustand | Soll |
+| # | Zugriffsweg | Ist | Soll |
 |---|---|---|---|
-| 1 | Toolbar-Button „Spalte löschen" (neu, SVG-Icon — **kein** Unicode-/Emoji-Zeichen, siehe Lehre aus `FEATURE-SPEC-DOCX-ODT.md` Abschnitt 20 zum Icon-Rendering-Problem) | Fehlt komplett | Neuer Button in `Toolbar.tsx`, analog zum bestehenden „⊞ Tabelle"-Button, sichtbar/erreichbar sobald der Cursor sich innerhalb einer Tabelle befindet (siehe Zeile 2). Ruft `deleteColumn(state, dispatch)` auf. |
-| 2 | Sichtbarkeit/Deaktivierung außerhalb einer Tabelle | Nicht anwendbar (Button existiert nicht) | Button ist entweder **ausgeblendet** oder sichtbar-aber-deaktiviert (`disabled`), wenn `isInTable(view.state)` `false` ist (dieselbe bereits vorhandene Helper-Funktion, die schon für den „Tabelle einfügen"-Button als `aria-pressed`-Indikator verwendet wird, `Toolbar.tsx:231`). Kein stiller Klick ins Leere. |
-| 3 | Deaktivierung bei „letzte verbleibende Spalte" (siehe Befund 3/Abschnitt 3.6) | Nicht anwendbar | Muss **vor** dem Klick erkennbar sein (deaktivierter Button und/oder Tooltip „Letzte Spalte kann nicht einzeln gelöscht werden — Tabelle löschen?") statt eines stillen No-Op nach dem Klick. |
-| 4 | Kontextmenü (Rechtsklick in einer Tabellenzelle) → „Spalte löschen" | Fehlt komplett — die App hat aktuell **kein** Kontextmenü-System für irgendeine Funktion (projektweite Suche liefert null Treffer) | **Zu entscheiden:** Wird ein komplettes Kontextmenü-System neu eingeführt (deutlich näher an Word/LibreOffice-Erwartung, aber größerer Aufbau) oder bleibt es bei einem Toolbar-Button (kleinerer Aufwand, aber Abweichung von der Nutzererwartung „Rechtsklick auf Spalte")? Diese Entscheidung ist **nicht** trivial und muss vor Umsetzung explizit getroffen und hier nachgetragen werden — sie betrifft auch die Geschwister-Features `zeile-loeschen`, `spalte-einfuegen`, `zellen-verbinden` etc. und sollte nicht pro Einzelfeature unterschiedlich gelöst werden. |
-| 5 | Tastenkombination | Word/LibreOffice definieren hierfür **keine** durchgängige Standard-Tastenkombination (im Gegensatz zu z. B. Fett = Strg+B) | Kein Soll-Element — bewusst nicht gefordert, hier nur zur Vollständigkeit dokumentiert. |
-| 6 | Visuelle Kennzeichnung „welche Spalte ist aktuell markiert" | `CellSelection` wird von `prosemirror-tables` bereits mit einer Standard-Hervorhebung der ausgewählten Zellen dargestellt (Default-CSS des Plugins bzw. eigenes Styling, zu prüfen) | Muss visuell eindeutig erkennbar sein, **bevor** der Löschen-Button geklickt wird — Nutzer:in muss sehen können, welche Spalte(n) von der Aktion betroffen sein werden. |
-| 7 | Mobile/Touch-Bedienung (Spaltenauswahl per Touch-Drag, Button-Klick) | Ungeprüft | Auf den in `playwright.config.ts:20-22` konfigurierten Projekten „Mobile" (Pixel 7) und „Tablet" (iPad Mini) verifizieren — Spaltenmarkierung per Touch-Drag über `prosemirror-tables`/`columnResizing` ist auf Touch-Geräten grundsätzlich schwieriger zu bedienen als per Maus; mindestens der Fall „Cursor in einer Zelle, Button klicken" (ohne CellSelection) muss auf allen drei Projekten funktionieren. |
+| 1 | Toolbar-Button „Spalte löschen" (neu) | fehlt | Neuer Button in `Toolbar.tsx`, direkt beim „⊞ Tabelle"-Button. **Inline-SVG-Icon** (kein Unicode/Emoji) — Precedent existiert bereits: `ScissorsIcon` (`Toolbar.tsx:33-53`, `currentColor`, `aria-hidden`). Löst `deleteColumn(state, dispatch, view)` aus. |
+| 2 | Sichtbarkeit außerhalb einer Tabelle | n/a | Button **immer sichtbar**, aber `disabled`, wenn `isInTable(view.state)` `false` ist. Precedent für exakt dieses Muster existiert: der „Ausschneiden"-Button nutzt `disabled={!canCut(state)}` mit `disabled:opacity-40 disabled:cursor-not-allowed` (`Toolbar.tsx:143-156`). Kein Ausblenden (vermeidet Layout-Sprünge/E2E-Races). Kein stiller Klick ins Leere. |
+| 3 | Deaktivierung bei „letzte verbleibende Spalte" | n/a | Button **zusätzlich** `disabled`, wenn die aktuelle Selektion alle Spalten umfasst. **Pflicht (Befund 13):** Die Prüfung darf **nicht** `deleteColumn(state)` ohne `dispatch` verwenden (liefert fälschlich `true`), sondern muss `isInTable && !(rect.left === 0 && rect.right === rect.map.width)` über `selectedRect` selbst nachbilden. `title`-Tooltip erklärt den Zustand. |
+| 4 | Kontextmenü (Rechtsklick) | n/a | **Kein** eigenes Kontextmenü. Durch Projekt-Precedent entschieden (Befund 15, `WordEditor.tsx:117-121`): das native Browser-Kontextmenü bleibt erreichbar, alle Aktionen laufen über die Toolbar. Gilt einheitlich auch für die Geschwister-Features (`spalte-einfuegen`, `zeile-loeschen`, …). |
+| 5 | Tastenkombination | keine | **Bewusst keine.** Word/LibreOffice definieren keine durchgängige Standard-Kombination. Wichtig (Befund 14): `Backspace`/`Delete` sind bereits durch `deleteCellSelection` belegt (leert Zellinhalt) und dürfen **nicht** für strukturelles Spaltenlöschen umgewidmet werden. |
+| 6 | Sichtbare Markierung der betroffenen Spalte | **fehlt (unsichtbar)** | **Pflicht, zu bauen (Befund 12):** Vor dem Klick muss eindeutig erkennbar sein, welche Spalte(n) betroffen sind. `tableEditing()` setzt die Klasse `selectedCell`, aber es existiert **keine** CSS dafür. Eigene Overlay-Regel (`.ProseMirror .selectedCell::after`, hell/dunkel-tauglich, `pointer-events: none`) ergänzen; `td/th` benötigen dafür `position: relative`. |
+| 7 | Barrierefreiheit / Testbarkeit: stabiler Accessible Name | n/a | **Neu — Pflicht.** Der Button muss einen stabilen Accessible Name via `aria-label="Spalte löschen"` haben (nicht nur `title`), konsistent mit `Ausschneiden`/`Tabelle einfügen`/`MarkButton` (alle setzen `aria-label`). Nur so ist er per `getByRole('button', { name: 'Spalte löschen' })` zuverlässig testbar und für Screenreader benannt. Für ein `<button>` gewinnt sonst der Text-Inhalt (name-from-content) über `title` — eine reine `title`-Beschriftung wäre nicht verlässlich adressierbar. |
+| 8 | Mobile/Touch-Bedienung | ungeprüft | Auf den in `playwright.config.ts` konfigurierten Projekten „Mobile" (Pixel 7) und „Tablet" (iPad Mini) verifizieren. Vorbedingung: `.tableWrapper` (von `columnResizing()` erzeugt) braucht `overflow-x: auto`, sonst sprengt eine breite Tabelle den Viewport (Befund 12). Mindestens der Fall „Cursor in einer Zelle, Button klicken" (ohne `CellSelection`) muss auf allen drei Projekten funktionieren. |
 
 ---
 
-## 2. Gewünschtes Verhalten im Detail
+## 3. Gewünschtes Verhalten im Detail
 
-### 2.1 Erkennung „die markierte Spalte"
-Der Aufgabentext spricht von „der markierten Tabellenspalte" (Singular). Auf Basis von
-Befund 3/4 (Abschnitt 0) ergeben sich drei zu unterscheidende Ausgangslagen, die **alle**
-zum selben nachvollziehbaren Ergebnis führen müssen:
+### 3.1 Erkennung „die markierte Spalte"
+Der Auftrag spricht von „der markierten Tabellenspalte" (Singular). Aus Befund 3/4 ergeben
+sich drei Ausgangslagen, die **alle** zu einem nachvollziehbaren Ergebnis führen müssen:
 
-1. **Nur Cursor, keine Selektion, innerhalb einer Zelle:** Es wird die Spalte gelöscht,
-   in der sich der Cursor befindet — über die **gesamte** Höhe der Tabelle, nicht nur
-   die aktuelle Zeile.
-2. **`CellSelection` innerhalb einer einzelnen Spalte** (z. B. 2 von 3 Zeilen markiert):
-   Es wird trotzdem die **gesamte** Spalte gelöscht (Befund 4) — dieses Verhalten weicht
-   möglicherweise von der Nutzererwartung „nur die markierten Zellen werden entfernt" ab
-   und **muss** deshalb entweder (a) so wie von der Bibliothek vorgegeben belassen und
-   **sichtbar dokumentiert** werden (z. B. Tooltip/Hinweistext „Löscht die gesamte
-   Spalte"), oder (b) bewusst durch eigene Vorprüfung abgefangen werden, falls dieses
-   Verhalten als verwirrend bewertet wird. Diese Entscheidung ist vor Abnahme zu treffen.
-3. **`CellSelection` über mehrere Spalten hinweg** (z. B. 3 Zellen in einer Zeile
-   markiert): Nach Bibliotheksverhalten (Befund 3/`selectedRect`) werden **alle**
-   erfassten Spalten auf einmal gelöscht. Zu klären: Ist das für den Slug
-   `spalte-loeschen` (Singular in der Beschreibung) überhaupt im Scope, oder soll die
-   Aktion in diesem Fall bewusst auf „nur eine Spalte" beschränkt werden (z. B. durch
-   eigene Vorprüfung mit Fehlermeldung)? **Empfehlung dieser Spezifikation:** Dem
-   Bibliotheksverhalten folgen (mehrere markierte Spalten werden auf einen Klick
-   gelöscht, konsistent mit Word/LibreOffice, wo eine Mehrfachspalten-Selektion ebenfalls
-   alle markierten Spalten auf einmal entfernt) — muss aber explizit bestätigt und hier
-   nachgetragen werden, nicht stillschweigend angenommen.
+1. **Nur Cursor, keine Selektion, in einer Zelle:** Es wird die Spalte dieser Zelle über
+   die **gesamte** Tabellenhöhe gelöscht, nicht nur die aktuelle Zeile.
+2. **`CellSelection` innerhalb einer Spalte, aber nicht über die volle Höhe** (z. B. 2 von
+   3 Zeilen): Es wird trotzdem die **gesamte** Spalte gelöscht (Befund 4). Dieses Verhalten
+   entspricht Word/LibreOffice, kann aber der naiven Erwartung „nur markierte Zellen"
+   widersprechen und wird deshalb per `title`-Tooltip kommuniziert („Löscht die gesamte
+   Spalte").
+3. **`CellSelection` über mehrere Spalten:** Alle erfassten Spalten werden auf einen Klick
+   gelöscht (`selectedRect` liefert das Rechteck). **Design-Entscheidung dieser Datei:**
+   dem Bibliotheksverhalten folgen (konsistent mit Word/LibreOffice) — bestätigt, nicht
+   stillschweigend angenommen.
 
-### 2.2 Löschvorgang
-- Nach dem Löschen verringert sich die Gesamtspaltenzahl der Tabelle um genau die Anzahl
-  der gelöschten Spalten.
-- Verbleibende Spalten links/rechts der gelöschten Spalte rücken zusammen, ohne dass
-  Inhalt aus benachbarten Spalten verändert wird.
+### 3.2 Löschvorgang
+- Die Gesamtspaltenzahl verringert sich um genau die Anzahl gelöschter Spalten.
+- Verbleibende Spalten links/rechts rücken zusammen, ohne dass benachbarter Inhalt
+  verändert wird.
 - Der Zellinhalt der gelöschten Spalte (Text, Formatierung, Bilder) geht vollständig
-  verloren — dies ist eine **destruktive** Aktion; siehe Abschnitt 2.8 zu Undo als
-  einzigem Absicherungsmechanismus (keine explizite Bestätigungs-Dialogbox wie bei
-  Word/LibreOffice üblich, siehe Abschnitt 3.13 zur Klärung, ob ein Bestätigungsdialog
-  gefordert ist).
+  verloren — **destruktive** Aktion; Absicherung ausschließlich über Undo (Abschn. 3.8,
+  kein Bestätigungsdialog, siehe Grenzfall 13).
 
-### 2.3 Cursor-Platzierung nach dem Löschen
-- Der Cursor muss nach dem Löschen an einer sinnvollen, definierten Position innerhalb
-  der (verbleibenden) Tabelle stehen — z. B. in der Zelle, die an die Stelle der
-  gelöschten Spalte nachrückt, oder in der links benachbarten Zelle, falls die gelöschte
-  Spalte die letzte (rechteste) war. Kein Verlust der Editor-Selektion, kein Sprung an
-  eine unerwartete Dokumentstelle (Bezug zum generellen Anspruch aus
-  `FEATURE-SPEC-DOCX-ODT.md` Abschnitt 1.3 „kein Reset, kein Verlust des Fokus").
+### 3.3 Cursor-Platzierung nach dem Löschen
+- Der Cursor steht danach an einer definierten, sinnvollen Position **innerhalb** der
+  verbleibenden Tabelle (nachrückende Zelle bzw. linke Nachbarzelle, falls die rechteste
+  Spalte gelöscht wurde). Kein Verlust des Fokus, kein Sprung an eine unerwartete
+  Dokumentstelle (`FEATURE-SPEC-DOCX-ODT.md` Abschn. 1.3). `CellSelection.map(...)` fällt
+  bibliotheksseitig automatisch auf eine `TextSelection` zurück, sobald die markierten
+  Zellen wegfallen — nur per E2E zu verifizieren.
 
-### 2.4 Verhalten bei Spalten mit horizontal verbundenen Zellen (colspan)
-- Eine Zelle, die über die zu löschende Spalte **hinaus** reicht (`colspan` > Anzahl der
-  gelöschten Spalten innerhalb ihrer Spanne), verliert nur die entsprechende Anzahl an
-  `colspan`-Einheiten; ihr Inhalt bleibt vollständig erhalten (Befund 5, Abschnitt 0).
-- Eine Zelle, deren `colspan` **exakt** der Anzahl der gelöschten Spalten entspricht
-  (z. B. eine über 2 Spalten verbundene Zelle, bei der beide Spalten gelöscht werden),
-  wird komplett entfernt, samt Inhalt.
-- **Zu verifizieren (kein bisheriger Test deckt dies ab):** Löschen einer der beiden
-  Spalten, über die eine verbundene Zelle reicht (`colspan: 2` → `colspan: 1`) — Inhalt
-  bleibt in der verbleibenden Zelle erhalten, Text wird nicht dupliziert und nicht
-  verloren.
+### 3.4 Verhalten bei horizontal verbundenen Zellen (`colspan`)
+- Eine Zelle, die über die gelöschte Spalte **hinausragt** (`colspan` > Anzahl gelöschter
+  Spalten in ihrer Spanne), verliert nur die entsprechende Anzahl `colspan`-Einheiten;
+  Inhalt bleibt vollständig (Befund 5).
+- Eine Zelle, deren `colspan` **exakt** der Anzahl gelöschter Spalten entspricht, wird
+  komplett entfernt.
+- **Zu verifizieren (kein bisheriger Test):** `colspan: 2` → eine der beiden Spalten
+  löschen → `colspan: 1`, Inhalt in der verbleibenden Zelle erhalten, nicht dupliziert,
+  nicht verloren.
 
-### 2.5 Verhalten bei Spalten mit vertikal verbundenen Zellen (rowspan)
-- Eine Zelle mit `rowspan` > 1, die **innerhalb** der zu löschenden Spalte liegt (nicht
-  über deren Grenze hinausragend — vertikale Verbindungen betreffen per Definition nur
-  eine Spalte, keine mehreren), wird beim Löschen dieser Spalte vollständig entfernt,
-  inklusive ihres über mehrere Zeilen verteilten Inhalts.
-- **Zu verifizieren:** Löschen einer Spalte, die eine `rowspan`-Zelle enthält, während
-  eine **Nachbarspalte** unangetastet bleibt — die Zeilenstruktur der Tabelle (Anzahl
-  der `<w:tr>`/`<table:table-row>`-Elemente) darf sich dabei **nicht** ändern, nur die
-  Spaltenzahl.
+### 3.5 Verhalten bei vertikal verbundenen Zellen (`rowspan`)
+- Eine `rowspan`-Zelle **innerhalb** der gelöschten Spalte wird vollständig entfernt (inkl.
+  ihres über mehrere Zeilen verteilten Inhalts).
+- **Zu verifizieren:** Löschen einer Spalte mit `rowspan`-Zelle, während eine Nachbarspalte
+  bleibt → die **Zeilenanzahl** der Tabelle ändert sich **nicht**, nur die Spaltenzahl.
+- **ODT (Befund 8/16, empirisch als korrekt verifiziert):** Der ODT-Reader überspringt
+  `<table:covered-table-cell/>` bewusst und liest `rowspan` vom expliziten
+  `table:number-rows-spanned`-Attribut des Ankers — für ODF spezifikationskonform, durch
+  drei Probe-Läufe (eigen erzeugte `rowspan`-ODT plus vier reale LibreOffice-Fixtures,
+  u. a. `tableCoveredContent.odt`) bestätigt. Dieser Fall ist **kein** Blocker; Abschn. 5.2.3
+  ist ein **Regressionstest**, kein offener Verifikationspunkt.
 
-### 2.6 Letzte verbleibende Spalte
-- Wie in Befund 3 (Abschnitt 0) beschrieben, verweigert die zugrunde liegende
-  Bibliotheksfunktion das Löschen, wenn die Selektion alle Spalten der Tabelle umfasst
-  (Ergebnis: `false`, kein Dispatch). **Anforderung:** Dieser Fall darf **nicht** als
-  stiller Fehlschlag beim Nutzer ankommen (Verstoß gegen
-  `FEATURE-SPEC-DOCX-ODT.md` Abschnitt 20). Zwei zulässige Lösungswege, von denen einer
-  vor Abnahme gewählt werden muss:
-  1. Button/Menüpunkt ist in diesem Zustand von vornherein deaktiviert (siehe
-     Abschnitt 1, Zeile 3), oder
-  2. Klick löst eine sichtbare Rückmeldung aus (z. B. Hinweistext oder Weiterleitung zum
-     Feature „Tabelle löschen" — eigener Slug `tabelle-loeschen`, nicht Teil dieser
-     Datei, siehe Abschnitt 7).
-- Eine Tabelle mit **nur einer** Spalte, bei der „Spalte löschen" ausgelöst wird, muss
-  denselben, oben definierten Weg nehmen wie eine Mehrspalten-Tabelle, bei der zufällig
-  **alle** Spalten markiert sind (dieselbe Bibliotheksbedingung `rect.left == 0 &&
-  rect.right == rect.map.width` trifft auf beide Fälle gleichermaßen zu).
+### 3.6 Letzte verbleibende Spalte
+- `deleteColumn` verweigert das Löschen, wenn die Selektion **alle** Spalten umfasst
+  (`rect.left == 0 && rect.right == rect.map.width` → `false`, kein Dispatch, Befund 3).
+- **Anforderung:** Das darf **nicht** als stiller Fehlschlag ankommen
+  (`FEATURE-SPEC-DOCX-ODT.md` Abschn. 20). Gewählter Weg: **Button ist in diesem Zustand
+  `disabled`** (Abschn. 2 Zeile 3), erkannt über die **eigene** Guard-Nachbildung aus
+  Befund 13 (nicht über einen `dispatch`-losen `deleteColumn`-Aufruf). Ein Tooltip erklärt:
+  „Letzte verbleibende Spalte kann nicht einzeln gelöscht werden — ggf. Tabelle löschen."
+- Eine 1-spaltige Tabelle und eine Mehrspaltentabelle mit **allen** Spalten markiert nehmen
+  denselben Weg (identische Bibliotheksbedingung).
 
-### 2.7 Interaktion mit Spaltenbreiten
-- `table_cell`-Attribut `colwidth` (Standard-Schema-Attribut aus `tableNodes(...)`,
-  siehe `schema.ts:106`) der verbleibenden Spalten bleibt unverändert (keine
-  automatische Neuverteilung der freiwerdenden Breite zwingend erforderlich für
-  „fertig", aber die Tabelle darf durch das Löschen **nicht** insgesamt schmaler werden
-  als der Seitenrand vorgibt bzw. optisch „zusammengequetscht" wirken — mindestens
-  vergleichbar mit dem Verhalten, das `columnResizing()` (`WordEditor.tsx:81`) für
-  manuelle Größenänderungen bereits bereitstellt).
+### 3.7 Interaktion mit Spaltenbreiten
+- Das Schema-Attribut `colwidth` der verbleibenden Spalten bleibt unverändert (keine
+  automatische Neuverteilung zwingend für „fertig"). Die Tabelle darf nach dem Löschen
+  nicht optisch „zusammengequetscht" wirken oder schmaler als der Seiteninhalt werden —
+  mindestens vergleichbar mit dem Verhalten von `columnResizing()`.
 
-### 2.8 Undo/Redo
-- Das Löschen einer (oder mehrerer markierter) Spalte(n) erzeugt **einen** einzelnen,
-  eigenständigen Undo-Schritt.
-- Strg+Z stellt die gelöschte(n) Spalte(n) inklusive **vollständigem** Inhalt
-  (Text, Zeichenformatierung, colspan/rowspan-Zustand benachbarter Zellen) exakt an der
-  ursprünglichen Position wieder her.
-- Strg+Y/Strg+Umschalt+Z (Redo) löscht die Spalte(n) erneut.
-- Mehrere aufeinanderfolgende Spalten-Löschvorgänge müssen einzeln, in korrekter
-  Reihenfolge rückgängig machbar sein (nicht als ein einziger zusammengefasster Schritt).
+### 3.8 Undo/Redo
+- Das Löschen erzeugt **einen** eigenständigen Undo-Schritt (Undo/Redo sind bereits über
+  `history()` in `WordEditor.tsx` mit `Mod-z`/`Mod-y`/`Mod-Shift-z` vorhanden — kein
+  Zusatzcode, nur E2E-Nachweis).
+- Strg+Z stellt die gelöschte(n) Spalte(n) inkl. **vollständigem** Inhalt (Text,
+  Zeichenformatierung, `colspan`/`rowspan`-Zustand der Nachbarzellen) an der exakten
+  Ursprungsposition wieder her; Strg+Y/Strg+Umschalt+Z löscht erneut.
+- Mehrere aufeinanderfolgende Löschvorgänge sind einzeln, in korrekter Reihenfolge
+  rückgängig zu machen (nicht als ein zusammengefasster Schritt).
 
-### 2.9 Wechselwirkung mit „Kopfzeile auf Folgeseiten wiederholen" (falls künftig umgesetzt)
-- Aktuell nicht umgesetzt (`kopfzeile-wiederholen`, Backlog-Zeile 192, Status „fehlt").
-  Für den aktuellen Verifikationsauftrag **nicht** im Scope, hier nur als künftige
-  Abhängigkeit vermerkt: Sobald diese Funktion existiert, muss das Löschen einer Spalte
-  auch die als „Kopfzeile" markierte erste Tabellenzeile konsistent mit verkürzen.
+### 3.9 Wechselwirkung „Kopfzeile auf Folgeseiten wiederholen"
+- `kopfzeile-wiederholen` ist nicht umgesetzt (Backlog, Status „fehlt"). Nicht im Scope;
+  nur vermerkt: sobald vorhanden, muss das Spaltenlöschen die als Kopfzeile markierte erste
+  Zeile konsistent mit verkürzen.
 
-### 2.10 Regressionsrisiko Selection-Sync-Bug
-- Wie in `FEATURE-SPEC-DOCX-ODT.md` Abschnitt 2 beschrieben, sind Tabellen ein
-  „Hauptverdachtsfall" für den bekannten Selection-Sync-Bug, da Klicks zwischen Zellen
-  ähnliche Selektionswechsel auslösen wie das dort beschriebene Szenario. Der
-  Spalten-Löschvorgang selbst ist eine Toolbar-Transaktion auf eine (ggf. zellbasierte)
-  Selektion und daher ein plausibler weiterer Auslöser für eine Variante dieses Bugs.
-  **Pflicht-Regressionstest:** Tabelle einfügen → in eine Zelle tippen → Spalte per
-  CellSelection markieren → „Spalte löschen" → per Klick in eine verbleibende Zelle neu
-  positionieren → weiter tippen → Text landet exakt an der geklickten Stelle, nicht an
-  einer veralteten internen Selektion.
+### 3.10 Regressionsrisiko Selection-Sync-Bug
+- Tabellen sind laut `FEATURE-SPEC-DOCX-ODT.md` Abschn. 2 ein „Hauptverdachtsfall" für den
+  bekannten Selection-Sync-Bug (stale Selektion nach Toolbar-Aktion + Klick). Der
+  Spalten-Löschvorgang ist eine Toolbar-Transaktion auf eine (zellbasierte) Selektion und
+  damit ein plausibler weiterer Auslöser.
+- **Pflicht-Regressionstest:** Tabelle einfügen → in Zelle tippen → Spalte per
+  `CellSelection` markieren → „Spalte löschen" → per Klick in eine verbleibende Zelle neu
+  positionieren → weiter tippen → Text landet exakt an der geklickten Stelle. Der bestehende
+  `tests/e2e/selection-regression.spec.ts` (Fall „inside a table cell", nutzt bereits
+  `getByRole('button', { name: 'Tabelle einfügen' })`, funktioniert dank vorhandenem
+  `aria-label`) ist die Vorlage — der neue Button muss aus demselben Grund ein `aria-label`
+  tragen (Abschn. 2 Zeile 7).
+
+### 3.11 Keyboard-Löschen vs. Strukturlöschen (Befund 14)
+- Mit einer per `CellSelection` markierten Spalte **leert** `Backspace`/`Delete` die
+  Zellen (Bibliotheks-Binding `deleteCellSelection`), entfernt aber die Spalte **nicht**.
+  Das ist beabsichtigtes Verhalten, **kein** Bug. Anforderung: Dieser Unterschied muss
+  Nutzer:innen nicht aktiv erklärt werden, aber im Test klar getrennt geprüft werden
+  (Grenzfall 21) — „Spalte löschen" ist ausschließlich das explizite Toolbar-Bedienelement.
 
 ---
 
-## 3. Grenzfälle
+## 4. Grenzfälle
 
-1. **Cursor ohne Selektion in einer Zelle:** löscht die Spalte dieser Zelle über die
-   volle Tabellenhöhe (Abschnitt 2.1, Fall 1).
-2. **`CellSelection` innerhalb einer Spalte, aber nicht über die volle Höhe** (z. B. 2
-   von 3 Zeilen markiert): löscht trotzdem die **gesamte** Spalte (Abschnitt 2.1,
-   Fall 2) — muss mit einem Testfall belegt werden, da dies leicht zu Verwirrung führen
-   kann.
-3. **`CellSelection` über mehrere Spalten:** löscht alle erfassten Spalten auf einen
-   Klick (Abschnitt 2.1, Fall 3, Design-Entscheidung dokumentieren).
-4. **Spalte mit horizontal verbundener Zelle, die über die Spaltengrenze hinausragt**
-   (`colspan` reduziert sich, Inhalt bleibt, siehe 2.4).
-5. **Spalte, deren gesamte Breite von einer verbundenen Zelle mit exakt passendem
-   `colspan` eingenommen wird:** Zelle wird komplett entfernt (siehe 2.4).
-6. **Spalte mit vertikal verbundener Zelle (`rowspan`):** Zelle über mehrere Zeilen wird
-   vollständig entfernt, Zeilenanzahl bleibt gleich (siehe 2.5).
-7. **Letzte verbleibende Spalte einer Tabelle (bzw. Selektion aller Spalten):** von der
-   Bibliothek verweigert (`false`, kein Dispatch) — muss sichtbar rückgemeldet werden,
-   nicht stiller No-Op (siehe 2.6, zentraler Pflicht-Testfall).
-8. **Tabelle mit genau zwei Spalten, eine wird gelöscht:** Ergebnis ist eine einspaltige
-   Tabelle — muss weiterhin normal bearbeitbar bleiben (Tippen, weitere Aktionen), keine
-   strukturelle Beschädigung.
-9. **Spalte am linken Tabellenrand löschen** vs. **Spalte am rechten Tabellenrand
-   löschen** vs. **Spalte in der Mitte löschen:** alle drei Positionen müssen
-   funktionieren, mit korrekt nachrückenden Nachbarspalten.
-10. **Leere Zellen in der zu löschenden Spalte** (kein Text, nur ein leerer Absatz):
-    löschen funktioniert ohne Absturz, keine „leere Zelle kann nicht gelöscht werden"-
-    Sonderbehandlung nötig.
-11. **Zelle mit mehreren Absätzen/gemischter Formatierung in der zu löschenden Spalte:**
-    gesamter Zellinhalt (alle Absätze, alle Formate) wird mitgelöscht, keine Teilreste.
-12. **Bild innerhalb einer Zelle der zu löschenden Spalte:** Bild wird mitgelöscht, keine
-    verwaiste Bilddatei im späteren Export-Zip (Analogie zu
-    `FEATURE-SPEC-DOCX-ODT.md` Abschnitt 7, Testfall 9 zum Bild-Löschen).
-13. **Bestätigungsdialog:** Word/LibreOffice zeigen für „Spalte löschen" **keinen**
-    Bestätigungsdialog (im Gegensatz zu z. B. „Tabelle löschen", wo teils nachgefragt
-    wird) — zu entscheiden, ob dieses Verhalten übernommen wird (Empfehlung: kein
-    Dialog, da Undo als Absicherung ausreicht und dies dem Verhalten anderer,
-    bereits „vorhandener" destruktiver Aktionen in dieser App entspricht, z. B.
-    Bild löschen ohne Rückfrage). Ergebnis der Entscheidung hier nachtragen.
-14. **Verschachtelte Tabelle (Tabelle in Tabellenzelle):** Spalte einer **äußeren**
-    Tabelle löschen, während eine Zelle dieser Spalte eine vollständige innere Tabelle
-    enthält → die gesamte innere Tabelle muss mitgelöscht werden, ohne Absturz (Bezug zu
-    `FEATURE-SPEC-DOCX-ODT.md` Abschnitt 6, Testfall 8, sowie der Tiefenbegrenzung
-    `MAX_TABLE_NESTING_DEPTH`/`MAX_NESTING_DEPTH` in `docx/reader.ts:208` bzw.
-    `odt/reader.ts:162`, die für den Import gilt, nicht für das Löschen selbst — hier nur
-    als Kontext für realistische, tief verschachtelte Testdateien relevant).
-15. **Spalte löschen unmittelbar nach „Tabelle einfügen" ohne vorheriges Tippen:**
-    funktioniert ohne Absturz, auch bei komplett leerer, frisch eingefügter 2×2-Tabelle.
-16. **Mehrfaches schnelles Hintereinander-Löschen** (z. B. dreimal in Folge dieselbe
-    verbleibende erste Spalte löschen, bis nur noch eine übrig ist): jede Aktion einzeln
-    korrekt, letzter Versuch wird gemäß Grenzfall 7 verweigert.
-17. **Reale Fremddatei mit großer Tabelle** (`FEATURE-SPEC-DOCX-ODT.md` Abschnitt 6,
-    Testfall 9: „> 5 Spalten, > 10 Zeilen, gemischte Formatierung") importieren, eine
-    mittlere Spalte löschen, exportieren, reimportieren → verbleibende Spalten und
-    -inhalte identisch zur Erwartung, keine Verschiebung.
-18. **Reale, mit LibreOffice erzeugte ODT-Fremddatei mit vertikal verbundenen Zellen**
-    (`covered-table-cell`, siehe Befund 8, Abschnitt 0) importieren, danach eine Spalte
-    löschen, exportieren, reimportieren → zu dokumentieren, ob der bereits bekannte
-    Spaltenzuordnungs-Fehler (Befund 8) das Ergebnis beeinflusst; falls ja, ist dies als
-    **Abhängigkeit/Blocker** dieses Features zu erfassen, nicht als neuer, dem Feature
-    „Spalte löschen" selbst zuzurechnender Fehler.
-19. **Selection-Sync-Regression** (siehe Abschnitt 2.10) — Pflicht-Regressionstest.
-20. **Track-Changes-Abhängigkeit (zukünftig, Phase 3, aktuell nicht umgesetzt):** Sobald
-    Änderungsverfolgung existiert, muss das Löschen einer Spalte bei aktiver
-    Aufzeichnung als nachverfolgbare Änderung markiert werden (analog zu
-    `FEATURE-SPEC-DOCX-ODT.md` Abschnitt 13, Testfall 8, der explizit
-    „Tabellen- … Struktur betreffende Änderung" als Grenzfall nennt). Für den aktuellen
-    Verifikationsauftrag **nicht** im Scope, nur als künftige Abhängigkeit vermerkt.
-
----
-
-## 4. Erforderliche Code-Änderungen (Umsetzungsskizze, kein Implementierungszwang im Detail)
-
-Zur Einordnung des Aufwands — diese Liste ist eine Skizze auf Basis der Code-Analyse aus
-Abschnitt 0, keine verbindliche Architekturvorgabe:
-
-1. `src/formats/shared/editor/commands.ts`: Re-Export bzw. dünner Wrapper um
-   `deleteColumn` aus `prosemirror-tables` (analog zum bereits bestehenden
-   `export { isInTable }` in `commands.ts:6`), ggf. mit einer Vorprüfung für den
-   „letzte Spalte"-Fall aus Abschnitt 2.6/3.7, damit der Aufrufer eine boolesche
-   „wäre diese Aktion überhaupt möglich"-Information erhält (für den deaktivierten
-   Button-Zustand aus Abschnitt 1, Zeile 3).
-2. `src/formats/shared/editor/Toolbar.tsx`: neuer Button analog zu den Zeilen 228-239
-   (bestehender „⊞ Tabelle"-Button), mit SVG-Icon statt Unicode-Zeichen, `disabled`-
-   Zustand gemäß Punkt 1.
-3. Klärung/Umsetzung der in Abschnitt 1, Zeile 4 offenen Frage (Kontextmenü-System ja/
-   nein) — betrifft möglicherweise eine gemeinsame Basis-Komponente für alle
-   Tabellen-Kontextfunktionen (Zeile/Spalte einfügen/löschen, verbinden/teilen), nicht
-   nur „Spalte löschen" isoliert.
-4. Ggf. Behebung des ODT-Writer-Bugs aus Befund 7 (`odt/writer.ts:88`, `colCount` sollte
-   wie im DOCX-Writer die Summe der `colspan`-Werte statt der reinen Zellenanzahl
-   verwenden) — **zu entscheiden, ob das Teil dieses Features ist** (da es durch dieses
-   Feature verschärft testbar wird) oder als separater Bugfix-Ticket geführt wird.
-5. Keine Schema-Änderung in `schema.ts` nötig — `table_cell`/`table_row`/`table`-Nodes
-   aus `tableNodes(...)` unterstützen das Entfernen von Zellen bereits strukturell.
+1. **Cursor ohne Selektion in einer Zelle:** löscht die Spalte über die volle Höhe (3.1/1).
+2. **`CellSelection` in einer Spalte, Teilhöhe** (z. B. 2 von 3 Zeilen): löscht die
+   **gesamte** Spalte (3.1/2) — mit Testfall belegen, da verwirrungsanfällig.
+3. **`CellSelection` über mehrere Spalten:** löscht alle erfassten Spalten auf einen Klick
+   (3.1/3).
+4. **Spalte mit `colspan`-Zelle, die hinausragt:** `colspan` reduziert, Inhalt bleibt (3.4).
+5. **Spalte, deren Breite von einer `colspan`-Zelle exakt gefüllt wird:** Zelle komplett
+   entfernt (3.4).
+6. **Spalte mit `rowspan`-Zelle:** Zelle über mehrere Zeilen vollständig entfernt,
+   Zeilenanzahl bleibt gleich (3.5). **ODT: Befund 8/16 — empirisch als korrekt
+   verifiziert, kein Risiko; Regressionstest, kein offener Klärungsbedarf.**
+7. **Letzte verbleibende Spalte / alle Spalten markiert:** von der Bibliothek verweigert —
+   Button `disabled`, sichtbare Rückmeldung statt stillem No-Op (3.6, **zentraler
+   Pflicht-Testfall**).
+8. **Tabelle mit genau 2 Spalten, eine löschen:** Ergebnis ist eine 1-spaltige Tabelle,
+   weiterhin normal bearbeitbar, keine strukturelle Beschädigung.
+9. **Spalte links / rechts / in der Mitte löschen:** alle drei Positionen funktionieren,
+   Nachbarspalten rücken korrekt nach.
+10. **Leere Zellen in der Spalte** (nur ein leerer Absatz): löschen ohne Absturz, keine
+    Sonderbehandlung.
+11. **Zelle mit mehreren Absätzen/gemischter Formatierung:** gesamter Zellinhalt wird
+    mitgelöscht, keine Teilreste.
+12. **Bild in einer Zelle der Spalte:** Bild wird mitgelöscht, keine verwaiste Bilddatei im
+    Export-Zip (Analogie `FEATURE-SPEC-DOCX-ODT.md` Abschn. 7 Testfall 9).
+13. **Bestätigungsdialog:** **kein** Dialog (wie Word/LibreOffice für „Spalte löschen").
+    Undo genügt als Absicherung; konsistent mit „Bild löschen" (Entf, ohne Rückfrage) und
+    dem Fehlen jeder Dialog-Infrastruktur.
+14. **Verschachtelte Tabelle:** äußere Spalte löschen, deren Zelle eine vollständige innere
+    Tabelle enthält → gesamte innere Tabelle wird mitgelöscht, kein Absturz
+    (`FEATURE-SPEC-DOCX-ODT.md` Abschn. 6 Testfall 8).
+15. **Spalte löschen direkt nach „Tabelle einfügen"** (frische, leere 2×2-Tabelle, kein
+    Tippen): funktioniert ohne Absturz.
+16. **Mehrfaches schnelles Löschen in Folge:** jede Aktion einzeln korrekt; der letzte
+    Versuch (nur noch eine Spalte übrig) wird gemäß Grenzfall 7 verweigert.
+17. **Reale Fremddatei mit großer Tabelle** (`> 5` Spalten, `> 10` Zeilen, gemischte
+    Formatierung): mittlere Spalte löschen, exportieren, reimportieren → verbleibende
+    Spalten/Inhalte identisch, keine Verschiebung. Konkret verfügbar: `BigTable.odt`,
+    `crazyTable.odt`, `OOStyledTable.odt` (`tests/fixtures/external/odt/`) sowie der
+    DOCX-Korpus aus `src/formats/docx/__tests__/external-fixtures.test.ts`.
+18. **Reale, mit LibreOffice erzeugte ODT mit vertikaler Verbindung**
+    (`covered-table-cell`, Befund 8/16 — **empirisch bereits als korrekt verifiziert**,
+    kein offener Verdacht; konkret geeignet: `tableCoveredContent.odt`, verifiziert 33×
+    `covered-table-cell`, `rowspan` bis 6; weitere Kandidaten `crazyTable.odt`,
+    `TableWidth.odt`, `feature_attributes_tables.odt` — vor Nutzung real auf
+    `number-rows-spanned`/`covered-table-cell` prüfen): importieren, Spalte löschen,
+    exportieren, reimportieren → Spaltenzuordnung wird als **korrekt importiert erwartet**
+    (nicht mehr als offene Frage). Weicht ein konkretes Fixture wider Erwarten ab, ist
+    **dieses Fixture** als Ausnahme zu dokumentieren, nicht „Spalte löschen" als
+    gescheitert zu werten.
+18a. **Reale ODT mit irregulärer Spaltenstruktur** (Befund 17, z. B.
+    `tests/fixtures/external/odt/tableOps.odt`, nutzt `table:number-columns-repeated`/
+    `table:number-rows-repeated`): Die vorbestehende, formatübergreifende
+    `colCount`-aus-Zeile-0-Schwäche beider Writer (Befund 17) kann hier beim Export
+    Zellen einer breiteren Folgezeile verwerfen. **Nicht** durch `deleteColumn` verursacht
+    (das hält die Tabelle stets rechteckig) — bei einem solchen Fixture-Treffer als
+    **bekannte, pre-existing Writer-Einschränkung** zu dokumentieren, nicht als
+    Fehlschlag dieses Features.
+19. **Selection-Sync-Regression** (3.10) — Pflicht-Regressionstest.
+20. **Track-Changes-Abhängigkeit** (Phase 3, nicht umgesetzt): sobald vorhanden, muss das
+    Spaltenlöschen bei aktiver Aufzeichnung als nachverfolgbare Änderung markiert werden
+    (`FEATURE-SPEC-DOCX-ODT.md` Abschn. 13 Testfall 8). Nicht im aktuellen Scope.
+21. **Keyboard-Löschen ≠ Strukturlöschen (Befund 14):** Spalte per `CellSelection`
+    markieren → `Backspace`/`Delete` → nur Zellinhalte werden geleert, Spalte bleibt
+    bestehen. Muss als eigener Testfall vom Toolbar-„Spalte löschen" abgegrenzt werden
+    (kein Bug, aber Verwechslungsgefahr).
+22. **Cross-Format-Export ist kein UI-Weg (Befund 18):** Der Export-Button gibt immer im
+    beim Öffnen gewählten Format aus (`DocumentWorkspace.tsx:68-95`). Rundreisen
+    DOCX→ODT bzw. ODT→DOCX (5.1/5, 5.2/5, 5.3) sind deshalb ab dem Export-Schritt nur auf
+    Objektebene (`readX`/`writeY` direkt im Test), nicht per echtem zweitem
+    Browser-Download, nachweisbar. Kein Blocker für „Spalte löschen" selbst, aber
+    verbindliche Rahmenbedingung für die Testebene dieser Fälle.
 
 ---
 
 ## 5. Rundreise-Anforderung (DOCX **und** ODT)
 
-Wie in `FEATURE-SPEC-DOCX-ODT.md` Abschnitt 1.3/3/19 gefordert, gilt für jede
-Interaktion mit „Spalte löschen" die Rundreise-Bedingung: **Datei A hochladen →
-Spalte löschen → exportieren → Ergebnis entspricht inhaltlich A abzüglich der
-gelöschten Spalte, sonst keine Abweichung.** Zusätzlich gilt die allgemeine
-Rundreise-Grundregel unverändert für den Fall, dass **keine** Spalte gelöscht wird
-(reines Sicherstellen, dass die neue Funktion bestehende Tabellen nicht beschädigt).
+Grundregel (`FEATURE-SPEC-DOCX-ODT.md` Abschn. 1.3/3/19): **Datei A hochladen → Spalte
+löschen → exportieren → Ergebnis entspricht inhaltlich A abzüglich der gelöschten Spalte,
+sonst keine Abweichung.** Export wird gegen einen **unabhängigen** Parser geprüft, nicht nur
+gegen den eigenen Reader (sonst können sich Schreib- und Lesefehler gegenseitig
+kaschieren). Über echten Datei-Upload (`filechooser`/`input[type=file]`) und echten
+Download (`page.waitForEvent('download')` + `JSZip.loadAsync`).
+
+**Verbindliche Randbedingung (Befund 18):** Der Export-Button gibt ausschließlich im beim
+Öffnen gewählten Format aus (`DocumentWorkspace.tsx:68-95,124-142`) — es existiert **kein**
+Formatwähler beim Export. **Gleichformat**-Rundreisen (Import Format X → … → Export
+Format X) sind deshalb vollständig über echten Browser-Upload/-Download nachweisbar.
+**Cross-Format**-Rundreisen (5.1/5, 5.2/5, 5.3) sind es **nicht**: Import über die UI ist
+möglich, der Formatwechsel selbst muss aber auf Objektebene (`readX(...)` gefolgt von
+direktem `writeY(...)` im Test, ohne zweiten UI-Export) erfolgen. Das ist eine reale
+Produktgrenze, kein Test- oder Feature-Mangel von „Spalte löschen" — bei der Verifikation
+ausdrücklich zu vermerken, nicht stillschweigend zu übergehen oder fälschlich als
+UI-Bug zu werten.
+
+### 5.0 Basis-Rundreise ohne Änderung (Pflicht-Absicherung)
+Bevor überhaupt eine Spalte gelöscht wird, muss sichergestellt sein, dass die neue Funktion
+bestehende Tabellen **nicht beschädigt**:
+1. DOCX mit Tabelle hochladen → **unverändert** exportieren → reimportieren → Tabelle
+   inhaltlich identisch (Spaltenzahl, Zellinhalte, Verbindungen).
+2. Dasselbe für ODT — **inkl.** einer Tabelle mit `rowspan` (Regressionstest für Befund 7/8:
+   der Writer erzeugt `covered-table-cell`, der Reader gewinnt die Spalten daraus korrekt
+   zurück — empirisch bereits verifiziert, siehe Befund 16; dieser Testfall sichert das
+   dauerhaft ab, ist aber **kein** offener Klärungspunkt mehr).
 
 ### 5.1 DOCX
-1. Einfache DOCX-Testdatei mit einer 3×3-Tabelle importieren → mittlere Spalte per
-   Cursor-Klick + „Spalte löschen" entfernen → als DOCX exportieren → mit einem
-   unabhängigen Parser (z. B. python-docx oder direktes Parsen von
-   `word/document.xml`) verifizieren: `<w:tblGrid>` enthält genau 2 `<w:gridCol>`,
-   jede `<w:tr>` enthält genau 2 `<w:tc>`, Inhalt der verbleibenden Spalten korrekt.
-2. Tabelle mit horizontal verbundener Zelle (`colspan: 2`) importieren, eine der beiden
-   überspannten Spalten löschen, exportieren → verbleibende Zelle referenziert **kein**
-   `<w:gridSpan>` mehr (bzw. `w:val="1"`, je nach Implementierungswahl bezüglich
-   expliziter vs. impliziter Angabe von `colspan: 1`), Inhalt bleibt erhalten.
-3. Tabelle mit vertikal verbundener Zelle (`rowspan: 2`) importieren, genau diese Spalte
-   löschen, exportieren → Zeilenanzahl (`<w:tr>`-Anzahl) unverändert, `vMerge`-Element
-   für diese Spalte verschwindet vollständig aus beiden betroffenen Zeilen.
-4. Reale, komplexe Fremddatei (z. B. aus einem Open-Source-Testkorpus wie
-   Apache-POI-Testdaten, siehe `FEATURE-SPEC-DOCX-ODT.md` Abschnitt 18) mit einer
-   Tabelle > 5 Spalten importieren, eine Spalte löschen, exportieren, reimportieren →
-   verbleibende Zellinhalte identisch zur Erwartung.
-5. Cross-Format: ODT mit Tabelle importieren → Spalte löschen → als DOCX exportieren →
-   Inhalt der verbleibenden Spalten bleibt erhalten.
-6. Doppelte Aktion: zwei verschiedene Spalten nacheinander löschen (ohne
-   zwischenzeitlichen Export) → erst danach exportieren → beide Spalten fehlen korrekt,
-   keine der beiden „kommt durch einen Konvertierungs-Zufall" wieder zurück.
+1. 3×3-Tabelle importieren → mittlere Spalte per Cursor + „Spalte löschen" → als DOCX
+   exportieren → unabhängig prüfen: `<w:tblGrid>` enthält genau 2 `<w:gridCol>`, jede
+   `<w:tr>` genau 2 `<w:tc>`, Inhalt der verbleibenden Spalten korrekt.
+2. Tabelle mit `colspan: 2` → eine überspannte Spalte löschen → verbleibende Zelle
+   referenziert kein `<w:gridSpan>` mehr (bzw. `w:val="1"`), Inhalt erhalten.
+3. Tabelle mit `rowspan: 2` → genau diese Spalte löschen → `<w:tr>`-Anzahl unverändert,
+   `vMerge` verschwindet aus beiden betroffenen Zeilen.
+4. Reale Fremddatei (Open-Source-Testkorpus, `FEATURE-SPEC-DOCX-ODT.md` Abschn. 18; für
+   DOCX der bereits eingebundene Korpus aus `src/formats/docx/__tests__/external-fixtures.test.ts`)
+   mit Tabelle `> 5` Spalten → eine Spalte löschen → exportieren → reimportieren →
+   verbleibende Zellinhalte identisch.
+5. **Cross-Format (Befund 18 — nur auf Objektebene, kein zweiter UI-Export):** ODT mit
+   Tabelle importieren (echter UI-Upload) → Spalte löschen (echte Toolbar-Bedienung) →
+   Zustand als Objekt entnehmen und direkt mit `writeDocx(...)` nach DOCX schreiben (kein
+   UI-Weg vorhanden) → `readDocx` bestätigt erhaltenen Inhalt.
+6. Zwei verschiedene Spalten nacheinander löschen (ohne Zwischen-Export) → dann exportieren
+   → beide fehlen korrekt, keine „kommt durch Zufall zurück".
 
 ### 5.2 ODT
-1. Einfache ODT-Testdatei mit einer 3×3-Tabelle importieren → mittlere Spalte löschen →
-   als ODT exportieren → `content.xml` enthält genau 2 `<table:table-column>`-Elemente
-   und pro `<table:table-row>` genau 2 `<table:table-cell>`, Inhalt korrekt.
-2. Tabelle mit horizontal verbundener Zelle (`table:number-columns-spanned="2"`)
-   importieren, eine überspannte Spalte löschen, exportieren → Attribut verschwindet
-   bzw. reduziert sich korrekt, Inhalt bleibt erhalten. **Hierbei explizit den Befund 7
-   (Abschnitt 0, `odt/writer.ts:88`) mitprüfen:** Stimmt die Anzahl der
-   `<table:table-column>`-Elemente nach dem Löschen mit der tatsächlichen Zellenzahl der
-   Zeile 0 überein, unabhängig von verbleibenden `colspan`-Werten?
-3. Tabelle mit vertikal verbundener Zelle (`table:number-rows-spanned="2"`) importieren,
-   genau diese Spalte löschen, exportieren → Zeilenanzahl unverändert, Attribut
-   verschwindet vollständig.
-4. **Pflicht-Testfall für Befund 8:** Reale, mit LibreOffice/OpenOffice erzeugte
-   ODT-Datei mit einer Tabelle, die mindestens eine vertikale Verbindung über
-   `<table:covered-table-cell/>`-Platzhalter abbildet, importieren → vor jeder
-   Lösch-Aktion zunächst verifizieren, ob die Spaltenzuordnung überhaupt korrekt
-   importiert wurde (bekanntermaßen fraglich, siehe Befund 8) — falls nicht, ist dieser
-   Testfall als **blockiert durch bestehenden Reader-Bug** zu kennzeichnen, nicht als
-   Fehlschlag von „Spalte löschen" selbst.
-5. Cross-Format: DOCX mit Tabelle importieren → Spalte löschen → als ODT exportieren →
-   Inhalt der verbleibenden Spalten bleibt erhalten.
+1. 3×3-Tabelle importieren → mittlere Spalte löschen → als ODT exportieren → `content.xml`
+   enthält genau 2 `<table:table-column>` und pro `<table:table-row>` genau 2
+   `<table:table-cell>`, Inhalt korrekt.
+2. **Regressionstest Befund 7:** Tabelle mit `colspan: 2` in Zeile 0 (⇒ 3 logische
+   Spalten, aber 2 JSON-Zellen) → exportieren → Assertion **direkt gegen die XML**: genau 3
+   `<table:table-column>`-Vorkommen (nicht 2). Sicherstellen, dass der bereits behobene
+   `colCount` korrekt bleibt.
+3. Tabelle mit `rowspan: 2` → genau diese Spalte löschen → exportieren → Zeilenanzahl
+   unverändert, Attribut/`covered-table-cell` konsistent. **Regressionstest, kein
+   Blocker-Kandidat (Befund 8/16 — empirisch bereits als korrekt verifiziert):** Erwartung
+   ist eine **korrekte** Spaltenzuordnung beim Reimport. Sollte ein konkreter Testlauf
+   wider Erwarten abweichen, ist das ein neuer, eigenständig zu meldender Befund (nicht
+   die Bestätigung eines bereits bekannten Risikos).
+4. **Regressionstestfall Befund 8/16:** reale, mit LibreOffice/OpenOffice erzeugte ODT mit
+   vertikaler Verbindung über `<table:covered-table-cell/>` importieren → **vor** jeder
+   Lösch-Aktion prüfen, ob die Spaltenzuordnung korrekt importiert wurde — Erwartung:
+   **korrekt**, wie bereits empirisch nachgewiesen (Befund 16). Ergebnis trotzdem
+   dokumentieren. Konkrete, bereits im Repo vorhandene und für vertikale Verbindungen
+   **verifizierte** Kandidaten aus `tests/fixtures/external/odt/`: `tableCoveredContent.odt`
+   (33× `covered-table-cell`, `rowspan` bis 6 — Hauptkandidat), ergänzend `BigTable.odt`,
+   `crazyTable.odt`, `OOStyledTable.odt`, `TableWidth.odt`, `coloredTable_MSO15.odt`,
+   `Tabelle1.odt`, `feature_attributes_tables.odt`, `table-column-delete-with-merge.odt`,
+   `table-column-delete-with-merge-2-times.odt` — vor Verwendung im Reader-Import auf
+   tatsächlich enthaltene `covered-table-cell`/`rowspan` prüfen, statt blind anzunehmen.
+5. **Cross-Format (Befund 18 — nur auf Objektebene):** DOCX mit Tabelle → Spalte löschen →
+   Zustand direkt mit `writeOdt(...)` nach ODT schreiben (kein UI-Weg für einen zweiten
+   Export im anderen Format) → `readOdt` bestätigt erhaltenen Inhalt.
 
 ### 5.3 Doppelte Rundreise / Cross-Format hin und zurück
-1. DOCX mit Tabelle → Editor → Spalte löschen → Export als ODT → erneuter Import →
-   Export zurück als DOCX → verbleibende Spalteninhalte nach zwei
-   Formatkonvertierungen weiterhin identisch (Formatierungsverluste bei Cross-Format
-   sind laut `FEATURE-SPEC-DOCX-ODT.md` Abschnitt 19 akzeptabel und zu dokumentieren,
-   Textverlust nicht).
-2. Dieselbe Prüfung mit Startpunkt ODT.
+
+**Randbedingung (Befund 18):** Da kein UI-Formatwähler beim Export existiert, laufen beide
+Fälle als Import über die UI (Editor-Interaktion inkl. echtem „Spalte löschen"-Klick), die
+**Formatwechsel selbst** aber direkt auf Objektebene (`readX`/`writeY`-Aufrufe im Test),
+nicht als Kette echter Browser-Downloads.
+
+1. DOCX → Editor → Spalte löschen (echte Toolbar-Bedienung) → `writeOdt` → `readOdt` →
+   `writeDocx` → `readDocx` → verbleibende Spalteninhalte nach zwei Konvertierungen
+   weiterhin identisch (Formatierungsverluste bei Cross-Format sind laut
+   `FEATURE-SPEC-DOCX-ODT.md` Abschn. 19 akzeptabel und zu dokumentieren, **Textverlust
+   nicht**).
+2. Dieselbe Prüfung mit Startpunkt ODT (Achtung `rowspan` — Befund 8/16 bereits als korrekt
+   verifiziert, hier nur Regressionsschutz).
 
 ---
 
-## 6. Explizit außerhalb des Scopes dieser Spezifikation
+## 6. Explizit außerhalb des Scopes
 
-Um Missverständnisse bei der späteren Abnahme zu vermeiden, wird hier festgehalten,
-was **nicht** Teil von „Spalte löschen" (dieser Datei) ist, sondern eigene, separate
-Backlog-Einträge mit eigener Priorität und eigener Anforderungsdatei bleiben:
-
-- **`spalte-einfuegen` (Spalte einfügen links/rechts, Priorität 1):** Das Gegenstück
-  zum Löschen ist ein eigenes Feature. Beide teilen sich voraussichtlich denselben
-  Toolbar-Bereich/dieselbe Kontextmenü-Entscheidung (siehe Abschnitt 1, Zeile 4), aber
-  die Einfüge-Logik selbst ist hier nicht gefordert.
-- **`zeile-loeschen` (Zeile löschen, Priorität 1):** Strukturell sehr ähnlich (auch
-  `prosemirror-tables` liefert `deleteRow`/`removeRow` fertig), aber ein eigener Slug
-  mit eigener Abnahme. Diese Datei behandelt **ausschließlich** Spalten.
-- **`zellen-verbinden` / `zellen-teilen` (Priorität 1/2):** Das **Erzeugen** bzw.
-  **Auflösen** von `colspan`/`rowspan` ist nicht Gegenstand dieser Datei — hier wird nur
-  das **Verhalten von „Spalte löschen" gegenüber bereits bestehenden** Verbindungen
-  behandelt (Abschnitt 2.4/2.5/3.4-3.6).
-- **`tabelle-loeschen` (Tabelle komplett löschen, Priorität 1):** Wird in Abschnitt 3.7
-  nur als möglicher Lösungsweg für den Grenzfall „letzte Spalte" erwähnt, ist aber ein
-  eigenständiges Feature mit eigener Abnahme.
-- **`tabelle-eigenschaften` / `tabellenformatvorlagen` / `tabelle-autoanpassen`:**
-  Rahmen, Schattierung, automatische Breitenanpassung nach dem Löschen sind eigene,
-  fehlende Features (Backlog-Zeilen 190/191/197) — Abschnitt 2.7 dieser Datei fordert
-  nur, dass das Tabellenlayout nach dem Löschen nicht sichtbar bricht, keine vollwertige
-  automatische Neuverteilung.
-- **`kopfzeile-wiederholen` (Priorität 2):** Nicht umgesetzt, nur als künftige
-  Abhängigkeit in Abschnitt 2.9/3.20 vermerkt.
-- **Track-Changes-Markierung von Struktur-Änderungen** (Phase 3, siehe Abschnitt 3.20):
-  nicht Teil des aktuellen Verifikationsauftrags.
+- **`spalte-einfuegen`** (Prio 1): Gegenstück, eigener Slug; teilt voraussichtlich den
+  Toolbar-Bereich, aber die Einfüge-Logik ist hier nicht gefordert.
+- **`zeile-loeschen`** (Prio 1): strukturell ähnlich (`deleteRow`/`removeRow` fertig in der
+  Bibliothek), eigener Slug/eigene Abnahme. Diese Datei behandelt **nur** Spalten.
+- **`zellen-verbinden` / `zellen-teilen`** (Prio 1/2): das **Erzeugen/Auflösen** von
+  Verbindungen ist nicht Gegenstand; hier nur das **Verhalten gegenüber bestehenden**
+  Verbindungen (Abschn. 3.4/3.5).
+- **`tabelle-loeschen`** (Prio 1): nur als Lösungsweg für „letzte Spalte" erwähnt
+  (Abschn. 3.6), eigenes Feature.
+- **Tabellen-Eigenschaften / -Formatvorlagen / Auto-Anpassung** (Rahmen, Schattierung,
+  automatische Breitenneuverteilung): eigene, fehlende Features. Abschn. 3.7 fordert nur,
+  dass das Layout nach dem Löschen nicht sichtbar bricht.
+- **`kopfzeile-wiederholen`** (Prio 2): nur als künftige Abhängigkeit (Abschn. 3.9).
+- **Track-Changes-Markierung von Struktur-Änderungen** (Phase 3): nicht im aktuellen
+  Verifikationsauftrag.
+- **Jeglicher Reader-/Writer-Umbau am ODT-Tabellenmodell wegen Befund 8:** entfällt —
+  Befund 8 ist empirisch als korrektes Verhalten verifiziert (Befund 16), kein Fix-Auftrag.
+- **Fix der `colCount`-aus-Zeile-0-Schwäche** (Befund 17, `docx/writer.ts:160` /
+  `odt/writer.ts:115-116`): vorbestehend, formatübergreifend, nicht durch dieses Feature
+  verursacht — eigenes, separates Ticket, hier nur zu dokumentieren, falls eine reale
+  Fremddatei darauf trifft.
+- **Ein zweiter Export-Format-Wähler in der UI** (Befund 18): eigenes, unabhängiges
+  Feature; diese Datei nutzt für Cross-Format-Rundreisen die Objektebene als Ersatz.
 
 ---
 
 ## 7. Testfälle für die Verifikation (E2E, echte Bedienung im Browser)
 
-Bereits vorhandene, aber laut Auftrag **nicht ausreichende** Tests (prüfen nur
-Lesen/Schreiben direkt konstruierter Tabellen-JSON-Dokumente, keine Oberflächen-
-Bedienung, kein `deleteColumn`-Aufruf):
-- `src/formats/docx/__tests__/roundtrip.test.ts:173-247` („DOCX round trip: tables")
-- `src/formats/odt/__tests__/roundtrip.test.ts:162-208` („ODT round trip: tables")
+Bereits vorhandene, laut Auftrag **nicht ausreichende** Tests (prüfen nur Lesen/Schreiben
+direkt konstruierter Tabellen-JSON, keine Oberflächen-Bedienung, kein `deleteColumn`):
+`src/formats/docx/__tests__/roundtrip.test.ts` und `src/formats/odt/__tests__/roundtrip.test.ts`
+(jeweils die Tabellen-`describe`-Blöcke).
 
-Zusätzlich zu schreibende Testfälle (neue Datei, z. B. `tests/e2e/table-columns.spec.ts`),
-damit alle Abschnitte 1–5 dieser Anforderung abgedeckt sind — durchgehend über echte
-Toolbar-/Maus-Bedienung (`page.locator(...)`, `page.mouse`, `dragTo`/Shift-Klick für
-`CellSelection`), nicht über direkte Command-Aufrufe:
+Neu zu schreiben (z. B. `tests/e2e/table-columns.spec.ts`), durchgängig über echte
+Toolbar-/Maus-Bedienung (`page.getByRole('button', { name: 'Spalte löschen' })`,
+`page.mouse`, `page.mouse.move(..., { steps })` für `CellSelection`), **nicht** über direkte
+Command-Aufrufe:
 
-1. Tabelle einfügen (bestehender Button), Cursor in mittlere Spalte einer 3×3-Tabelle
-   setzen, „Spalte löschen" klicken → Tabelle hat danach nur noch 2 Spalten, Inhalt der
-   verbleibenden Spalten unverändert.
-2. Button/Menüpunkt außerhalb einer Tabelle (Cursor in normalem Absatz) → deaktiviert
-   oder ohne Wirkung, keine Exception.
-3. Spalte per Maus-Drag über mehrere Zellen derselben Spalte markieren (`CellSelection`,
-   nicht über volle Höhe) → „Spalte löschen" → gesamte Spalte verschwindet (Grenzfall 2).
-4. Mehrere Spalten per Maus-Drag markieren → „Spalte löschen" → alle markierten Spalten
-   verschwinden auf einen Klick (Grenzfall 3, gemäß getroffener Design-Entscheidung).
-5. Tabelle mit einer über 2 Spalten verbundenen Zelle (zunächst über Testdaten/Fixture
-   vorbereitet, da `zellen-verbinden` selbst noch nicht über die UI erzeugbar ist) —
-   eine der beiden Spalten löschen → verbleibende Zelle zeigt weiterhin den Inhalt,
-   `colspan` ist um 1 reduziert (DOM-Prüfung `colspan`-Attribut bzw. internes
-   Dokumentmodell).
-6. Tabelle mit einer über 2 Zeilen verbundenen Zelle (`rowspan`) — genau diese Spalte
-   löschen → Zeilenanzahl unverändert, Zelle vollständig entfernt.
-7. Tabelle mit genau 2 Spalten — eine löschen → Ergebnis ist eine 1-spaltige Tabelle,
-   weiterhin editierbar (Tippen funktioniert).
-8. Tabelle mit genau 1 Spalte (bzw. alle Spalten einer Tabelle markiert) —
-   „Spalte löschen" auslösen → **keine** Änderung an der Tabelle, sichtbare Rückmeldung
-   statt stillem No-Op (zentraler Pflicht-Testfall, Grenzfall 7).
-9. Bild in einer Zelle der zu löschenden Spalte einfügen (echter `filechooser`-Flow wie
-   in `FEATURE-SPEC-DOCX-ODT.md` Abschnitt 7 gefordert) → Spalte löschen → Bild
-   verschwindet vollständig, keine Restspur im Dokumentmodell.
-10. Undo (Strg+Z) direkt nach „Spalte löschen" → Spalte inkl. vollständigem Inhalt wird
-    exakt wiederhergestellt; Redo (Strg+Y) löscht sie erneut.
-11. Zwei aufeinanderfolgende Spalten-Löschvorgänge, danach zweimal Undo → beide Spalten
-    werden in umgekehrter Reihenfolge einzeln wiederhergestellt.
-12. **Regressionstest analog `tests/e2e/selection-regression.spec.ts`**, aber mit
-    „Spalte löschen" als auslösendem Schritt (siehe Abschnitt 2.10/Grenzfall 19):
-    Tabelle einfügen → tippen → Spalte markieren und löschen → per Klick in
-    verbleibende Zelle neu positionieren → weiter tippen → Text landet korrekt, kein
-    Dokumentverlust.
-13. Vollständiger Rundreisetest je Format (Abschnitt 5.1/5.2), ausgeführt über echten
-    Datei-Upload (`filechooser`) und echten Download-Abfangmechanismus
-    (`page.waitForEvent('download')`).
-14. Cross-Format-Rundreise (Abschnitt 5.3) einmal DOCX→ODT→DOCX, einmal ODT→DOCX→ODT.
-15. Reale Fremddatei-Tests aus Abschnitt 5.1.4/5.2.4 (Open-Source-Korpus bzw. mit
-    LibreOffice erzeugte Datei mit vertikaler Verbindung — inkl. Dokumentation, falls
-    durch Befund 8 blockiert).
-16. Verschachtelte Tabelle (Tabelle in Tabellenzelle, Grenzfall 14) — äußere Spalte mit
-    innerer Tabelle löschen → kein Absturz, gesamte innere Tabelle verschwindet mit.
-17. Bedienung auf allen drei in `playwright.config.ts:20-22` konfigurierten Projekten
-    (Desktop Chrome, Mobile/Pixel 7, Tablet/iPad Mini) → mindestens Testfall 1 und 8
-    funktionieren auf jedem Projekt.
+1. Tabelle einfügen, Cursor in mittlere Spalte einer 3×3-Tabelle, „Spalte löschen" →
+   danach 2 Spalten, verbleibender Inhalt unverändert.
+2. Cursor in normalem Absatz (außerhalb Tabelle) → Button `disabled`, keine Exception.
+3. `CellSelection` über Teilhöhe einer Spalte (Maus-Drag über 2 von 3 Zeilen) → „Spalte
+   löschen" → gesamte Spalte verschwindet (Grenzfall 2).
+4. `CellSelection` über mehrere Spalten → „Spalte löschen" → alle markierten Spalten weg
+   (Grenzfall 3).
+5. **Sichtbarkeit (Befund 12):** Spalte per Maus-Drag markieren → die markierten Zellen
+   sind **sichtbar hervorgehoben** (`.selectedCell`-Overlay vorhanden), bevor gelöscht wird.
+6. Tabelle mit `colspan: 2` (per Fixture, da `zellen-verbinden` noch keine UI hat) → eine
+   der beiden Spalten löschen → verbleibende Zelle zeigt Inhalt, `colspan` um 1 reduziert.
+7. Tabelle mit `rowspan: 2` → genau diese Spalte löschen → Zeilenanzahl unverändert, Zelle
+   vollständig entfernt.
+8. Tabelle mit 2 Spalten → eine löschen → 1-spaltige Tabelle, weiterhin editierbar.
+9. **Letzte Spalte / alle Spalten markiert → Button `disabled`, kein stiller No-Op**
+   (zentraler Pflicht-Testfall, Grenzfall 7; prüft implizit Befund 13 — der Button muss
+   auch dann deaktiviert sein, wenn eine `CellSelection` alle Spalten umfasst).
+10. Bild in einer Zelle der Spalte (echter `filechooser`-Flow) → Spalte löschen → Bild
+    verschwindet vollständig, keine Restspur.
+11. `Backspace`/`Delete` auf markierter Spalte → **nur Zellinhalt geleert**, Spalte bleibt
+    (Grenzfall 21, Befund 14) — klar abgegrenzt vom Toolbar-Löschen.
+12. Undo (Strg+Z) direkt nach Löschen → Spalte inkl. Inhalt wiederhergestellt; Redo
+    (Strg+Y) löscht erneut.
+13. Zwei aufeinanderfolgende Löschvorgänge, dann zweimal Undo → beide Spalten in umgekehrter
+    Reihenfolge einzeln wiederhergestellt.
+14. **Selection-Sync-Regression** mit „Spalte löschen" als Auslöser (Abschn. 3.10/Grenzfall
+    19): Tabelle → tippen → Spalte markieren+löschen → Klick in verbleibende Zelle →
+    tippen → Text landet korrekt, kein Dokumentverlust.
+15. Basis-Rundreise **ohne** Änderung je Format (Abschn. 5.0), inkl. ODT-`rowspan`.
+16. Vollständige Rundreise je Format (Abschn. 5.1/5.2) über echten Upload/Download.
+17. Cross-Format-Rundreise (Abschn. 5.3): DOCX→ODT→DOCX **und** ODT→DOCX→ODT.
+18. Reale Fremddatei-Tests (Abschn. 5.1.4/5.2.4) — inkl. Dokumentation, falls durch Befund
+    8 blockiert.
+19. Verschachtelte Tabelle (Grenzfall 14) → äußere Spalte mit innerer Tabelle löschen →
+    kein Absturz, innere Tabelle verschwindet mit.
+20. Bedienung auf allen drei `playwright.config.ts`-Projekten (Desktop Chrome, Mobile/Pixel
+    7, Tablet/iPad Mini) → mindestens Testfall 1 und 9 auf jedem Projekt grün; Tabelle
+    sprengt den Viewport nicht (`.tableWrapper`-Overflow, Befund 12).
 
 ---
 
 ## 8. Testmatrix — Zusammenfassung
 
-| Bereich | Unit-Test (Reader/Writer) | E2E-Test (echte Bedienung) | Rundreise-Test (DOCX/ODT) |
+| Bereich | Unit (Reader/Writer) | E2E (echte Bedienung) | Rundreise (DOCX/ODT) |
 |---|---|---|---|
 | Grundfunktion: eine Spalte per Cursor löschen | fehlt | **fehlt komplett** | fehlt |
-| `CellSelection` innerhalb einer Spalte (Teilhöhe) | n/a | fehlt | n/a |
-| `CellSelection` über mehrere Spalten | n/a | fehlt | fehlt |
-| Spalte mit `colspan`-Zelle (Reduktion statt Löschen) | fehlt | fehlt | fehlt |
-| Spalte mit `rowspan`-Zelle | fehlt | fehlt | fehlt |
-| Letzte verbleibende Spalte (Bibliotheks-Guard) | fehlt | **fehlt, zentraler Pflichttest** | n/a |
+| Sichtbare `CellSelection`-Markierung (Befund 12) | n/a | **fehlt, zu bauen** | n/a |
+| Button `disabled` außerhalb Tabelle | n/a | fehlt | n/a |
+| Letzte Spalte: Button `disabled` (Befund 13) | n/a | **fehlt, zentraler Pflichttest** | n/a |
+| `CellSelection` Teilhöhe / mehrere Spalten | n/a | fehlt | fehlt |
+| Spalte mit `colspan` (Reduktion) | fehlt | fehlt | fehlt |
+| Spalte mit `rowspan` | fehlt | fehlt | fehlt (ODT: Befund 8/16 — Regressionstest, kein Blocker) |
+| Backspace ≠ Strukturlöschen (Befund 14) | n/a | fehlt | n/a |
 | Bild in gelöschter Spalte | fehlt | fehlt | fehlt |
-| Undo/Redo nach Spalten-Löschung | n/a | fehlt | n/a |
-| Selection-Sync-Regressionstest × Spalte löschen | n/a | **fehlt, muss Pflicht werden** | n/a |
-| Reale Fremddatei DOCX (> 5 Spalten) | fehlt | fehlt | fehlt |
-| Reale Fremddatei ODT mit vertikaler Verbindung (Befund 8) | fehlt, ggf. durch Reader-Bug blockiert | fehlt | fehlt |
-| ODT-`colCount`-Bug (Befund 7) im Zusammenspiel mit Löschen | fehlt | fehlt | fehlt |
+| Undo/Redo | n/a | fehlt | n/a |
+| Selection-Sync-Regression × Spalte löschen | n/a | **fehlt, muss Pflicht werden** | n/a |
+| Basis-Rundreise ohne Änderung (Abschn. 5.0) | teilw. vorhanden | fehlt | **fehlt** |
+| ODT-`colCount` (Befund 7, bereits behoben) | **Regressionstest fehlt** | n/a | fehlt |
+| ODT-`covered-table-cell`-Reader (Befund 8/16, **empirisch bereits als korrekt verifiziert**) | **Regressionstest fehlt** (kein offener Bug mehr) | fehlt | fehlt (Regressionsschutz, kein Blocker) |
+| Reale Fremddatei DOCX (`>5` Spalten) | fehlt | fehlt | fehlt |
 | Verschachtelte Tabelle | fehlt | fehlt | n/a |
-| Cross-Format-Rundreise nach Spalten-Löschung | n/a | fehlt | fehlt |
-| Mobile/Tablet-Bedienung | n/a | fehlt | n/a |
+| Cross-Format-Rundreise (Befund 18: nur Objektebene möglich) | fehlt (Objektebene) | n/a (kein UI-Weg) | fehlt (Objektebene) |
+| Mobile/Tablet-Bedienung + Overflow | n/a | fehlt | n/a |
+| `colCount`-aus-Zeile-0-Schwäche bei irregulären Fremddateien (Befund 17) | vorbestehend, außerhalb Scope | n/a | als bekannte Einschränkung zu dokumentieren, falls getroffen |
 
-**Fazit:** Der Backlog-Status „fehlt" ist für dieses Feature vollständig zutreffend —
-es existiert keinerlei UI-Anbindung. Die zugrunde liegende Bibliotheksfunktion
-(`deleteColumn`) ist zwar vorhanden und funktional stabil, aber **kein einziger Aspekt**
-ihres Verhaltens (Grenzfälle, Rundreise, Wechselwirkung mit bereits bekannten
-Writer/Reader-Bugs aus Befund 7/8) ist bisher getestet oder auch nur über die
-Oberfläche erreichbar.
+**Fazit:** Status „fehlt" ist zutreffend — keinerlei UI-Anbindung. `deleteColumn` ist
+vorhanden und stabil; **kein** Verhaltensaspekt (Grenzfälle, Sichtbarkeit,
+„deaktiviert"-Logik, Rundreise) ist bisher getestet oder über die Oberfläche erreichbar.
+Befund 8 (ODT-`covered-table-cell`) ist **kein** offener Bug mehr, sondern empirisch als
+korrekt verifiziert (Befund 16) — hier fehlt nur noch der dauerhafte Regressionstest, nicht
+die Klärung selbst.
 
 ---
 
-## 9. Verifikationsauftrag (Hinweis zum Backlog-Status „nicht vertrauenswürdig")
+## 9. Verifikationsauftrag (zum Backlog-Status „nicht vertrauenswürdig")
 
-Da der Ausgangsstatus laut Backlog „fehlt" ist und dieses Feature vollständig neu
-gebaut werden muss, gilt für die Abnahme dieselbe Regel wie in
-`FEATURE-SPEC-DOCX-ODT.md` Abschnitt 22 und in `suchen-req.md` Abschnitt 13 formuliert:
-**Jeder einzelne Testfall dieser Datei muss über echte Browser-Interaktion (Playwright,
-sichtbarer Klick/Maus-Drag/Tastatureingabe) nachgewiesen werden — nicht nur durch
-isolierte Command-/Unit-Tests auf `commands.ts`- bzw. `prosemirror-tables`-Ebene.** Ein
-Unit-Test, der `deleteColumn` direkt mit konstruierten ProseMirror-Dokumenten aufruft,
-beweist nicht, dass ein neuer Toolbar-Button, eine echte `CellSelection` per Maus und
-die sichtbare Aktualisierung der Tabelle im echten Editor tatsächlich funktionieren.
+Es gilt dieselbe Regel wie in `FEATURE-SPEC-DOCX-ODT.md` Abschn. 22: **Jeder Testfall dieser
+Datei muss über echte Browser-Interaktion (sichtbarer Klick / Maus-Drag / Tastatureingabe)
+nachgewiesen werden — nicht nur durch isolierte Command-/Unit-Tests.** Ein Unit-Test, der
+`deleteColumn` mit konstruierten Dokumenten aufruft, beweist **nicht**, dass ein neuer
+Toolbar-Button, eine echte `CellSelection` per Maus, die **sichtbare** Markierung und der
+korrekte `disabled`-Zustand (Befund 13) im echten Editor funktionieren.
 
-Vorgeschlagene Testebenen (analog zur Testmatrix in `FEATURE-SPEC-DOCX-ODT.md`
-Abschnitt 21):
-
-| Ebene | Beispiel-Datei/Ort | Deckt ab |
+| Ebene | Ort | Deckt ab |
 |---|---|---|
-| Unit-Test (Reader/Writer) | `src/formats/docx/__tests__/roundtrip.test.ts`, `src/formats/odt/__tests__/roundtrip.test.ts` (Erweiterung) | Export/Import einer bereits verkürzten Tabelle inkl. `colspan`/`rowspan`-Reduktion, Befund 6/7 |
-| E2E-Test (echte Bedienung) | `tests/e2e/table-columns.spec.ts` (neu) | Button-Klick, `CellSelection` per Maus, Undo/Redo, Selection-Sync-Regression, letzte-Spalte-Guard |
-| Rundreise-Test | Erweiterung bestehender `tests/e2e/docx.spec.ts` / `tests/e2e/odt.spec.ts` | Abschnitt 5 dieser Datei |
-| Reale Fixture-Datei | reale komplexe DOCX/ODT-Dateien (siehe `FEATURE-SPEC-DOCX-ODT.md` Abschnitt 18) | Abschnitt 5.1.4/5.2.4, Befund 8 |
+| Unit (Reader/Writer) | `docx/__tests__/roundtrip.test.ts`, `odt/__tests__/roundtrip.test.ts` (Erweiterung) | `colspan`/`rowspan`-Reduktion, Befund 6 (Invariante) / 7 (Regression) / 8+16 (Regressionsschutz für bereits korrektes Verhalten) |
+| Unit (Command) | `src/formats/shared/editor/__tests__/commands.test.ts` (neu) | eigene „letzte Spalte?"-Guard-Nachbildung aus Befund 13 (inkl. dokumentiertem Bibliotheks-Fehlverhalten des `dispatch`-losen `deleteColumn`) |
+| Unit (Cross-Format, Objektebene) | neue Datei, z. B. `src/formats/shared/__tests__/table-column-cross-format-roundtrip.test.ts` | Abschn. 5.1/5, 5.2/5, 5.3 — **einziger** Nachweisweg für Cross-Format, da laut Befund 18 kein UI-Weg existiert |
+| E2E (Bedienung) | `tests/e2e/table-columns.spec.ts` (neu) | Button-Klick, sichtbare `CellSelection`, `disabled`-Zustände, Undo/Redo, Selection-Sync, Backspace-Abgrenzung |
+| Rundreise (Gleichformat) | Erweiterung `tests/e2e/docx.spec.ts` / `odt.spec.ts` bzw. die neue Datei | Abschn. 5, außer Cross-Format-Teile (Befund 18) |
+| Reale Fixtures | komplexe DOCX/ODT (`FEATURE-SPEC-DOCX-ODT.md` Abschn. 18) | Abschn. 5.1.4/5.2.4, Befund 8/16 (Regressionstest), Befund 17 (bekannte Ausnahme dokumentieren) |
 
-Erst wenn alle Testfälle aus Abschnitt 3–5 auf diesen Ebenen grün sind, darf der
-Backlog-Status von `spalte-loeschen` auf „vorhanden" geändert werden.
+Erst wenn alle Testfälle aus Abschn. 3–5/7 auf diesen Ebenen grün (oder mit dokumentierter,
+begründeter Ausnahme, z. B. Befund 17 bei irregulären Fremddateien oder Befund 18 für
+Cross-Format-Testebene) sind, darf der Backlog-Status auf „vorhanden" wechseln. Befund 8
+ist **kein** zulässiger Grund mehr für eine Blocker-Kennzeichnung — er ist empirisch als
+korrekt geklärt (Befund 16).
 
 ---
 
-## 10. Zusammenfassung der Pflicht-Abnahmekriterien (Definition of Done)
+## 10. Definition of Done (Pflicht-Abnahmekriterien)
 
-Das Feature „Spalte löschen" gilt erst dann als **vorhanden** im Sinne des Backlogs,
-wenn:
+„Spalte löschen" gilt erst dann als **vorhanden**, wenn:
 
-1. Ein echter, klickbarer UI-Weg existiert (Toolbar-Button und/oder Kontextmenü, gemäß
-   der in Abschnitt 1, Zeile 4 getroffenen Entscheidung), der `deleteColumn` sichtbar
-   und nachvollziehbar auslöst.
-2. Alle drei Erkennungsfälle aus Abschnitt 2.1 (Cursor ohne Selektion, `CellSelection`
-   innerhalb einer Spalte, `CellSelection` über mehrere Spalten) einzeln getestet und
-   ihr Verhalten explizit dokumentiert/entschieden ist.
-3. Das Verhalten bei bestehenden Verbindungen (`colspan`/`rowspan`, Abschnitt 2.4/2.5)
-   durch dedizierte Testfälle nachgewiesen ist — bisher deckt **kein** Test diesen Pfad
-   ab.
-4. Der Grenzfall „letzte verbleibende Spalte" (Abschnitt 2.6/3.7) sichtbar
-   zurückgemeldet wird (deaktivierter Button oder Hinweistext), kein stiller
-   Fehlschlag.
-5. Der Selection-Sync-Regressionstest mit „Spalte löschen" als Auslöser (Abschnitt
-   2.10/3.19/7.12) geschrieben, grün und dauerhaft Teil der Suite ist.
-6. Die Rundreise-Anforderung aus Abschnitt 5 (DOCX, ODT, Cross-Format, reale
-   Fremddateien) durch echten Datei-Upload/Download nachgewiesen ist.
-7. Die bereits bekannten Writer/Reader-Befunde 6–9 aus Abschnitt 0 im Zusammenspiel mit
-   „Spalte löschen" einzeln geprüft und ihr Ergebnis (behoben oder als bewusst
-   akzeptierte, dokumentierte Einschränkung) hier nachgetragen wurden — insbesondere
-   Befund 7 (ODT-`colCount`-Bug) und Befund 8 (ODT-`covered-table-cell`-Lücke bei realen
-   Fremddateien).
-8. Kein Testfall stillen Datenverlust zeigt (Inhalt einer **nicht** zu löschenden Spalte
-   verschwindet unerwartet) oder eine JS-Exception in der Konsole erzeugt.
-9. Undo/Redo (Abschnitt 2.8/7.10-11) zuverlässig funktioniert, auch über mehrere
-   aufeinanderfolgende Löschvorgänge hinweg.
-10. Der Backlog-Eintrag `spalte-loeschen` wird erst dann auf „vorhanden" geändert, wenn
-    Punkte 1–9 erfüllt sind; andernfalls verbleibt der Status „fehlt" bzw. wird auf
-    „teilweise" korrigiert, sobald ein erster funktionierender, aber noch nicht
-    vollständig verifizierter UI-Weg existiert.
+1. Ein echter, klickbarer Toolbar-Button existiert (mit `aria-label="Spalte löschen"`,
+   Abschn. 2 Zeile 1/7), der `deleteColumn` sichtbar und nachvollziehbar auslöst.
+2. Die markierte Spalte **vor** dem Klick sichtbar hervorgehoben ist (`.selectedCell`-Styling
+   gebaut, Befund 12) — kein Löschen „ins Blinde".
+3. Alle drei Erkennungsfälle (Abschn. 3.1: Cursor, `CellSelection` Teilhöhe, `CellSelection`
+   über mehrere Spalten) einzeln getestet und ihr Verhalten dokumentiert sind.
+4. Das Verhalten bei bestehenden Verbindungen (`colspan`/`rowspan`, Abschn. 3.4/3.5) durch
+   dedizierte Testfälle nachgewiesen ist.
+5. Der Grenzfall „letzte verbleibende Spalte" (Abschn. 3.6) über die **eigene**
+   Guard-Nachbildung (Befund 13, **nicht** über `dispatch`-loses `deleteColumn`) als
+   `disabled` zurückgemeldet wird — kein stiller No-Op.
+6. Abgrenzung Backspace/Entf (nur Zellinhalt, Befund 14) getestet und nicht mit dem
+   strukturellen Löschen verwechselt ist.
+7. Der Selection-Sync-Regressionstest mit „Spalte löschen" als Auslöser (Abschn. 3.10/7.14)
+   geschrieben, grün und dauerhaft Teil der Suite ist.
+8. Die Rundreise-Anforderung (Abschn. 5, inkl. Basis-Rundreise 5.0, DOCX, ODT,
+   Cross-Format, reale Fremddateien) über echten Upload/Download nachgewiesen ist.
+9. Die Writer/Reader-Befunde 6–9 im Zusammenspiel mit „Spalte löschen" einzeln geprüft und
+   ihr Ergebnis nachgetragen ist — insbesondere **Befund 7** (bereits behoben →
+   Regressionstest) und **Befund 8** (ODT-`covered-table-cell`-Reader: **kein** offener
+   Bug, empirisch als korrekt verifiziert — Befund 16 — nur Regressionstest nötig, **kein**
+   Reader-Fix und **keine** Dialog-/Einschränkungs-Dokumentation als „nicht unterstützt"
+   erforderlich).
+10. Kein Testfall stillen Datenverlust (Inhalt einer **nicht** zu löschenden Spalte
+    verschwindet) oder eine JS-Exception in der Konsole zeigt — mit Ausnahme der bereits
+    als vorbestehend dokumentierten `colCount`-aus-Zeile-0-Schwäche (Befund 17) bei
+    irregulären Fremddateien, die separat, nicht als Regression dieses Features zu führen
+    ist.
+11. Undo/Redo (Abschn. 3.8/7.12-13) zuverlässig funktioniert, auch über mehrere
+    aufeinanderfolgende Löschvorgänge.
+12. Bedienbarkeit auf Desktop-, Mobile- und Tablet-Viewport nachgewiesen ist (Abschn. 7/20),
+    ohne dass eine breite Tabelle den Viewport sprengt (Befund 12).
+13. Die Cross-Format-Rundreise (Abschn. 5.1/5, 5.2/5, 5.3) auf **Objektebene** nachgewiesen
+    ist (Befund 18 — kein UI-Formatwähler beim Export vorhanden; das ist keine
+    Abnahmelücke, sondern die für dieses Produkt korrekte Testebene).
+14. Der Backlog-Eintrag `spalte-loeschen` erst nach Erfüllung von 1–13 auf „vorhanden"
+    gesetzt wird; andernfalls „fehlt" bzw. „teilweise", sobald ein erster funktionierender,
+    aber noch nicht vollständig verifizierter UI-Weg existiert.

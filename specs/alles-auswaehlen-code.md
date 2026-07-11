@@ -1,757 +1,670 @@
-# Umsetzungsplan „Alles auswählen“ — dateigenau, gegen den tatsächlichen Code geprüft
+# Umsetzungsplan „Alles auswählen" — dateigenau, gegen den tatsächlichen Code geprüft
 
 Bezug: `E:\docs\specs\alles-auswaehlen-req.md` (Anforderung), `E:\docs\FEATURE-SPEC-DOCX-ODT.md`
-(Referenzkonventionen), Code-Stand geprüft am 2026-07-04 in `E:\docs` (kein Git-Repo,
-Dateistand = Arbeitskopie). Geprüfte Dateien/Pakete: `src/formats/shared/editor/WordEditor.tsx`,
+(Referenzkonventionen), `E:\docs\specs\alles-auswaehlen-qa.md` (QA-Testplan, unabhängig gegen
+diesen Plan gegengeprüft). Code-Stand **erneut geprüft am 2026-07-05** in `E:\docs` (das
+Arbeitsverzeichnis **ist** ein Git-Repository — `git status`/`git log` liefern reale Historie;
+die Vorfassung dieses Plans behauptete fälschlich „kein Git-Repo", siehe Korrektur H unten).
+Geprüfte Dateien/Pakete: `src/formats/shared/editor/WordEditor.tsx`,
 `src/formats/shared/editor/Toolbar.tsx`, `src/formats/shared/editor/commands.ts`,
-`src/formats/shared/schema.ts`, `src/formats/shared/documentModel.ts`, `src/index.css`,
-`src/formats/shared/editor/pageLayout.ts`, `src/app/DocumentWorkspace.tsx`, `src/App.tsx`,
-`playwright.config.ts`, `package.json`, `tests/e2e/selection-regression.spec.ts`,
-`tests/e2e/docx.spec.ts`, `tests/e2e/odt.spec.ts`, `node_modules/prosemirror-commands/dist/index.js`,
-`node_modules/prosemirror-state/dist/index.js`, `node_modules/prosemirror-history/dist/index.js`,
-`node_modules/prosemirror-tables/dist/index.js`, `node_modules/playwright-core` (Device-Definitionen).
+`src/formats/shared/editor/__tests__/commands.test.ts`, `src/formats/shared/schema.ts`,
+`src/formats/shared/editor/pageLayout.ts`, `src/index.css`, `src/app/DocumentWorkspace.tsx`,
+`playwright.config.ts`, `tests/e2e/selection-regression.spec.ts`, `tests/e2e/cut.spec.ts`,
+`tests/e2e/clipboard.spec.ts`, `tests/e2e/clipboard-roundtrip.spec.ts`, `tests/e2e/docx.spec.ts`,
+`tests/e2e/odt.spec.ts`, `tests/e2e/fixtures.ts`, `tests/e2e/fixtures/richDocument.ts`,
+`tests/e2e/fixtures/fullCoverageDocument.ts`, `src/formats/docx/__tests__/cut-roundtrip.test.ts`,
+`src/formats/odt/__tests__/cut-roundtrip.test.ts`, `node_modules/prosemirror-commands`,
+`-state`, `-history`, `-tables`, `node_modules/playwright-core` (Device-Definitionen).
+
+**Warnung an Leser:innen dieses Plans:** Eine frühere Fassung dieses Dokuments wurde geschrieben,
+**bevor** die Schwester-Tickets „Kopieren" und „Ausschneiden" umgesetzt waren. Diese Fassung
+korrigiert die dadurch entstandene Veralterung. Wer die Vorgängerfassung kennt, lese **zuerst
+Abschnitt 1** („Was sich seit der letzten Planfassung real geändert hat") — dort stehen die
+konkreten, verhaltensrelevanten Korrekturen, die verhindern, dass jemand bereits existierende
+Tests ein zweites Mal schreibt oder ein bereits existierendes Playwright-Projekt für
+„nicht vorhanden" hält.
 
 Rolle dieses Dokuments: Es beantwortet, was am **bestehenden Code** falsch/unvollständig ist,
-und legt fest, welche Dateien geändert bzw. neu angelegt werden. Vorweggenommenes Ergebnis,
-weil es die Struktur des gesamten Plans bestimmt: **„Alles auswählen“ selbst benötigt keine
-einzige Zeile neuen Anwendungscodes.** Jede in `alles-auswaehlen-req.md` beschriebene
-Anforderung ist entweder bereits durch `prosemirror-commands`/`prosemirror-state`/
-`prosemirror-history`/`prosemirror-tables` strukturell garantiert (mit Bibliotheks-Quellcode
-belegt, Abschnitt 2), oder sie ist keine Lücke von „Alles auswählen“, sondern gehört einem
-anderen, bereits existierenden Ticket/einer bereits existierenden Datei (Abschnitt 3). Der
-tatsächliche Umsetzungsauftrag dieses Plans ist damit fast ausschließlich **Testinfrastruktur**
-(Abschnitt 4/9) plus das **Beantworten der vier offenen Fragen** aus Abschnitt 8 der Anforderung
-(Abschnitt 1).
+und legt fest, welche Dateien geändert bzw. neu angelegt werden. Das **inhaltliche Kernergebnis
+bleibt unverändert:** „Alles auswählen" selbst benötigt **keine einzige Zeile neuen
+Anwendungscodes** — jede Anforderung ist entweder durch `prosemirror-commands`/`-state`/
+`-history`/`-tables` strukturell garantiert (Abschnitt 4) oder gehört einem anderen Ticket
+(Abschnitt 5). Was sich gegenüber der Vorfassung ändert, ist der **Testumfang**: ein großer
+Teil der in `alles-auswaehlen-req.md` geforderten Verifikation ist inzwischen als **Nebenprodukt**
+der Kopieren-/Ausschneiden-Umsetzung bereits vorhanden (Abschnitt 3). Der echte Restauftrag ist
+kleiner und anders geschnitten als in der Vorfassung angenommen (Abschnitt 5/6).
 
 ---
 
 ## 0. Kurzfassung des Codebefunds
 
-Die Bestandsaufnahme in `alles-auswaehlen-req.md` Abschnitt 0 ist zutreffend und wurde
-unabhängig nachvollzogen:
-
-- **Kein eigener Code-Pfad.** Verifiziert per Volltextsuche über `src/`:
-  ```
-  grep -rn "select-all|selectAll|AllSelection" src/
-  → keine Treffer außerhalb von Kommentaren (WordEditor.tsx, Zeile 20)
-  ```
+- **Kein eigener Code-Pfad für „Alles auswählen".** Verifiziert per Volltextsuche über `src/`:
+  `selectAll`/`select-all`/`AllSelection` haben in **Anwendungscode** keinen Treffer. Zwei
+  Nicht-Anwendungs-Treffer, die die Vorfassung noch als „keine Treffer" führte, sind zu
+  präzisieren:
+  1. `WordEditor.tsx` Zeilen 20–42 — reiner Kommentar (Beschreibung des Selection-Sync-Bugs;
+     `AllSelection` namentlich auf Zeile 22).
+  2. `src/formats/shared/editor/__tests__/commands.test.ts` Zeilen 1/33–37 — **ein echter Test**
+     (`'is true for an AllSelection'`), der `new AllSelection(state.doc)` konstruiert und gegen
+     `canCut` prüft. Das ist neu gegenüber der Vorfassung und relevant für Abschnitt 6.4 (das
+     dort geplante Unit-File ist **nicht** das „erste" seiner Art).
   `commands.ts` exportiert `setAlign`, `isAlignActive`, `setHeading`, `toggleList`,
-  `liftFromList`, `insertImage`, `insertTable`, `applyMarkColor`, `clearMarkColor` — nichts
-  mit Selektions-Bezug. `Toolbar.tsx` hat keinen „Alles auswählen“-Button. `WordEditor.tsx`
-  bindet `keymap(baseKeymap)` (Zeile 80) **nach** der eigenen `keymap({...})` (Zeilen 71–79,
-  die selbst kein `Mod-a` enthält) — `baseKeymap`s `"Mod-a": selectAll` ist also der einzige
-  Grund, warum Strg+A überhaupt funktioniert.
-- **`selectAll` ist Bibliothekscode**, nicht Projektcode
-  (`node_modules/prosemirror-commands/dist/index.js:489-492`):
+  `liftFromList`, `insertImage`, `insertHardBreak`, `insertTable`, `applyMarkColor`,
+  `clearMarkColor`, `canCut`, `cutSelection` — **nichts** mit `selectAll`/Select-All-Bezug.
+- **`selectAll` ist Bibliothekscode** (`node_modules/prosemirror-commands/dist/index.js`):
   ```js
   const selectAll = (state, dispatch) => {
       if (dispatch) dispatch(state.tr.setSelection(new AllSelection(state.doc)));
       return true;
   };
   ```
-- **Kein gestuftes Tabellenverhalten.** Bestätigt durch Gegenprobe in
-  `node_modules/prosemirror-tables/dist/index.js`: keine `Mod-a`-Bindung, kein
-  `selectAll`-Override, keine interne Keymap-Registrierung für Zell-/Tabellen-Ebenen-Selektion.
-  `tableEditing()` (registriert in `WordEditor.tsx:82`) ändert daran nichts — es bindet nur
-  Zellnavigations-/Lösch-Tasten, nie `Mod-a`. Der Ist-Zustand „sofort ganzes Dokument“ ist
-  also nicht nur „vermutlich so“, sondern durch Abwesenheit jeder Gegen-Bindung **bestätigt**.
-- **Kein `contextmenu`-Handler.** `grep -rn "contextmenu" src/` liefert **keinen** Treffer
-  (identischer Befund wie in `kopieren-code.md` Abschnitt 3.5 und `ausschneiden-code.md`
-  Abschnitt 1.3 für dieselbe Codebasis).
-- **Kein eigenes `::selection`-Styling.** `src/index.css` (72 Zeilen, vollständig gelesen)
-  enthält keine `::selection`-Regel.
-- **Nur ein indirekter Test.** `tests/e2e/selection-regression.spec.ts` (3 Tests) nutzt
-  Strg+A ausschließlich als Trigger für den Selection-Sync-Bug, nie als eigenständig
-  geprüfte Funktion.
+  `WordEditor.tsx` bindet die projekteigene `keymap({...})` (Objekt-Literal Zeilen 85–107, enthält
+  `Mod-z`/`Mod-y`/`Mod-Shift-z`/`Enter`/`Shift-Enter`/`Mod-b`/`Mod-i`/`Mod-u`/`Shift-Delete`,
+  **kein** `Mod-a`) und **danach** `keymap(baseKeymap)` (Zeile 108). `baseKeymap`s
+  `"Mod-a": selectAll` ist damit der einzige Grund, warum Strg+A/Cmd+A funktioniert.
+- **Kein gestuftes Tabellenverhalten.** `prosemirror-tables` bindet kein `Mod-a`, überschreibt
+  `selectAll` nicht. `columnResizing()`/`tableEditing()` (`WordEditor.tsx` Zeilen
+  109–110) binden nur Zellnavigations-/Löschtasten. „Sofort ganzes Dokument" ist durch
+  Abwesenheit jeder Gegen-Bindung **bestätigt**.
+- **Kein `contextmenu`-`preventDefault`-Handler.** `grep -rn "contextmenu" src/` liefert
+  **genau einen** Treffer — einen **Kommentar** in `WordEditor.tsx` (Zeilen 117–121), der die
+  bewusste Abwesenheit eines eigenen Kontextmenüs/`preventDefault` dokumentiert (durch die
+  Ausschneiden-Umsetzung ergänzt). Kein tatsächlicher Handler. Die Vorfassung schrieb „keinen
+  Treffer" — substanziell weiterhin korrekt (natives Kontextmenü bleibt erreichbar), aber der
+  Grep-Befund ist jetzt „ein dokumentierender Kommentar", nicht „nichts".
+- **Kein eigenes `::selection`-Styling.** `src/index.css` (**88 Zeilen**, vollständig gelesen und
+  per `wc -l` nachgezählt — die Vorfassung nannte 72) enthält keine `::selection`-Regel;
+  `.ProseMirror { color: #111827 }` steht unverändert auf Zeile 26.
+- **Selection-Sync-Regressionstest vorhanden — mit inzwischen VIER Tests, nicht drei.**
+  `tests/e2e/selection-regression.spec.ts` enthält:
+  1. `'select-all, bold, click to reposition, Enter, and type — both paragraphs must survive'`
+  2. `'same regression inside a table cell (click between cells after formatting)'`
+  3. `'repeated select-all + bold + click cycles stay stable (stress check)'`
+  4. `'select-all, bold, copy, click to reposition, type — both paragraphs must survive'`
+     — **ein Kopieren-Variantentest**, hinzugekommen mit der Kopieren-Umsetzung, mit Verweis
+     auf `kopieren-req.md` Abschnitt 3, Testfall 1. **Jede** Stelle der Vorfassung, die von
+     „den drei bestehenden Tests" sprach, ist auf **vier** zu korrigieren (Abschnitt 1).
 
-**Zusätzlich, über die Anforderungsdatei hinausgehend, neu gefundene bzw. präzisierte Punkte**
-(analog zum Vorgehen in `kopieren-code.md`/`ausschneiden-code.md`, die ebenfalls über die
-jeweilige `-req.md`-Bestandsaufnahme hinaus eigene Funde ergänzt haben):
+**Zusätzliche, weiterhin gültige Bibliotheks-Funde** (unabhängig nachvollzogen, unverändert
+korrekt gegenüber der Vorfassung):
 
-1. **`AllSelection` überschreibt nichts außer `replace`/`toJSON`/`map`/`eq`/`getBookmark`**
-   (`node_modules/prosemirror-state/dist/index.js:408-434`) — `ranges`, `from`, `to`, `$from`,
-   `$to`, `empty`, `content()` sind die generischen Implementierungen der Basisklasse
-   `Selection` (Zeilen 9-70). Das ist der Beleg dafür, dass **jeder** Fix, der an anderer
-   Stelle über `state.selection.ranges`/`from`/`to` (statt `$from` allein) geht, automatisch
-   auch für `AllSelection` korrekt arbeitet — relevant für Abschnitt 1, Frage 3 unten.
-2. **Undo-Neutralität ist strukturell erzwungen, nicht nur wahrscheinlich.**
-   `node_modules/prosemirror-history/dist/index.js`, Funktion `applyTransaction`:
-   ```js
-   if (tr.steps.length == 0) { return history; }
-   ```
-   `selectAll`s Transaktion (`state.tr.setSelection(...)`) hat **keine** `Step`s (eine reine
-   Selektionsänderung erzeugt nie einen `Step`) — `prosemirror-history` verwirft sie also,
-   bevor sie überhaupt in Erwägung gezogen wird, unabhängig von jeder Undo-Gruppierungslogik
-   weiter unten in derselben Funktion. Das beweist Grenzfall 8 der Anforderung
-   mathematisch, nicht nur empirisch.
-3. **`AllSelection.replace` garantiert ein gültiges Restdokument.**
-   ```js
-   replace(tr, content = Slice.empty) {
-       if (content == Slice.empty) {
-           tr.delete(0, tr.doc.content.size);
-           let sel = Selection.atStart(tr.doc);
-           if (!sel.eq(tr.selection)) tr.setSelection(sel);
-       } else { super.replace(tr, content); }
-   }
-   ```
-   In Kombination mit `doc: { content: 'block+' }` (`src/formats/shared/schema.ts:7`) kann
-   `tr.delete(0, size)` nie zu einem leeren/ungültigen Dokument führen — ProseMirrors
-   Transform-Fit-Logik ergänzt beim Löschen des gesamten Inhalts automatisch einen leeren
-   Absatz. Das ist derselbe Mechanismus, den `ausschneiden-code.md` Abschnitt 1.4 für
-   Strg+X/Strg+A bereits (dort beiläufig) dokumentiert; hier wird er als **die** tragende
-   Garantie für Grenzfall 1/6 der vorliegenden Anforderung explizit gemacht.
-4. **Die editierbare „Seite“ ist unabhängig vom App-Farbschema immer hell.** `pageLayout.ts`,
-   `pageBackgroundStyle()`: `backgroundImage: linear-gradient(to bottom, white 0, white
-   ${PAGE_CONTENT_HEIGHT_PX}px, …)` — der Seiteninhalt selbst ist **fest** weiß (nur die
-   Chrome *um* die Seiten herum, `bg-neutral-200 dark:bg-neutral-950` in `WordEditor.tsx:119`,
-   wechselt mit dem Theme). Zusätzlich setzt `.ProseMirror { color: #111827 }`
-   (`src/index.css:26`) eine **feste** dunkle Textfarbe, ebenfalls unabhängig vom Theme. Der
-   in Anforderung 2.3 befürchtete Fall „heller/unlesbarer Browser-Standard-Selektionshintergrund
-   im Dark Mode“ betrifft also mutmaßlich **nie** die eigentliche Editierfläche — Dark Mode
-   ändert nur die Chrome außerhalb der Seite, nie die Seite selbst. Das reduziert das Risiko
-   aus Abschnitt 2.3/Testfall 14 der Anforderung erheblich, ersetzt aber **nicht** den dort
-   geforderten visuellen Verifikationsschritt (Abschnitt 9.5 unten).
-5. **Tangentialer, aber nicht blockierender Fund: keinerlei Standard-ProseMirror-CSS ist
-   eingebunden.** `src/main.tsx` importiert nur `./index.css`; kein Import von
-   `prosemirror-view/style/prosemirror.css`, `prosemirror-tables/style/tables.css` oder
-   `prosemirror-gapcursor/style/gapcursor.css` existiert irgendwo im Repo (Volltextsuche ohne
-   Treffer). Das bedeutet, die Klasse `.ProseMirror-selectednode` (die ProseMirror intern bei
-   jeder echten `NodeSelection`, z. B. Einzelklick auf ein Bild, per JS auf das DOM-Element
-   setzt) hat **keinerlei** visuelle Wirkung, weil die zugehörige Default-Regel
-   (`outline: 2px solid #8cf`) nirgends definiert ist. **Für „Alles auswählen“ selbst ist das
-   kein Blocker**, weil eine `AllSelection` kein Bild als eigene `NodeSelection` einbettet —
-   ein von einer `AllSelection` eingeschlossenes Bild bekommt ausschließlich die native
-   Browser-Range-Hervorhebung (kein `.ProseMirror-selectednode`). Es ist aber ein real
-   existierender, bisher unentdeckter Darstellungsfehler, der **Einzelklick auf ein Bild**
-   betrifft (eigene `NodeSelection`, dort *würde* die Klasse gesetzt, aber nichts anzeigen).
-   Das gehört inhaltlich zu `bild-einfuegen-req.md`/`bild-groesse-aendern-req.md`, nicht zu
-   diesem Ticket — wird hier nur vermerkt, damit es nicht verloren geht (siehe Abschnitt 13).
-6. **Frage 3 der Anforderung überschneidet sich mit vier bereits existierenden
-   Schwester-Plänen.** Siehe Abschnitt 3.2 — wichtig genug, um hier vorab erwähnt zu werden:
-   `fett-code.md`, `kursiv-code.md`, `durchgestrichen-code.md` und
-   `unterstrichen-einfach-code.md` beschreiben **alle vier unabhängig voneinander** dieselbe
-   Diagnose (`MarkButton` wertet nur `$from.marks()` aus) und schlagen **jeweils eine eigene**
-   `isMarkActive`-Hilfsfunktion in derselben Datei (`commands.ts`) vor — mit **unterschiedlichen
-   Implementierungsdetails** (z. B. `kursiv-code.md` prüft zusätzlich `state.selection.ranges`
-   für `CellSelection`-Fälle, `fett-code.md`s Version tut das nicht). Da noch keiner dieser
-   vier Pläne umgesetzt ist (verifiziert: `commands.ts` enthält aktuell keine `isMarkActive`-
-   Funktion, `Toolbar.tsx` ruft weiterhin `toggleMark` direkt auf), ist dies ein
-   **Koordinationsrisiko zwischen vier Tickets**, kein Fehler dieses Plans — dieser Plan
-   dupliziert die Implementierung bewusst **nicht** (siehe Entscheidung zu Frage 3 in
-   Abschnitt 1).
-7. **Der aus `kopieren-code.md`/`ausschneiden-code.md` bekannte Cross-Format-Export-Blocker
-   besteht unverändert fort.** `src/app/DocumentWorkspace.tsx::handleExport` (Zeilen 17–29)
-   exportiert weiterhin ausschließlich in das Ursprungsformat (`module.exportFile(...)`, wobei
-   `module` beim Öffnen fest gebunden wird, `src/App.tsx:20`). Es gibt weiterhin keinen
-   „Exportieren als …“-Weg. Das blockiert die Cross-Format-Testfälle 6/7/8 aus
-   `alles-auswaehlen-req.md` Abschnitt 4.2 genauso, wie es dort bereits für Kopieren/
-   Ausschneiden dokumentiert ist (Abschnitt 3.3 unten).
+1. **`AllSelection` überschreibt nur `replace`/`toJSON`/`map`/`eq`/`getBookmark`**
+   (`prosemirror-state`) — `ranges`/`from`/`to`/`$from`/`$to`/`empty`/`content()` sind die
+   generischen Basisklassen-Implementierungen. Jeder Fix, der über
+   `state.selection.ranges`/`from`/`to` statt allein über `$from` geht, arbeitet automatisch
+   auch für `AllSelection` korrekt (relevant für Frage 3).
+2. **Undo-Neutralität strukturell erzwungen.** `prosemirror-history`, `applyTransaction`:
+   `if (tr.steps.length == 0) { return history; }`. `selectAll`s Transaktion ist reine
+   Selektion → **null** `Step`s → wird verworfen, bevor Undo-Gruppierung überhaupt greift.
+   Beweist Grenzfall 8 strukturell.
+3. **`AllSelection.replace` garantiert ein gültiges Restdokument.** `tr.delete(0, size)` +
+   Schema `doc: { content: 'block+' }` (`schema.ts:14`) → ProseMirrors Fit-Logik ergänzt beim
+   Löschen des Gesamtinhalts automatisch einen leeren Absatz. Trägt Grenzfall 1/6.
+4. **Editierfläche unabhängig vom Theme hell.** `pageLayout.ts::pageBackgroundStyle()` malt
+   `linear-gradient(to bottom, white 0, white ${PAGE_CONTENT_HEIGHT_PX}px, transparent …)` — die
+   „Seiten"-Bänder sind **fest weiß**, nur die „Lücken"-Bänder sind transparent und zeigen die
+   Chrome-Farbe (`bg-neutral-200 dark:bg-neutral-950`, `WordEditor.tsx:163`). Zusammen mit der
+   festen Textfarbe `#111827` reagiert die eigentliche Editierfläche **nicht** auf Dark Mode.
+   Das Risiko „unlesbarer Selektionshintergrund im Dark Mode" ist gering — ersetzt aber nicht
+   den in Abschnitt 6, Testfall 14 der Anforderung geforderten visuellen Check.
+5. **Kein Standard-ProseMirror-CSS eingebunden** (`prosemirror-view/style/*`,
+   `prosemirror-tables/style/*` werden nirgends importiert). `.ProseMirror-selectednode` hat
+   damit keine visuelle Wirkung. **Für „Alles auswählen" kein Blocker** (eine `AllSelection`
+   bettet kein Bild als eigene `NodeSelection` ein → das eingeschlossene Bild bekommt nur die
+   native Range-Hervorhebung). Betrifft nur **Einzelklick-Bildauswahl** → gehört
+   `bild-einfuegen`/`bild-groesse-aendern` (Abschnitt 15).
+6. **Cross-Format-Export-Blocker besteht fort.** `DocumentWorkspace.tsx::handleExport`
+   (**Zeilen 68–95** — die Vorfassung nannte 17–29; die Datei ist seither um Re-Entrancy-Guard,
+   Export-Fehlerbehandlung und Test-Hooks gewachsen) ruft weiterhin nur
+   `module.exportFile(snapshot.content, snapshot.fileName)` im **Ursprungsformat** auf. Kein
+   „Exportieren als …". Blockiert die Cross-Format-Testfälle 6/7/8 aus `alles-auswaehlen-req.md`
+   Abschnitt 4.2 — **derselbe** Blocker, den Kopieren/Ausschneiden bereits gemeldet haben
+   (Abschnitt 5.3).
 
 ---
 
-## 1. Entscheidungen zu den offenen Fragen (`alles-auswaehlen-req.md` Abschnitt 8)
+## 1. Was sich seit der letzten Planfassung real geändert hat (die kritische Korrektur)
 
-Diese Antworten sind so formuliert, dass sie **wörtlich** in `alles-auswaehlen-req.md`
-Abschnitt 8 nachgetragen werden können, sobald dieser Plan freigegeben ist.
+Diese Tabelle ist der Kern der „kritisch prüfen und verbessern"-Überarbeitung. Jede Zeile ist
+eine falsch gewordene Aussage der Vorfassung samt verifizierter Realität. Wer nach der Vorfassung
+arbeitet, würde ohne diese Korrekturen doppelte Arbeit leisten oder falsche Voraussetzungen
+annehmen.
 
-### Frage 1: Eigener Toolbar-Button für „Alles auswählen“?
+| # | Aussage der Vorfassung | Verifizierte Realität heute | Konsequenz |
+|---|---|---|---|
+| A | „`selection-regression.spec.ts`: **drei** bestehende Tests" (durchgängig) | **Vier** Tests; der vierte ist bereits ein Kopieren-Variantentest (`…, bold, copy, …`) | „Alles auswählen" ergänzt **keinen** eigenen Kopieren-Regressionstest hier — der existiert. Zählung überall auf 4 korrigiert (Abschnitt 6.3). |
+| B | Ergänze `selection-regression.spec.ts` um einen **Ausschneiden**-Regressionstest (Strg+A → Strg+X → Klick → Enter → tippen) | `tests/e2e/cut.spec.ts` **Testfall 5 (PFLICHT)** ist exakt dieser Test: „Tippen → Strg+A → Strg+X → Klick zur Neupositionierung → Enter → weiter tippen bleibt korrekt" | **Nicht duplizieren.** Referenzieren statt neu schreiben (Abschnitt 3). |
+| C | „weder `kopieren-code.md` noch `ausschneiden-code.md` sind umgesetzt" | **Beide umgesetzt:** `commands.ts` hat `cutSelection`/`canCut`; `WordEditor.tsx` bindet `Shift-Delete: cutSelection`; E2E: `cut.spec.ts`, `clipboard.spec.ts`, `clipboard-roundtrip.spec.ts`; Unit: `commands.test.ts` | Die Test-Lücke ist **viel kleiner** als angenommen; große Teile der Select-All-Oberfläche sind bereits mitgetestet (Abschnitt 3). |
+| D | `playwright.config.ts` hat **drei** Projekte; ein `Desktop Safari`-Projekt „existiert noch nicht" | **Fünf** Projekte: `Desktop Chrome`, `Mobile`, `Tablet`, **`Desktop Safari (Clipboard)`** und **`Desktop Firefox (Clipboard)`** (beide `testMatch: /clipboard.*\.spec\.ts/`). Chrome+Mobile tragen zusätzlich `permissions: ['clipboard-read','clipboard-write']` | Die von `alles-auswaehlen-req.md` Frage 4 vorausgesetzte Bedingung („sobald ein Desktop-Safari-Projekt existiert …") ist **erfüllt**. Cmd+A auf Desktop-WebKit ist jetzt mit einer **Ein-Zeilen-`testMatch`-Änderung** testbar (Abschnitt 2/10). |
+| E | Das neue Unit-File wäre „die erste Unit-Test-Datei, die `EditorState.create` direkt aufbaut" | `commands.test.ts` baut `EditorState.create({ doc, schema: wordSchema })` bereits direkt auf und testet `AllSelection` bereits (Zeilen 10, 33–37) | Neues Unit-File folgt dem **bestehenden** Muster; „erstmalig"-Formulierung gestrichen (Abschnitt 6.4). |
+| F | `src/index.css` „72 Zeilen"; `grep contextmenu` „keinen Treffer"; `handleExport` „Zeilen 17–29" | `index.css` **88 Zeilen** (`wc -l`, erneut nachgezählt — nicht 89); `contextmenu`-Grep trifft **einen Kommentar** in `WordEditor.tsx`; `handleExport` **Zeilen 68–95** (exakt bestätigt) | Reine Faktenkorrektur; die inhaltlichen Schlüsse (kein `::selection`, kein Handler, kein Cross-Format-Export) bleiben gültig. |
+| G | Der `pageerror`/Konsolenfehler-Helper werde „erstmals" in `ausschneiden-code.md` eingeführt | Helper `watchForConsoleErrors(page)` existiert bereits **mehrfach dupliziert** (u. a. `cut.spec.ts`, `clipboard.spec.ts`, `clipboard-roundtrip.spec.ts`, `export-error-handling.spec.ts`) — und zusätzlich verifiziert: `docxCard`/`odtCard` sind **ebenfalls** dreifach dupliziert (`cut.spec.ts`, `clipboard.spec.ts`, `clipboard-roundtrip.spec.ts`) statt aus der bereits existierenden `tests/e2e/fixtures.ts` (die genau diese Helper exportiert und von `complex-import-fidelity.spec.ts` bereits genutzt wird) importiert zu werden | `select-all.spec.ts`/`select-all-roundtrip.spec.ts` übernehmen das etablierte **lokale** Duplikations-Muster (nicht `fixtures.ts`, da `cut.spec.ts`/`clipboard*.spec.ts` bewusst ohne dessen Test-Wrapper auskommen); Zentralisierung (`watchForConsoleErrors` **und** `docxCard`/`odtCard` in `fixtures.ts` verschieben) bleibt eine sinnvolle, aber ticketübergreifende Aufräumempfehlung (Abschnitt 6.1). |
+| H | Kopfzeile der Vorfassung: „Code-Stand geprüft … (kein Git-Repo, Dateistand = Arbeitskopie)" | `E:\docs` **ist** ein Git-Repository (`git status`/`git log` liefern reale Commit-Historie, u. a. `d65cde0 Implement Kopieren …`, `175d86d Grant explicit clipboard …`, `9f8fa03 Implement Ausschneiden …`) | Reine Faktenkorrektur ohne inhaltliche Konsequenz für diesen Plan — aber relevant für Abschnitt 12 (Commits nach jedem Schritt, siehe Projektbibel-Konvention). |
+| I | Abschnitt 10 (Vorfassung) empfahl `testMatch: /(clipboard\|select-all).*\.spec\.ts/` | **Diese Regex ist fehlerhaft**, geprüft per Wortprobe: `select-all` gefolgt von `.*` (das auch `-roundtrip` matcht) gefolgt von `\.spec\.ts` matcht **auch** `select-all-roundtrip.spec.ts` — genau die Datei, die Abschnitt 10 selbst „bewusst nicht mit aufnehmen" wollte. Der unabhängig gegengeprüfte QA-Plan (`alles-auswaehlen-qa.md` §6.5, Korrektur K9) fand denselben Fehler und verifizierte die korrekte Form | **Korrigiert** auf `testMatch: /(clipboard.*\|select-all)\.spec\.ts/` (Abschnitt 2/10 unten) — erhält `clipboard.spec.ts` **und** `clipboard-roundtrip.spec.ts`, ergänzt nur den Tastatur-Kern `select-all.spec.ts`, schließt `select-all-roundtrip.spec.ts` aus. |
+| J | Abschnitt 6.2, §4.2 Testfall 5 (Tabelle) unterstellte stillschweigend, eine per Toolbar gebaute Tabelle tauge auch für den `colspan`/`rowspan`-Erhalt-Nachweis | `Toolbar.tsx` bietet **nur** `insertTable(2, 2)` (`Toolbar.tsx:277–289`, `commands.ts:92–102`) — einen **plain**, ungemergten Raster; es gibt **keinen** Merge-Zellen-Bedienelement in der UI. Eine `colspan`/`rowspan`-tragende Tabelle ist über die UI **nicht** herstellbar. Bereits vorhandene Fixtures mit gemergten Zellen: `tests/e2e/fixtures/richDocument.ts` (`w:gridSpan`/`table:number-columns-spanned`), `tests/e2e/fixtures/fullCoverageDocument.ts` — exakt das Muster, das `docx.spec.ts`s eigener Merged-Table-Rundtrip-Test bereits per Fixture-Upload (nicht UI-Bau) verwendet | **Korrigiert** in Abschnitt 6.2 unten: `colspan`/`rowspan`-Erhalt wird über (a) einen neuen Unit-Rundreisetest mit direkt gebautem doc-JSON (analog `cut-roundtrip.test.ts` Testfall 7) und (b) einen E2E-Test mit **Fixture-Upload** der bestehenden gemergten Fixtures bewiesen; die per Toolbar gebaute 2×2-Tabelle bleibt nur für den einfacheren Fall „Zeilen-/Spaltenzahl unverändert, Formatierung in unverbundenen Zellen" zuständig. |
 
-**Entscheidung: Nein.** Begründung, konsistent mit der bereits getroffenen Entscheidung für
-„Kopieren“ (`kopieren-code.md` Abschnitt 1, Frage 1) und im Unterschied zur Entscheidung für
-„Ausschneiden“ (`ausschneiden-code.md`, das **einen** Button bekommt):
+**Das Kernergebnis bleibt:** Kein neuer Anwendungscode für „Alles auswählen". Die einzige
+substanzielle Neubewertung ist, **wie wenig** noch zu tun ist und dass ein Teil davon eine
+`playwright.config.ts`-Änderung ist, die die Vorfassung für unmöglich hielt.
 
-- Ein Toolbar-Button für Ausschneiden ist gerechtfertigt, weil er einen **deaktivierten
-  Zustand** (keine Selektion) sinnvoll sichtbar macht und weil Ausschneiden eine
-  **destruktive** Aktion ist, für die ein zusätzlicher, entdeckbarer Zugriffsweg einen realen
-  Nutzen hat (Anforderung `ausschneiden-req.md` Abschnitt 1). „Alles auswählen“ hat laut
-  `alles-auswaehlen-req.md` Abschnitt 2.1 explizit **keinen** deaktivierten Zustand — ein
-  Button wäre demnach **immer** aktiv, was keinen Mehrwert gegenüber der bereits
-  vorhandenen, universellen Tastenkombination bietet.
-- Word und LibreOffice bieten „Alles auswählen“ selbst primär über Tastenkombination +
-  Menü/Kontextmenü an, nicht über einen prominenten Symbolleisten-Button (in Word ist es ein
-  Menüpunkt unter „Bearbeiten“/„Auswählen“ im Home-Ribbon, kein Einzel-Icon) — dieses Produkt
-  hat kein Ribbon-Menüsystem, in das ein solcher Menüpunkt passen würde (Abschnitt 1, Punkt 5
-  der Anforderung, bereits so entschieden).
-- Ein neuer Button würde denselben `AllSelection`-Code auslösen, den Strg+A bereits auslöst —
-  kein neuer Zustand, kein neues Feedback, nur ein redundanter Klickweg mit zusätzlichem
-  Wartungsaufwand (Icon, i18n, Fokus-Handling).
+---
 
-Konsequenz für den Code: **keine Änderung an `Toolbar.tsx`** für „Alles auswählen“ selbst.
+## 2. Entscheidungen zu den Fragen (`alles-auswaehlen-req.md` Abschnitt 8)
 
-### Frage 2: Sofort-ganzes-Dokument- vs. gestuftes Tabellenverhalten?
+Fragen 1–3 sind gegenüber der Vorfassung unverändert korrekt; Frage 4 wird durch Fund D neu
+und **stärker** beantwortet.
 
-**Entscheidung: (a) — das aktuelle „sofort gesamtes Dokument“-Verhalten wird als bewusstes,
-endgültiges Soll übernommen.** Begründung:
+### Frage 1: Eigener Toolbar-Button? **Nein.**
+Unverändert: „Alles auswählen" hat laut `alles-auswaehlen-req.md` Abschnitt 2.1 keinen
+deaktivierten Zustand → ein Button wäre immer aktiv, böte keinen Zustand/kein Feedback
+gegenüber der universellen Tastenkombination. Konsistent mit „Kopieren" (kein Button),
+abweichend von „Ausschneiden" (Button wegen deaktiviertem, destruktivem Charakter — im Code
+sichtbar als `disabled={!canCut(view.state)}` in `Toolbar.tsx`, `ScissorsIcon`). **Keine
+Änderung an `Toolbar.tsx`.**
 
-- Kein zusätzlicher Code nötig (siehe Abschnitt 0, Fund 2) — das entspricht der von der
-  Anforderung selbst vorgeschlagenen Vorzugsoption „(a) … da es dem aktuellen Ist-Zustand
-  entspricht und keinen zusätzlichen Code erfordert“.
-- Ein gestuftes Zelle→Tabelle→Dokument-Verhalten (wie Word/LibreOffice) würde **zusätzlichen,
-  nicht triviale zustandsbehafteten Code** erfordern: die Bibliothek `selectAll` ist zustandslos
-  (jeder Aufruf erzeugt unabhängig eine neue `AllSelection`), ein gestuftes Verhalten bräuchte
-  ein eigenes Plugin, das sich merkt, „auf welcher Stufe“ die letzte Strg+A-Betätigung war,
-  und das bei jeder Cursorbewegung/jedem Klick zurückgesetzt werden müsste. Das widerspricht
-  zusätzlich der **wörtlichen Anforderung aus Grenzfall 2**: „Wiederholtes Strg+A … bleibt
-  idempotent bei vollständiger Selektion, keine sichtbare Änderung“ — genau das Gegenteil
-  einer gestuften Ebenen-Weiterschaltung. Beide Anforderungen (Grenzfall 2 **und** ein
-  gestuftes Tabellenverhalten) gleichzeitig zu erfüllen, würde bedeuten, den Ebenen-Zustand nur
-  zu erhöhen, solange man sich **noch nicht** auf der Dokument-Ebene befindet, und ab da
-  strikt idempotent zu bleiben — lösbar, aber ein eigenständiges Feature mit eigenem
-  Zustandsautomaten, keine kleine Ergänzung.
-- Strukturell bereits sicher (Abschnitt 0, Fund 3): Auch aus einer Tabellenzelle heraus
-  erzeugt Strg+A → Entf ein valides Restdokument, keine kaputte Tabellenstruktur — die in
-  Grenzfall 3 geforderte Mindestanforderung („darf nicht strukturell inkonsistent sein“) ist
-  bereits erfüllt, unabhängig von der gestuft/sofort-Entscheidung.
-- Konsequenz: **kein neuer Code**, nur eine dokumentierte Entscheidung plus Test, der exakt
-  dieses Verhalten (Zelle → sofort ganzes Dokument, danach valide leer nach Entf) als Soll
-  festschreibt (Abschnitt 9, Testfall analog Req-Testfall 4).
+### Frage 2: Tabellenverhalten? **(a) — sofort ganzes Dokument.**
+Unverändert: entspricht dem ProseMirror-Standard, erfordert keinen Code, ist mit Grenzfall 2
+(Idempotenz) vereinbar; ein gestuftes Zelle→Tabelle→Dokument-Verhalten bräuchte ein eigenes,
+zustandsbehaftetes Plugin und widerspräche Grenzfall 2. Strukturell sicher via Fund 3.
 
-### Frage 3: Toolbar-Zustandsanzeige bei uneinheitlicher Formatierung nach Strg+A?
+### Frage 3: Toolbar-Zustandsanzeige bei uneinheitlicher Formatierung? **Nicht dieses Ticket.**
+Unverändert: Ursache ist `Toolbar.tsx` Zeile 69 (`markType.isInSet(view.state.selection.$from.marks())`
+in `MarkButton`) — sie wertet nur `$from` aus. Das ist ein querschnittliches Thema von
+`fett-code.md`/`kursiv-code.md`/`durchgestrichen-code.md`/`unterstrichen-einfach-code.md`.
+Verifiziert, dass **keiner** dieser vier bereits umgesetzt ist: `commands.ts` enthält keine
+`isMarkActive`-Funktion, `Toolbar.tsx` ruft `toggleMark` weiterhin direkt auf. „Alles auswählen"
+liefert nur einen `AllSelection`-Regressionstest, sobald einer der vier landet (Fund 1 sagt
+voraus, dass jede `ranges`/`from`/`to`-basierte Korrektur automatisch auch für `AllSelection`
+greift; Pflicht-Test bestätigt das). Koordinationsrisiko der vier Tickets siehe Abschnitt 5.2.
 
-**Entscheidung: Wird nicht von diesem Ticket behoben — ist bereits Gegenstand von vier
-anderen, unabhängigen Plänen.** Siehe Abschnitt 0, Fund 6, und Abschnitt 3.2 unten für die
-Details. Zusammengefasst:
-
-- `fett-code.md`, `kursiv-code.md`, `durchgestrichen-code.md` und
-  `unterstrichen-einfach-code.md` planen bereits **je eine eigene** Korrektur derselben
-  Zeile `Toolbar.tsx:42` (`markType.isInSet(view.state.selection.$from.marks())`), weil jede
-  dieser vier Anforderungen dieselbe Diagnose unabhängig gemacht hat.
-- Dieser Plan führt **keine fünfte, wiederum leicht abweichende** Implementierung ein — das
-  würde das bereits bestehende Koordinationsrisiko (vier fast identische, aber nicht
-  identische Fixes für dieselbe Zeile) nur verschärfen.
-- Der einzige genuine Beitrag von „Alles auswählen“ zu diesem Thema: sobald **einer** der vier
-  Pläne gelandet ist, muss ein Regressionstest bestätigen, dass die Korrektur auch für eine
-  echte `AllSelection` (nicht nur für eine gewöhnliche `TextSelection` über einen Teilbereich)
-  korrekt greift. Das ist durch Abschnitt 0, Fund 1 bereits **strukturell vorhergesagt**
-  (`AllSelection` überschreibt `ranges`/`from`/`to`/`$from` nicht, jede auf diesen Feldern
-  basierende Korrektur funktioniert automatisch auch bei `AllSelection`) — aber „vorhergesagt“
-  ist nicht „bewiesen“, deshalb Pflicht-Test in Abschnitt 9.3.
-- Diese Entscheidung ist in `alles-auswaehlen-req.md` Abschnitt 8, Frage 3 als „ausgelagert an
-  `fett-code.md`/`kursiv-code.md`/`durchgestrichen-code.md`/`unterstrichen-einfach-code.md`,
-  hier nur mit AllSelection-Regressionstest nachgezogen“ nachzutragen, **nicht** als „bewusst
-  akzeptierte Einschränkung“ — es ist ein tatsächlicher Fix, nur nicht von diesem Ticket.
-
-### Frage 4: Ist Safari/WebKit bzw. macOS (Cmd+A) Teil der Testmatrix?
-
-**Entscheidung: Teilweise — kein neues Playwright-Projekt speziell für dieses Ticket,
-Wiederverwendung/Koordination mit dem bereits andernorts geplanten WebKit-Projekt.**
-Befund (`playwright.config.ts`, Zeilen 19–23, unverändert seit `kopieren-code.md`s Prüfung):
-
+### Frage 4: Safari/WebKit bzw. macOS (Cmd+A) in der Testmatrix? **Jetzt konkret umsetzbar.**
+Die Vorfassung stufte dies als „offenen Punkt, bis ein Desktop-Safari-Projekt existiert" ein.
+**Dieses Projekt existiert jetzt** (`playwright.config.ts` Zeilen 43–46):
 ```ts
-projects: [
-  { name: 'Desktop Chrome', use: { ...devices['Desktop Chrome'] } },
-  { name: 'Mobile', use: { ...devices['Pixel 7'] } },
-  { name: 'Tablet', use: { ...devices['iPad Mini'] } },
-]
+{
+  name: 'Desktop Safari (Clipboard)',
+  testMatch: /clipboard.*\.spec\.ts/,
+  use: { ...devices['Desktop Safari'] },
+},
 ```
+sowie analog `Desktop Firefox (Clipboard)` (Zeilen 50–53). Beide sind auf `clipboard*.spec.ts`
+gescoped und würden `select-all*.spec.ts` **nicht** automatisch erfassen. `alles-auswaehlen-req.md`
+Abschnitt 8, Frage 4 hat exakt diesen Fall vorweggenommen: „dessen `testMatch` ist dann um
+`select-all*.spec.ts` zu erweitern, statt ein weiteres WebKit-Projekt anzulegen." **Empfohlene
+konkrete Änderung** (Abschnitt 10, **korrigiert** — Korrektur I in Abschnitt 1): die
+`testMatch`-Regex **beider** Clipboard-Projekte auf `/(clipboard.*|select-all)\.spec\.ts/`
+erweitern (**nicht** `/(clipboard|select-all).*\.spec\.ts/` — diese naheliegendere Form wurde
+zunächst erwogen, matcht aber per Wortprobe **auch** `select-all-roundtrip.spec.ts`, weil `.*`
+nach der Gruppe beliebigen Text bis `.spec.ts` zulässt; die korrigierte Form lässt `.*` nur
+**innerhalb** der `clipboard`-Alternative zu, sodass `select-all` unmittelbar von `.spec.ts`
+gefolgt sein muss). Dann läuft der Tastatur-Kern von
+`select-all.spec.ts` (Strg/Cmd+A, Idempotenz, Tippen-ersetzt-alles) zusätzlich auf echtem
+Desktop-WebKit **und** Desktop-Firefox — das schließt „echtes macOS/Cmd+A" so weit wie in dieser
+Umgebung möglich (Playwright-WebKit-Desktop; ein physischer Apple-Rechner bleibt außerhalb des
+CI-Scopes, aber der WebKit-`selectAll`-Codepfad ist dann Desktop-verifiziert, nicht nur
+Touch-emuliert über `Tablet`/iPad Mini).
 
-Erneut geprüft (`node -e "require('playwright-core').devices['iPad Mini'].defaultBrowserType"`):
-`iPad Mini` → **`webkit`**, `Pixel 7`/`Desktop Chrome` → `chromium`. Das bestätigt exakt den
-in `kopieren-code.md` Abschnitt 1, Frage 2 dokumentierten Befund erneut. Für „Alles auswählen“
-folgt daraus:
-
-- Die neuen Testdateien (Abschnitt 4.2) laufen **ohne Sonderkonfiguration** automatisch auch
-  auf dem `Tablet`-Projekt (WebKit-Engine) — das deckt die WebKit-Code-Pfad-Ausführung von
-  `selectAll`/`AllSelection` bereits ab, allerdings über `page.keyboard.press('ControlOrMeta+a')`
-  auf einem **touch-emulierten** Gerät, nicht als echter macOS-Desktop-Test mit einer echten
-  Cmd-Taste.
-- `kopieren-code.md` Abschnitt 1, Frage 2 plant bereits ein **neues, eigenes** Projekt
-  `Desktop Safari (Clipboard)` (WebKit, Desktop-Viewport, gescoped über `testMatch` auf
-  `clipboard*.spec.ts`) — das existiert im heutigen `playwright.config.ts` **noch nicht**
-  (verifiziert: nur die drei oben gezeigten Projekte sind vorhanden; weder `kopieren-code.md`
-  noch `ausschneiden-code.md` sind bereits umgesetzt).
-- **Empfehlung statt eigenem drittem/viertem WebKit-Projekt:** Sobald das `Desktop Safari
-  (Clipboard)`-Projekt aus `kopieren-code.md` real angelegt wird, dessen `testMatch`-Regex um
-  die neuen `select-all*.spec.ts`-Dateien erweitern (z. B. `/(clipboard|select-all).*\.spec\.ts/`),
-  statt ein drittes, fast identisches WebKit-Projekt anzulegen. Das vermeidet unnötig
-  wachsende CI-Laufzeit durch mehrere Desktop-Safari-Projekte mit demselben Gerät.
-- Solange dieses Safari-Projekt noch nicht existiert, bleibt „echtes macOS/Cmd+A“ ein
-  **offener Punkt** (wie in `alles-auswaehlen-req.md` Abschnitt 1, Zeile 91 bereits selbst als
-  zulässig vorgesehen) — hier explizit **nicht** stillschweigend als erledigt markiert.
+Hinweis: `Tablet` (iPad Mini) ist laut
+`require('playwright-core').devices['iPad Mini'].defaultBrowserType` → `webkit`; `Pixel 7` und
+`Desktop Chrome` → `chromium`. Die neuen Specs laufen ohne Sonderkonfiguration bereits auf
+`Desktop Chrome`/`Mobile`/`Tablet`; die `testMatch`-Erweiterung fügt nur die beiden **Desktop**-
+Nicht-Chromium-Engines hinzu.
 
 ---
 
-## 2. Verifizierte Anforderungs-Codebelege (Bibliotheks-Ebene)
+## 3. Bereits vorhandene Testabdeckung, die „Alles auswählen" mitprüft
 
-Gegen `node_modules/prosemirror-*` geprüft, damit jede Anforderung aus `alles-auswaehlen-req.md`
-Abschnitt 2/3 nicht nur angenommen, sondern belegt ist:
+Der wichtigste inhaltliche Zugewinn dieser Überarbeitung: Seit Kopieren/Ausschneiden umgesetzt
+sind, ist ein erheblicher Teil der in `alles-auswaehlen-req.md` geforderten Verifikation bereits
+vorhanden — als Nebenprodukt. **Vor** dem Schreiben neuer Tests ist diese Abdeckung
+gegenzuprüfen, um Duplikate zu vermeiden.
 
-| Anforderung (`alles-auswaehlen-req.md`) | Codebeleg | Ergebnis |
+| Anforderung (`alles-auswaehlen-req.md`) | Bereits abgedeckt durch | Verbleibende Select-All-eigene Lücke |
 |---|---|---|
-| 2.1 Immer auslösbar, kein deaktivierter Zustand | `selectAll` prüft keinerlei Vorbedingung außer `dispatch` vorhanden (`prosemirror-commands/dist/index.js:489-492`) | **Bereits erfüllt**, kein Code nötig, nur Test |
-| 2.2 Markiert wirklich den gesamten Baum (Absätze, Listen, Tabellen, Bilder, `hard_break`) | `AllSelection`-Konstruktor: `super(doc.resolve(0), doc.resolve(doc.content.size))` — deckt strukturell **jede** Position ab, unabhängig vom Node-Typ | **Bereits erfüllt**, kein Code nötig, nur Test |
-| 2.4 Pfeiltasten kollabieren an den Rand | `AllSelection` ist eine normale `Selection`-Unterklasse; ProseMirrors Standard-Cursorbewegungslogik (`prosemirror-commands`, `selectNodeBackward`/Basisverhalten der `EditorView`) behandelt sie wie jede Range-Selektion — kein Sonderfall im Projekt-Code nötig | **Bereits erfüllt**, kein Code nötig, nur Test |
-| 3 Grenzfall 1/6 (leeres Dokument, Entf danach) | `AllSelection.replace` + `doc: 'block+'` (Abschnitt 0, Fund 3) | **Bereits erfüllt**, kein Code nötig, nur Test |
-| 3 Grenzfall 2 (Idempotenz) | `AllSelection.eq(other) { return other instanceof AllSelection }` (`prosemirror-state/dist/index.js:432`) — zwei `AllSelection`-Instanzen sind immer „gleich“ | **Bereits erfüllt**, kein Code nötig, nur Test |
-| 3 Grenzfall 3 (Tabellenzelle) | Abschnitt 0, Fund/Frage 2 | **Bereits erfüllt (als Soll (a) bestätigt)**, kein Code nötig, nur Test |
-| 3 Grenzfall 4 (Bild in Selektion, Ausrichtung danach) | `setAlign` (`commands.ts:13-27`) iteriert via `state.doc.nodesBetween(from, to, …)` und wendet nur auf `alignableTypes = {paragraph, heading}` an — `image` wird stillschweigend übersprungen, kein Fehler möglich | **Bereits erfüllt**, kein Code nötig, nur Test |
-| 3 Grenzfall 8 (Undo-Neutralität) | Abschnitt 0, Fund 2 (`tr.steps.length == 0`) | **Bereits erfüllt (strukturell bewiesen)**, kein Code nötig, nur Test |
-| 3 Grenzfall 9 (IME-Komposition) | ProseMirror-View verarbeitet `compositionstart`/`compositionupdate`/`compositionend` intern (`prosemirror-view`, `composition.ts`-Logik) unabhängig von der aktuellen Selektionsart; `Mod-a` ist eine reine Keydown-Bindung, die während einer aktiven Komposition vom Browser typischerweise gar nicht als normales `keydown` weitergereicht wird (IME fängt die Taste ab) | Vermutlich bereits erfüllt, **aber Verhalten browserabhängig** — nur per Test verifizierbar, kein Code-Fix im Projekt möglich/nötig |
-| 3 Grenzfall 10 (Fokus außerhalb des Editors) | `prosemirror-keymap`s `keydownHandler` wird über `EditorProps.handleKeyDown` **nur** für Events registriert, die auf `view.dom` (dem `contenteditable`-Element) auftreffen; ein Toolbar-`<input type="color">` ist ein eigenes, nicht verschachteltes DOM-Element außerhalb von `view.dom` | **Bereits erfüllt (strukturell)**, kein Code nötig, nur Test |
-| 3 Grenzfall 11 (großes Dokument, Performance) | Keine Custom-Logik im Selektionspfad — `AllSelection` ist O(1) im Konstruktor (zwei `resolve`-Aufrufe); keine dokumentweite Traversierung beim Erzeugen der Selektion selbst | **Bereits erfüllt**, kein Code nötig, nur Test (Zeitmessung) |
-| 3 Grenzfall 12 (Kopieren/Ausschneiden danach) | Siehe `kopieren-code.md`/`ausschneiden-code.md` — beide bereits eigenständig verifiziert, hier nur die Verkettung mit vorangehendem Strg+A zu testen | Kein neuer Code, nur Verkettungs-Test |
-| 3 Grenzfall 16 (kein globaler `contextmenu`-Handler) | Abschnitt 0 (Grep ohne Treffer) | **Bereits erfüllt**, Regressionstest hält das fest |
+| §2.6 / Grenzfall 7: Strg+A → **Ausschneiden** (statt Formatierung) → Klick → Enter → tippen | `cut.spec.ts` **Testfall 5 (PFLICHT)** | **Keine** — nicht duplizieren |
+| §2.6 / Grenzfall 7: Strg+A → **Kopieren** → Klick → Enter → tippen | `selection-regression.spec.ts` **Test 4** (`…, bold, copy, …`) | Marginal: „Kopieren **ohne** vorheriges Fett" fehlt literal (Abschnitt 6.3) |
+| Grenzfall 6 / §4.2 Testfall 3: Strg+A → Entf/Ausschneiden → valider leerer Zustand + Export/Reimport | `cut.spec.ts` Testfall 4 (leert in validen Zustand) **und** `cut.spec.ts` „Rundreise 10" (Strg+A → Strg+X → Export → Reimport = gültige leere Datei) | Nur die **Entf-Taste** (statt Strg+X) als Auslöser ist select-all-eigen |
+| Grenzfall 10: Fokus im Textfarbe-`<input type=color>`, systemweites Strg+X/A verändert Editor nicht | `cut.spec.ts` „Grenzfall 14" (Farbwähler-Fokus, Strg+X) | Analogon mit **Strg+A** statt Strg+X ist select-all-eigen (Abschnitt 6.1, Testfall 9) |
+| Grenzfall 8: Strg+X → Undo stellt her (Undo-Grundverhalten) | `cut.spec.ts` Testfall 9, „Zusatz (Req §2.5)" (separater Undo-Schritt) | **Undo-Neutralität von Strg+A selbst** (kein eigener Undo-Eintrag) ist select-all-eigen |
+| §4.2 Testfall 1/2: Strg+A → **Formatierung (Fett)** über alles → Export → jeder Lauf trägt Formatierung | — (Ausschneiden testet nur Löschen-Rundreisen, nicht Formatieren-über-alles) | **Vollständig offen** — echte Select-All-eigene Rundreise (Abschnitt 6.2) |
+| §1/§6: „Strg+A markiert wirklich **alles**" als eigenständige Behauptung | — (überall nur als Trigger genutzt, nie selbst assertiert) | **Vollständig offen** — Kern dieses Tickets (Abschnitt 6.1) |
+
+Muster, die dabei wiederverwendet werden (statt neu erfunden): `watchForConsoleErrors(page)`,
+der `settle(page)`/`waitForTimeout(50)`-Umgang mit dem asynchronen `selectionchange`-Rennen
+(`selection-regression.spec.ts` Zeilen 27–34, `cut.spec.ts`, `clipboard.spec.ts`), der
+`odtCard`/`docxCard`-Locator und das JSZip-Auslesen von `document.xml`/`content.xml` in den
+`Rundreise`-Tests von `cut.spec.ts` (Zeilen 473–630).
 
 ---
 
-## 3. Was tatsächlich fehlt bzw. wem es gehört
+## 4. Verifizierte Anforderungs-Codebelege (Bibliotheks-Ebene)
 
-### 3.1 Kernlücke dieses Tickets: kein eigenständiger Test
+Unverändert gegenüber der Vorfassung (weiterhin korrekt). Belegt, dass keine Anforderung neuen
+Anwendungscode braucht:
 
-Das ist die einzige **echte** Lücke, die „Alles auswählen“ selbst gehört (keine Bibliotheks-
-Garantie kann einen fehlenden Test ersetzen): Es existiert kein Test, der behauptet und
-verifiziert „Strg+A markiert wirklich alles“, unabhängig vom Selection-Sync-Bug. Abschnitt 4/9
-liefert die neuen Dateien dafür.
-
-### 3.2 Frage-3-Überschneidung — Detail
-
-Vergleich der vier bereits vorhandenen, unabhängigen Diagnosen derselben Zeile
-`Toolbar.tsx:42`:
-
-| Datei | Vorgeschlagener Funktionsname | Deckt `CellSelection`/`ranges` ab? | Bereits umgesetzt? |
-|---|---|---|---|
-| `fett-code.md` §4.1 | `isMarkActive(state, markType)` (iteriert `state.doc.nodesBetween(from, to, …)`, nutzt nur `from`/`to` der **Hauptrange**) | Nein (nutzt `from`/`to`, nicht `ranges`) | Nein |
-| `kursiv-code.md` §4.1 | `isMarkActive(state, markType)` **und** `toggleInlineMark(markType, attrs?)` (iteriert `state.selection.ranges`, inkl. `removeWhenPresent:false`-Fix für `toggleMark` selbst) | Ja | Nein |
-| `durchgestrichen-code.md` §3.6 | Eigene Variante (Pro-Range-Definition äquivalent zu `toggleMark`s `removeWhenPresent:true`-Zweig, nicht `:false`) | Teilweise (anderes Zielverhalten) | Nein |
-| `unterstrichen-einfach-code.md` | Verweist auf dasselbe Muster, keine eigene Funktion vorgeschlagen | — | Nein |
-
-Alle vier Pläne ändern dieselbe Zeile in `Toolbar.tsx` und potenziell dieselbe neue Funktion
-in `commands.ts` — mit **unterschiedlichem** Umfang (`ranges` vs. `from`/`to`) und
-**unterschiedlichem** Toggle-Zielverhalten (`removeWhenPresent` an/aus). Das ist außerhalb des
-Geltungsbereichs von „Alles auswählen“, aber relevant genug, um hier dokumentiert zu werden,
-damit die vier Tickets nicht überraschend gegeneinander arbeiten. **Empfehlung an das
-Backlog (nicht Teil dieses Plans):** eines der vier Tickets (vorzugsweise `kursiv-code.md`,
-weil es als einziges bereits `ranges`-basiert **und** das Toggle-Verhalten selbst behandelt)
-als kanonische Quelle für `isMarkActive`/`toggleInlineMark` bestimmen, die anderen drei
-referenzieren statt duplizieren.
-
-### 3.3 Geerbter Cross-Format-Export-Blocker
-
-Identisch zu `kopieren-code.md` Abschnitt 3.4 / `ausschneiden-code.md` Abschnitt 3.5, hier
-erneut verifiziert (Abschnitt 0, Fund 7). Betrifft `alles-auswaehlen-req.md` Abschnitt 4.2,
-Testfälle 6 („DOCX war Ursprung → als ODT exportieren“), 7 (umgekehrt) und 8 („doppelte
-Rundreise“ mit Formatwechsel). Diese drei Testfälle werden in Abschnitt 9.2 unten als
-`test.fixme(...)` mit Verweis auf denselben, bereits an anderer Stelle gemeldeten Blocker
-markiert — **kein** erneuter Fix-Vorschlag hier, um keine dritte, konkurrierende
-Lösungsbeschreibung für dasselbe Problem zu erzeugen (siehe bereits
-`kopieren-code.md` Abschnitt 3.4 für den vorgeschlagenen Minimal-Patch).
-
-### 3.4 Bereits korrekt, nur zu bestätigen: `.ProseMirror-selectednode` betrifft „Alles auswählen“ nicht
-
-Siehe Abschnitt 0, Fund 5. Kein Code-Fix in diesem Ticket. Wird in Abschnitt 13 als
-weiterzumeldender Fund an ein Bild-Ticket vermerkt.
-
----
-
-## 4. Datei-für-Datei-Umsetzungsplan
-
-### 4.1 Geänderte Dateien
-
-| Datei | Änderung | Abschnitt |
+| Anforderung | Codebeleg | Ergebnis |
 |---|---|---|
-| `specs/alles-auswaehlen-req.md` | Abschnitt 8 um die vier Entscheidungen aus Abschnitt 1 dieses Plans ergänzen (wörtlich übernehmbar) | 1 |
+| 2.1 Immer auslösbar, kein deaktivierter Zustand | `selectAll` prüft nur `dispatch` vorhanden | Bereits erfüllt, nur Test |
+| 2.2 Markiert den ganzen Baum | `AllSelection`-Konstruktor `super(doc.resolve(0), doc.resolve(doc.content.size))` deckt jede Position ab | Bereits erfüllt, nur Test |
+| 2.4 Pfeiltasten kollabieren an den Rand | Standard-`Selection`-Unterklasse, ProseMirror-Standardcursorlogik | Bereits erfüllt, nur Test |
+| Grenzfall 1/6 (leer, Entf danach) | `AllSelection.replace` + `doc: 'block+'` (Fund 3) | Bereits erfüllt, nur Test |
+| Grenzfall 2 (Idempotenz) | `AllSelection.eq(other) = other instanceof AllSelection` | Bereits erfüllt, nur Test |
+| Grenzfall 3 (Tabellenzelle) | Frage 2 = (a) | Bereits erfüllt (als Soll bestätigt), nur Test |
+| Grenzfall 4 (Bild + Ausrichtung danach) | `setAlign` (`commands.ts:13–27`) iteriert `nodesBetween`, wendet nur auf `{paragraph, heading}` an, überspringt `image` wirkungslos | Bereits erfüllt, nur Test |
+| Grenzfall 8 (Undo-Neutralität) | Fund 2 (`tr.steps.length == 0`) | Strukturell bewiesen, nur Test |
+| Grenzfall 9 (IME) | View verarbeitet Composition intern; `Mod-a` als Keydown wird vom IME i. d. R. abgefangen | Browserabhängig — nur per Test verifizierbar |
+| Grenzfall 10 (Fokus außerhalb Editor) | `prosemirror-keymap` registriert `handleKeyDown` nur für `view.dom`; Toolbar-`<input type=color>` liegt außerhalb | Strukturell erfüllt, nur Test |
+| Grenzfall 11 (Performance) | `AllSelection`-Konstruktion O(1) (zwei `resolve`) | Bereits erfüllt, nur Test (Zeitmessung) |
+| Grenzfall 16 (kein globaler `contextmenu`-Handler) | Abschnitt 0 (nur ein Kommentar) | Bereits erfüllt, Regressionstest hält es fest |
 
-**Das ist die einzige inhaltliche Änderung an bestehendem Anwendungscode/-konfiguration.**
-Explizit **NICHT** geändert (und warum):
+---
 
-- `src/formats/shared/editor/commands.ts` — keine neue Selektionslogik nötig (Abschnitt 2);
-  die einzige mit „Alles auswählen“ überschneidende Änderungsidee (`isMarkActive`) gehört den
-  vier in Abschnitt 3.2 genannten Tickets, nicht diesem.
-- `src/formats/shared/editor/Toolbar.tsx` — keine Änderung (Entscheidung Frage 1, Abschnitt 1).
-- `src/formats/shared/editor/WordEditor.tsx` — keine Änderung. Insbesondere wird **keine**
-  eigene `Mod-a`-Bindung in die projekteigene `keymap({...})` (Zeilen 71–79) vorgezogen — sie
-  würde exakt dasselbe tun wie `baseKeymap`s vorhandener Eintrag und nur eine zweite
-  Quelle der Wahrheit für dasselbe Verhalten schaffen. Empfehlung: einen Kommentar direkt
-  über `keymap(baseKeymap)` (Zeile 80) ergänzen, der festhält, dass Strg+A/Cmd+A bewusst über
-  diesen Bibliotheks-Default läuft und wo die Verifikation dazu liegt:
-  ```ts
-  // "Mod-a" (Alles auswählen) kommt bewusst aus prosemirror-commands' baseKeymap
-  // (selectAll → AllSelection), keine eigene Bindung hier. Verifiziert in
-  // specs/alles-auswaehlen-code.md; Tests in tests/e2e/select-all.spec.ts.
-  keymap(baseKeymap),
-  ```
-  Das ist eine reine Kommentar-Ergänzung (keine Verhaltensänderung), optional, aber empfohlen,
-  damit ein künftiger Bearbeiter nicht versehentlich denkt, Strg+A sei ungetestet/unbeabsichtigt.
-- `src/formats/shared/schema.ts` — keine Änderung. Kein neuer Node-/Mark-Typ wird für „Alles
-  auswählen“ benötigt.
-- `src/index.css` — keine Änderung. Kein eigenes `::selection`-Styling wird ergänzt: Es gibt
-  aktuell keinen belegten Kontrast-Fehler (Abschnitt 0, Fund 4), und ein Eingriff ohne
-  konkreten Befund wäre unbegründeter Scope-Creep. Wird der Visualtest in Abschnitt 9.5
-  einen tatsächlichen Kontrastfehler aufdecken, ist das ein **neuer, separat zu behandelnder
-  Fund** (siehe Abschnitt 13), keine vorab angenommene Änderung.
-- `src/app/DocumentWorkspace.tsx` — keine Änderung durch dieses Ticket (Cross-Format-Export
-  ist ein fremder Blocker, Abschnitt 3.3).
-- `src/formats/docx/*`, `src/formats/odt/*` — keine Änderung (Abschnitt 7).
-- `playwright.config.ts` — keine zwingende Änderung (Abschnitt 1, Frage 4; optionale
-  spätere Koordination mit dem WebKit-Projekt aus `kopieren-code.md`).
+## 5. Was tatsächlich fehlt bzw. wem es gehört
 
-### 4.2 Neue Dateien
+### 5.1 Kernlücke dieses Tickets: „Strg+A markiert wirklich alles" + Formatier-Rundreise
+Zwei Dinge sind **select-all-eigen** und **nirgends** abgedeckt (siehe Abschnitt 3, letzte zwei
+Zeilen):
+1. Ein eigenständiger E2E-Test, der behauptet und beweist „Strg+A markiert den gesamten Inhalt"
+   (unabhängig vom Selection-Sync-Bug, unabhängig von Ausschneiden).
+2. Die Formatier-Rundreise „Strg+A → Fett über alles → Export → jeder `<w:r>`/jeder Absatz trägt
+   die Formatierung" für DOCX und ODT (Ausschneiden testet nur Lösch-Rundreisen).
+Alles Übrige aus `alles-auswaehlen-req.md` ist entweder Bibliotheksgarantie (Abschnitt 4), schon
+abgedeckt (Abschnitt 3) oder gehört einem anderen Ticket (5.2/5.3).
 
-| Datei | Zweck |
-|---|---|
-| `tests/e2e/select-all.spec.ts` | Neue Haupt-E2E-Suite: Abschnitt 1/2/3 (Basisverhalten, Grenzfälle 1/2/3/4/6/9/10/11) und Abschnitt 6, Testfälle 1–3, 5–8, 12–14 aus `alles-auswaehlen-req.md` |
-| `tests/e2e/select-all-roundtrip.spec.ts` | Abschnitt 4 aus `alles-auswaehlen-req.md`: Rundreise-Testfälle 1–5, 9 aktiv; 6–8 als `test.fixme(...)`, Verweis auf Abschnitt 3.3 |
-| `src/formats/shared/editor/__tests__/select-all.test.ts` | Vitest-Unit-Tests (jsdom, kein echter Browser nötig): direkte `AllSelection`/`Transaction`-Prüfungen für die in Abschnitt 2 tabellierten Bibliotheksgarantien (schnelle, deterministische Absicherung zusätzlich zur E2E-Ebene) |
+### 5.2 Frage-3-Koordinationsrisiko (vier Tickets, dieselbe Zeile)
+Unverändert relevant: `fett-`/`kursiv-`/`durchgestrichen-`/`unterstrichen-einfach-code.md`
+planen je eine eigene Korrektur derselben `Toolbar.tsx`-Zeile 69 und potenziell derselben neuen
+`commands.ts`-Funktion (`isMarkActive`/`toggleInlineMark`), mit unterschiedlichem Umfang
+(`ranges` vs. `from`/`to`) und Toggle-Ziel. Keiner ist umgesetzt (verifiziert). „Alles auswählen"
+dupliziert das **nicht**; Empfehlung ans Backlog: `kursiv-code.md` als kanonische Quelle
+bestimmen (behandelt als einziges `ranges` **und** das Toggle-Verhalten selbst), die anderen drei
+referenzieren. Nicht Teil dieses Plans.
 
-Erweiterte (nicht neu angelegte) Datei:
+### 5.3 Geerbter Cross-Format-Export-Blocker
+`DocumentWorkspace.tsx::handleExport` exportiert nur im Ursprungsformat (Fund 6). Betrifft
+`alles-auswaehlen-req.md` §4.2 Testfälle 6/7/8. **Precedent aus `cut.spec.ts` (Zeile 585):** dort
+wurde der Cross-Format-Fall als „Rundreise 4/5 (Cross-Format, **angepasst**)" auf **denselben
+Format**-Export reduziert und real getestet, statt komplett zu überspringen. Dieser Plan bietet
+für §4.2 #6–#8 **beide** dokumentierten Optionen an (Abschnitt 6.2): entweder `test.fixme(...)`
+mit Blocker-Verweis (wie von der Anforderung §4.3 vorgeschrieben) **oder** die
+`cut.spec.ts`-Anpassung (Same-Format-Ersatz + Unit-Test der reinen Konvertierung). Empfohlen:
+`test.fixme(...)` für die literale Cross-Format-UI-Rundreise **plus** je ein Same-Format-Test,
+damit die Konvertierungslogik nicht ungetestet bleibt — deckungsgleich mit dem, was
+`cut.spec.ts` bereits vorlebt.
 
-| Datei | Änderung | Zweck |
+### 5.4 `.ProseMirror-selectednode` betrifft „Alles auswählen" nicht
+Fund 5. Kein Fix hier; als Weitermeldung an ein Bild-Ticket in Abschnitt 15.
+
+---
+
+## 6. Datei-für-Datei-Umsetzungsplan
+
+### 6.0 Übersicht
+
+| Datei | Art | Änderung |
 |---|---|---|
-| `tests/e2e/selection-regression.spec.ts` | 2 neue Tests **ergänzt** (bestehende 3 Tests bleiben unverändert) | Abschnitt 2.6 letzter Punkt der Anforderung: Ausschneiden/Kopieren statt Fett als Zwischenschritt |
+| `tests/e2e/select-all.spec.ts` | **neu** | Haupt-E2E-Suite: „Strg+A markiert alles" + select-all-eigene Grenzfälle (6.1) |
+| `tests/e2e/select-all-roundtrip.spec.ts` | **neu** | Formatier-Rundreise DOCX/ODT über echten Export/Reimport im Browser (6.2) |
+| `src/formats/docx/__tests__/select-all-roundtrip.test.ts` | **neu** | Vitest-Rundreise (Reader+Writer, kein Browser): Formatierung über **alle** Blöcke inkl. `colspan`/`rowspan`, nach dem Muster von `cut-roundtrip.test.ts` (6.2a) |
+| `src/formats/odt/__tests__/select-all-roundtrip.test.ts` | **neu** | Spiegelbildlich zu obigem, ODT-Seite (6.2a) |
+| `src/formats/shared/editor/__tests__/select-all.test.ts` | **neu** | Vitest-Unit-Belege der Bibliotheksgarantien (6.4) |
+| `playwright.config.ts` | **geändert (empfohlen)** | `testMatch` der beiden Clipboard-Projekte um `select-all` erweitern (Frage 4 / Abschnitt 10) |
+| `tests/e2e/selection-regression.spec.ts` | **optional, minimal** | höchstens **ein** Test (Kopieren ohne vorheriges Fett), nur falls literale §2.6-Deckung gewünscht (6.3) |
+| `src/formats/shared/editor/WordEditor.tsx` | **optional** | reiner Klarstellungskommentar über `keymap(baseKeymap)` (6.5) |
+| `specs/alles-auswaehlen-req.md` | **geändert** | Abschnitt 8 um die Entscheidungen aus Abschnitt 2 ergänzen |
 
----
+**Explizit NICHT geändert** (und warum): `commands.ts` (keine Selektionslogik nötig, Abschnitt 4;
+`isMarkActive` gehört den vier Formatierungstickets, 5.2), `Toolbar.tsx` (Frage 1 — insbesondere
+**kein** Merge-Zellen-Bedienelement wird ergänzt, obwohl dessen Fehlen den `colspan`/`rowspan`-Test
+in 6.2a auf Fixture-Upload verweist; das ist ein Scope-Grenze-Hinweis, kein Auftrag, ein
+Merge-Feature nachzurüsten), `schema.ts`
+(kein neuer Node/Mark), `src/index.css` (kein belegter Kontrastfehler — Fund 4; ein Eingriff
+ohne Befund wäre Scope-Creep; ein realer Fund im Visualtest 6.2/Testfall 14 wäre ein **neuer**,
+separat zu behandelnder Punkt), `src/app/DocumentWorkspace.tsx` (fremder Blocker, 5.3),
+`src/formats/docx/writer.ts`/`reader.ts`, `src/formats/odt/writer.ts`/`reader.ts` selbst (Abschnitt 9
+— nur ihre **Tests** werden ergänzt, nicht ihre Implementierung, da sie bereits generisch über
+`body.content` iterieren und keinen Sonderfall für „erster/letzter Block" oder `AllSelection`
+brauchen).
 
-## 5. ProseMirror-Schema/Commands — Detailplan
+### 6.1 `tests/e2e/select-all.spec.ts` (neu)
 
-**Ergebnis: keine Änderung.** Weder `wordSchema` (`schema.ts`) noch `commands.ts` benötigen
-neue Nodes, Marks oder Befehle für „Alles auswählen“. Die Funktion besteht vollständig aus
-der bereits eingebundenen `baseKeymap`-Bindung; ein projekteigener `selectAllCommand`-Wrapper
-würde keinen zusätzlichen Nutzen bieten (kein zusätzlicher Zustand, keine zusätzliche
-Fehlerbehandlung nötig — `selectAll` kann strukturell nicht fehlschlagen, siehe Abschnitt 2,
-Zeile 1 der Tabelle) und stattdessen nur eine zweite Quelle der Wahrheit neben `baseKeymap`
-schaffen, die bei künftigen ProseMirror-Updates auseinanderlaufen könnte.
+Nach dem Muster von `selection-regression.spec.ts`/`cut.spec.ts` (echte Browser-Interaktion,
+`.ProseMirror`-Locator, `odtCard`-Helper, `watchForConsoleErrors`, `settle`). Testfälle
+(Doppelungen mit Abschnitt 3 bewusst vermieden):
 
-**Einzige Ausnahme, falls Frage 2 in einer späteren Iteration von (a) auf (b) revidiert
-werden sollte** (gestuftes Zelle→Tabelle→Dokument-Verhalten): Das würde einen neuen,
-zustandsbehafteten Befehl (z. B. `stagedSelectAll(): Command`, der per `tr.setMeta` die
-zuletzt erreichte Stufe trägt) sowie eine eigene `Mod-a`-Bindung in der projekteigenen
-`keymap({...})` **vor** `keymap(baseKeymap)` erfordern (Priorität nach Registrierungsreihenfolge
-in `WordEditor.tsx`). Das ist hier **nicht** Teil des Umsetzungsauftrags (Frage 2 wurde in
-Abschnitt 1 auf (a) entschieden) — nur als Hinweis für eine mögliche künftige Revision notiert.
+1. **Basisverhalten (Req §6.1):** Mehrere Absätze tippen → `ControlOrMeta+a` → `Delete` →
+   `.ProseMirror p` Anzahl = 1 und leer (indirekter Nachweis „wirklich alles markiert").
+2. **Leeres Dokument (Grenzfall 1/§6.2):** Frisches Dokument → `ControlOrMeta+a` → kein
+   `pageerror` (via `watchForConsoleErrors`), danach weiterhin tippbar.
+3. **Idempotenz (Grenzfall 2/§6.3):** Zweimal `ControlOrMeta+a` → `Delete` → weiterhin
+   vollständige Löschung, keine Exception. (Nicht in `cut.spec.ts` enthalten — genuin neu.)
+4. **Tabellenzelle (Grenzfall 3/§6.4, Frage 2 = (a)):** Tabelle einfügen, Text in zwei Zellen,
+   Cursor in eine Zelle, `ControlOrMeta+a` → `Delete` → `.ProseMirror table` = 0,
+   `.ProseMirror p` = 1. Bestätigt „sofort ganzes Dokument". (Abgrenzung: `cut.spec.ts`
+   Testfall 6 testet das **Gegenteil** — Strg+X **ohne** vorheriges Strg+A leert nur die Zelle;
+   dieser Test prüft explizit die Strg+A-Eskalation auf das ganze Dokument.)
+5. **Bild in der Selektion (Grenzfall 4/§6.5):** Bild über den `🖼 Bild`-Button einfügen (kleine
+   Data-URL-PNG wie in `docx.spec.ts`), Text davor/danach, `ControlOrMeta+a` → Ausrichtung
+   „zentriert" per Toolbar → kein `pageerror`, Text zentriert, `.ProseMirror img` unverändert.
+6. **Tippen ersetzt alles (Grenzfall 5/§6.6):** Text → `ControlOrMeta+a` → neuen Text tippen →
+   nur neuer Text, genau ein Absatz.
+7. **Undo-Neutralität (Grenzfall 8/§6.7):** „A" tippen, Enter, „B" tippen → `ControlOrMeta+a`
+   (reine Selektion) → `ControlOrMeta+z` → der zuletzt getippte Block wird rückgängig gemacht,
+   **nicht** „Auswahl aufheben" als eigener Schritt. (Prüft select-all-**Neutralität** — anders
+   als `cut.spec.ts` Testfall 9, das Undo **nach einer Inhaltsänderung** prüft.)
+8. **IME-Komposition (Grenzfall 9):** `CompositionEvent('compositionstart')` dispatchen, dann
+   `ControlOrMeta+a`, sauber mit `compositionend` beenden → kein `pageerror`. Dokumentierter
+   Hinweis: nähert reale IME nur an.
+9. **Fokus außerhalb Editor (Grenzfall 10):** `page.getByLabel('Textfarbe').focus()` →
+   `ControlOrMeta+a` → `.ProseMirror`-Inhalt unverändert. (Strg+A-Analogon zu `cut.spec.ts`
+   Grenzfall 14, das dieselbe Idee mit Strg+X prüft.)
+10. **Performance/langes Dokument (Grenzfall 11/§6.13):** ~300 Absätze programmatisch erzeugen,
+    `ControlOrMeta+a` mit `performance.now()`-Messung < Schwellenwert (z. B. 500 ms), danach
+    `Delete` → `.ProseMirror p` = 1 (bis zum Dokumentende erfasst).
+11. **Kontextmenü erreichbar (Req-Testfall 3/Grenzfall 16):** `dispatchEvent`-`contextmenu` →
+    `expect(ev.defaultPrevented).toBe(false)` (Muster wie in `kopieren`/`cut`).
+12. **Cursor-Kollaps (Abschnitt 2.4):** `ControlOrMeta+a`, `ArrowLeft` → Cursor am Anfang;
+    separat `ArrowRight` → Cursor am Ende (jeweils über nächsten getippten Buchstaben geprüft).
+13. **Visueller Kontrast-Check (Req-Testfall 14):** nach `ControlOrMeta+a` Screenshot in
+    `emulateMedia({ colorScheme: 'light' })` und `'dark'`,
+    `expect(editor).toHaveScreenshot('select-all-<scheme>.png')`. Erwartung (Fund 4): beide
+    Screenshots nahezu identisch (Fläche reagiert nicht auf Dark Mode) — Baseline bewusst prüfen
+    und committen, nicht blind akzeptieren.
 
----
+Matrix (Req-Testfall 12): Testfälle 1–3 laufen ohne Sonderbehandlung auf `Desktop Chrome`/
+`Mobile`/`Tablet`; nach der `testMatch`-Erweiterung (Abschnitt 10) zusätzlich auf `Desktop
+Safari`/`Desktop Firefox`. Kommentar zur Mobile-Popup-Einschränkung wie in `cut.spec.ts`: das
+native OS-Auswahlpopup ist Browser-/OS-Chrome und mit Playwright nicht anklickbar; der Test
+verifiziert den zugrunde liegenden Mechanismus, nicht das Popup selbst.
 
-## 6. Toolbar-Änderungen
+### 6.2 `tests/e2e/select-all-roundtrip.spec.ts` (neu)
 
-**Keine.** Siehe Entscheidung zu Frage 1 (Abschnitt 1) und Frage 3 (Abschnitt 1/3.2).
-`Toolbar.tsx` wird durch dieses Ticket an keiner Stelle verändert. Sollte die
-Produktentscheidung zu Frage 1 in der Freigabe umgekehrt werden (Button doch gewünscht), wäre
-der Ansatz: neuer Button analog zu den bestehenden Formatierungs-Buttons,
-`onMouseDown` → `e.preventDefault(); run(view, selectAll)` (Import von `selectAll` aus
-`prosemirror-commands`, kein eigener Wrapper nötig, da der Befehl bereits genau das gewünschte
-Verhalten hat), ohne eigenen „aktiv“-Zustand (es gibt laut Anforderung 2.1 keinen
-deaktivierten Zustand). Dieser Absatz ist reine Handlungsoption, **nicht** Teil des aktuellen
-Umsetzungsplans.
+Nach dem `Rundreise`-Muster in `cut.spec.ts` (Zeilen 473–630: „Exportieren" →
+`waitForEvent('download')` → JSZip → `document.xml`/`content.xml` prüfen). Deckt
+`alles-auswaehlen-req.md` §4.2 — die **Formatier**-Rundreisen, die Ausschneiden nicht abdeckt:
 
----
+1. **§4.2 Testfall 1 (DOCX):** neues Dokument → mehrere Absätze → `ControlOrMeta+a` → „Fett" →
+   Export → `document.xml` → **jeder** `<w:r>` trägt `<w:b/>`, **erster und letzter** Absatz
+   explizit geprüft (nicht nur einer).
+2. **§4.2 Testfall 2 (ODT):** dieselbe Sequenz → `content.xml` → `fo:font-weight="bold"` bzw.
+   das entsprechende Auto-Style aus `odt/styleRegistry.ts`.
+3. **§4.2 Testfall 3 (Entf, beide Formate):** `ControlOrMeta+a` → **`Delete`** (Entf-Taste, nicht
+   Strg+X — das ist die select-all-eigene Variante gegenüber `cut.spec.ts` „Rundreise 10") →
+   Export DOCX **und** ODT → Reimport → je eine valide Datei mit einem leeren Absatz.
+4. **§4.2 Testfall 5 (Tabelle) — zweigeteilt, da per Toolbar keine gemergte Zelle baubar ist
+   (Korrektur J, Abschnitt 1):** `Toolbar.tsx` bietet nur `insertTable(2, 2)` — einen **plain**
+   2×2-Raster ohne `colspan`/`rowspan` (kein Merge-Bedienelement existiert). Zwei Teiltests statt
+   einem:
+   - **4a (plain, per UI gebaut):** Tabelle über den Toolbar-Button einfügen, Text in zwei Zellen,
+     Cursor in eine Zelle → `ControlOrMeta+a` → „Fett" → Export/Reimport → Zeilen-/Spaltenzahl
+     unverändert (2×2), Formatierung in **beiden** Zellen vorhanden. Beweist den Normalfall.
+   - **4b (`colspan`/`rowspan`, per Fixture-Upload):** Eine der bereits vorhandenen Fixtures mit
+     gemergter Zelle hochladen (`tests/e2e/fixtures/richDocument.ts` bzw.
+     `fullCoverageDocument.ts`, DOCX `w:gridSpan="2"` / ODT `table:number-columns-spanned="2"` —
+     exakt das Muster, das `docx.spec.ts`s eigener Merged-Table-Rundtrip-Test bereits per
+     Fixture-Upload statt UI-Bau verwendet) → `ControlOrMeta+a` → „Fett" → Export/Reimport →
+     `colspan`/`rowspan` erhalten, Formatierung **auch innerhalb** der gemergten Zelle vorhanden.
+     Der reine `colspan`/`rowspan`-Erhalt (unabhängig von „Fett über alles") ist zusätzlich am
+     direkt gebauten doc-JSON durch 6.2a (Unit-Ebene, schneller/deterministischer) abgesichert.
+5. **§4.2 Testfall 4 (Kopieren in neues Dokument):** `ControlOrMeta+a` → `ControlOrMeta+c` →
+   zweites leeres Dokument öffnen → einfügen → Export/Reimport → Struktur erhalten. Clipboard-
+   Rechte sind auf `Desktop Chrome`/`Mobile` bereits **projektweit** gewährt
+   (`playwright.config.ts` Zeilen 34–35) — kein per-Test-`grantPermissions` nötig; verlässlich
+   nur auf Chromium (wie in `clipboard.spec.ts` dokumentiert).
+6. **§4.2 Testfälle 6/7/8 (Cross-Format):** primär `test.fixme(true, 'Blockiert durch fehlende
+   Cross-Format-Export-UI, siehe alles-auswaehlen-code.md §5.3 / kopieren-code.md / ausschneiden-
+   code.md — derselbe Blocker.')`. Zusätzlich empfohlen (Precedent `cut.spec.ts` „Rundreise 4/5,
+   angepasst"): je ein **Same-Format**-Ersatztest (z. B. ODT → Strg+A → Aktion → als ODT
+   exportieren), damit die Konvertierung nicht ungetestet bleibt, während die literale
+   Cross-Format-UI blockiert ist.
+7. **§4.2 Testfall 9 (Regressionskette + Export):** Sequenz aus `selection-regression.spec.ts`
+   Test 1 (Strg+A → Fett → Klick → Enter → tippen) **zusätzlich** gefolgt von Export DOCX **und**
+   ODT → Reimport → beide Absätze in beiden Formaten vorhanden. Einziger Testfall, der die
+   Selection-Sync-Sequenz mit einer echten Datei-Rundreise verkettet.
 
-## 7. Import/Export-Anpassungen OOXML (DOCX) und ODF (ODT)
+### 6.2a `src/formats/docx/__tests__/select-all-roundtrip.test.ts` +
+`src/formats/odt/__tests__/select-all-roundtrip.test.ts` (neu, Vitest, kein Browser)
 
-**Ergebnis der Prüfung: Keine Änderungen nötig.** Begründung: „Alles auswählen“ schreibt
-selbst keine Datei (`alles-auswaehlen-req.md`, einleitender Satz von Abschnitt 4). Die
-Rundreise-Anforderung bezieht sich ausschließlich darauf, dass eine **mit** Strg+A als
-Zwischenschritt durchgeführte Aktion (Formatieren/Löschen/Kopieren-Einfügen) beim
-Export/Re-Import zum selben Ergebnis führt wie ohne den Strg+A-Umweg. Das ist strukturell
-bereits gegeben, weil Strg+A ausschließlich die **Selektion** ändert, niemals den
-Dokumentbaum selbst — Reader/Writer sehen nach einer per `AllSelection` durchgeführten
-Formatierungs-/Löschaktion exakt dasselbe ProseMirror-Dokument, das sie auch sähen, wenn
-dieselbe Aktion über eine manuelle Mehrfach-Selektion jedes einzelnen Absatzes erreicht worden
-wäre.
+**Neu gegenüber der Vorfassung** (Korrektur J): reine Reader/Writer-Rundreisen, die die
+**Formatierung-über-alle-Blöcke**-Fälle browserunabhängig und schneller als 6.2 nachweisen —
+Ergänzung, kein Ersatz für den echten Browser-Beweis in 6.2. Vorlage ist `cut-roundtrip.test.ts`
+(existiert bereits identisch benannt in beiden Formatordnern; `doc()`/`paragraph(text, align,
+marks)`/`roundTrip()`-Helper sowie `TINY_PNG` von dort übernehmen, nicht neu erfinden):
 
-Konkret geprüft (identische Belege wie in `kopieren-code.md` Abschnitt 7, hier erneut für
-„Alles auswählen“ nachvollzogen):
+| Testfall | Aufbau | Prüfung |
+|---|---|---|
+| Formatierung über alle Blöcke, erster/letzter explizit (§4.2 #1/#2) | `doc([paragraph('Erster','left',[{type:'strong'}]), heading(1,'Mitte',[{type:'strong'}]), paragraph('Letzter','left',[{type:'strong'}])])` | Nach `roundTrip()`: **jeder** Block trägt `strong`; `content[0]` **und** `content[content.length-1]` explizit per Index geprüft — deckt eine mögliche Off-by-one-Writer-Regel auf, die ein Test, der nur „irgendwo strong" prüft, übersehen würde |
+| `colspan`/`rowspan`-Erhalt bei durchgehender Formatierung (§4.2 #5, Korrektur J) | Tabelle mit einer gemergten Zelle (analog `cut-roundtrip.test.ts` Testfall 7 — direkt als doc-JSON gebaut, **nicht** über die UI, da `insertTable(2,2)` keine Merges kennt), **jede** Zelle inkl. der gemergten mit fett formatiertem Text | Zeilen-/Spaltenzahl unverändert; `attrs.colspan`/`attrs.rowspan` (DOCX: `w:gridSpan`) bzw. `table:number-columns-/rows-spanned` (ODT) erhalten; **jede** Zelle trägt die Formatierung |
+| Vollständig geleertes Dokument (§4.2 #3) | `doc([paragraph('')])` | `roundTrip()` wirft nicht; genau ein leerer Absatz. *(Deckungsgleich mit `cut-roundtrip.test.ts` Testfall 10 — hier nur knapp referenzieren, nicht neu beweisen.)* |
+| Liste, jede Ebene formatiert (Req 2.2 „alle Ebenen") | Verschachtelte `bullet_list` (2 Ebenen), jeder `list_item`-Text fett | Verschachtelungstiefe unverändert, Formatierung auf beiden Ebenen erhalten |
+| Bild + Text (§4.2 #4, Kopieren-Ziel) | `doc([paragraph('Vor Bild'), image(TINY_PNG), paragraph('Nach Bild','left',[{type:'strong'}])])` | Bild-Node vorhanden, Reihenfolge unverändert, Text davor/danach inkl. Formatierung erhalten |
 
-| Merkmal | DOCX Reader/Writer | ODT Reader/Writer | Bewertung |
-|---|---|---|---|
-| Formatierung über gesamtes Dokument (Fett/Kursiv/…) je Lauf | Reader/Writer verarbeiten jeden Absatz/Lauf unabhängig, kein „erster/letzter Block“-Sonderfall (`docx/reader.ts`/`writer.ts` iterieren generisch über `body.content`) | Analog (`odt/reader.ts`/`writer.ts`) | **Vollständig**, kein Änderungsbedarf |
-| `colspan`/`rowspan` bleibt nach Strg+A+Formatierung erhalten | `writer.ts:130,154-164` (`w:gridSpan`, `w:vMerge`), `reader.ts:223-250` — unverändert seit `kopieren-code.md`-Prüfung | `writer.ts:94-98` (`table:number-columns-spanned`/`-rows-spanned`), `reader.ts:193-197` — unverändert | **Vollständig**, kein Änderungsbedarf |
-| Vollständige Löschung (Strg+A → Entf) exportiert als valide leere Datei | Schema-Constraint `doc: 'block+'` garantiert mindestens einen leeren Absatz im Restdokument (Abschnitt 0, Fund 3); Writer verarbeitet einen einzelnen leeren Absatz wie jeden anderen | Analog | **Vollständig**, kein Änderungsbedarf |
-| Bilder innerhalb einer `AllSelection`-Formatierung bleiben unverändert | `setAlign` überspringt `image`-Knoten wirkungslos (Abschnitt 2); `imageCollector.ts` verarbeitet jede `image`-Node unabhängig von vorangegangenen Selektionsoperationen | Analog `odt/imageCollector.ts` | **Vollständig**, kein Änderungsbedarf |
+Diese beiden Dateien sind der einzige Ort, an dem der `colspan`/`rowspan`-Erhalt nach „Alles
+auswählen + Formatierung" ohne die per-UI-Einschränkung aus Korrektur J nachweisbar ist — die
+E2E-Testfälle 4b (6.2) beweisen zusätzlich den echten Browser-/Datei-Pfad über eine hochgeladene
+Fixture, aber nicht die Formatierungs-Variante mit beliebigem, frei konstruierbarem doc-Baum.
 
-**Einziger Blocker, der Import/Export indirekt betrifft:** der in Abschnitt 3.3 beschriebene,
-bereits andernorts gemeldete Cross-Format-Export-Blocker — liegt nicht an Reader/Writer selbst
-(die sind cross-format-fähig), sondern an der fehlenden UI in `DocumentWorkspace.tsx`.
+### 6.3 `tests/e2e/selection-regression.spec.ts` (optional, höchstens ein Test)
 
----
+**Wichtig:** Die Vorfassung wollte hier zwei Tests ergänzen (Ausschneiden- und Kopieren-Variante).
+Beide sind faktisch überflüssig geworden:
+- **Ausschneiden-Variante:** existiert als `cut.spec.ts` Testfall 5 (PFLICHT). **Nicht anlegen.**
+- **Kopieren-Variante:** existiert als Test 4 dieser Datei (`…, bold, copy, …`).
 
-## 8. Playwright-Konfiguration
+Genuin noch nicht vorhanden ist einzig „Kopieren **ohne** vorheriges Fett" (reines
+`ControlOrMeta+a` → `ControlOrMeta+c` → Klick → `End` → `Enter` → tippen; prüft, dass Kopieren die
+Selektion **überhaupt nicht** perturbiert, ganz ohne dazwischenliegende Doc-ändernde
+Transaktion). Das ist ein **near-duplicate** von Test 4 mit geringem Zusatznutzen. Empfehlung:
+nur anlegen, falls literale §2.6-Wortlautdeckung gefordert wird; sonst als „durch Test 4 +
+`cut.spec.ts` Testfall 5 abgedeckt" dokumentieren. **Die vier bestehenden Tests bleiben in jedem
+Fall unangetastet und grün** (Pflichtbestandteil laut Anforderung §2.6).
 
-**Kein neues Projekt zwingend erforderlich für dieses Ticket.** Die neuen Testdateien laufen
-automatisch auf allen drei bestehenden Projekten (`Desktop Chrome`, `Mobile`, `Tablet`), da die
-Projekt-Matrix in `playwright.config.ts` pro Testdatei greift, ohne Sonderregistrierung.
-Siehe Abschnitt 1, Frage 4 für die Empfehlung, ein künftiges `Desktop Safari`-Projekt (falls
-`kopieren-code.md`/`ausschneiden-code.md` es zuerst anlegen) um die `select-all*.spec.ts`-Dateien
-zu erweitern, statt ein eigenes anzulegen.
+### 6.4 `src/formats/shared/editor/__tests__/select-all.test.ts` (neu, Vitest/jsdom)
 
-Für den Mobile-/Tablet-Testfall 12 der Anforderung (Touch-Auswahlpopup) gilt dieselbe
-Einschränkung wie in `ausschneiden-code.md` Abschnitt 6.2, Testfall 13 bereits dokumentiert:
-Playwright kann das native OS-Auswahl-Popup selbst nicht anklicken (es ist Browser-/OS-Chrome,
-kein Teil des DOM). Der Test verifiziert stattdessen den zugrunde liegenden Mechanismus
-(`ControlOrMeta+a` funktioniert auf `Mobile`/`Tablet` identisch zu `Desktop Chrome`, da alle
-über denselben `baseKeymap`-Pfad laufen) und dokumentiert die Popup-Interaktion selbst als
-„durch Bibliotheksverhalten abgeleitet, nicht Ende-zu-Ende auf echtem Gerät verifiziert“ — exakt
-die in Abnahmekriterium/DoD-Logik bereits etablierte, zulässige Ausnahmeform.
+Folgt dem **bestehenden** Muster aus `commands.test.ts` (`EditorState.create({ doc, schema:
+wordSchema })`, `wordSchema.node(...)`-Baumaufbau) — **nicht** „erstmalig". Deckt die
+Bibliotheksgarantien aus Abschnitt 4 browserunabhängig ab, ergänzend zur E2E-Ebene:
 
----
-
-## 9. Testplan im Detail
-
-### 9.1 `tests/e2e/select-all.spec.ts` (neu)
-
-Nach dem Vorbild von `selection-regression.spec.ts` (echte Browser-Interaktion,
-`.ProseMirror`-Locator, `getByRole`/`getByTitle`, `odtCard`-Helper für „Neu erstellen“).
-
-1. **Basisverhalten (Req-Testfall 1/6.1):** Mehrere Absätze eintippen → `ControlOrMeta+a` →
-   `Delete` → `.ProseMirror p` Anzahl = 1 und leer (indirekter Nachweis „wirklich alles
-   markiert“, wie in Req Abschnitt 6, Testfall 1 vorgeschlagen).
-2. **Leeres Dokument (Grenzfall 1/6.2):** Frisch erstelltes Dokument (nur ein leerer Absatz),
-   `ControlOrMeta+a` → kein `pageerror`-Event (Helper wie in `ausschneiden-code.md` §6.2
-   eingeführt, hier für diese Datei übernommen/dupliziert, siehe Hinweis unten), danach
-   weiterhin tippbar (Text eingeben, sichtbar prüfen).
-3. **Idempotenz (Grenzfall 2/6.3):** Zweimal `ControlOrMeta+a` ohne Zwischenaktion → danach
-   `Delete` → weiterhin vollständige Löschung, keine Exception, kein doppelter Effekt.
-4. **Tabellenzelle (Grenzfall 3/6.4, Frage 2 = (a)):** Tabelle einfügen, Text in zwei Zellen
-   eintippen, Cursor in eine Zelle setzen, `ControlOrMeta+a` → `Delete` → **gesamtes**
-   Dokument (inkl. der ganzen Tabelle) ist geleert, `.ProseMirror table` Anzahl = 0,
-   `.ProseMirror p` Anzahl = 1 (leer) — bestätigt die in Abschnitt 1 getroffene Entscheidung
-   als tatsächliches Verhalten, nicht nur als Annahme.
-5. **Bild in der Selektion (Grenzfall 4/6.5):** Bild einfügen (über den bestehenden
-   „🖼 Bild“-Button mit einer kleinen Test-PNG als Data-URL, analog zum Muster in
-   `docx.spec.ts`/`odt.spec.ts`), Text davor/danach eintippen, `ControlOrMeta+a` →
-   Ausrichtung „zentriert“ per Toolbar anwenden → kein `pageerror`, Text ist zentriert
-   (`getComputedStyle`/Locator-Attribut-Check auf `text-align: center`), `.ProseMirror img`
-   Anzahl unverändert (Bild bleibt unversehrt, siehe Abschnitt 2 Zeile 4).
-6. **Tippen ersetzt alles (Grenzfall 5/6.6):** Text eingeben → `ControlOrMeta+a` → neuen Text
-   tippen → alter Text vollständig weg, nur neuer Text vorhanden, **genau ein** Absatz.
-7. **Undo-Neutralität (Grenzfall 8/6.7):** Text „A“ eintippen → Text „B“ eintippen (zweite,
-   separate Eingabe/Absatz) → `ControlOrMeta+a` (reine Selektion, keine Folgeaktion) →
-   `ControlOrMeta+z` → Ergebnis entspricht dem Zustand **vor** der letzten inhaltlichen
-   Änderung (nicht „Auswahl aufgehoben, aber Inhalt unverändert“ als eigener Schritt) —
-   konkret: der zuletzt getippte Blockinhalt wird rückgängig gemacht, nicht „nichts passiert“.
-8. **IME-Komposition (Grenzfall 9):** `element.dispatchEvent(new CompositionEvent('compositionstart'))`
-   während eines aktiven Kompositionszustands `ControlOrMeta+a` auslösen → keine
-   `pageerror`-Exception, Editor bleibt in einem konsistenten Zustand (Composition wird vom
-   Test danach sauber mit `compositionend` beendet, um keinen hängenden Testzustand zu
-   hinterlassen). Dokumentierter Hinweis im Test: Diese Simulation bildet reale IME-Eingabe
-   nur näherungsweise nach (echte OS-IME-Interaktion ist mit Playwright nicht auslösbar) —
-   analog zur bereits an anderer Stelle akzeptierten Einschränkung für Mobile-Popups.
-9. **Fokus außerhalb des Editors (Grenzfall 10):** Fokus in das Textfarbe-`<input type="color">`
-   der Toolbar setzen (`page.getByLabel('Textfarbe').focus()`), `ControlOrMeta+a` drücken →
-   `.ProseMirror`-Inhalt bleibt unverändert (kein Editor-weiter Select-All-Effekt).
-10. **Performance/langes Dokument (Grenzfall 11/6.13):** Per Testskript ca. 300 Absätze
-    programmatisch eintippen (`page.keyboard.type` in einer Schleife oder — schneller —
-    über wiederholtes `Enter`+kurzer Text), `ControlOrMeta+a` → Zeitmessung
-    (`performance.now()` vor/nach `page.keyboard.press`) bestätigt < definierter Schwellenwert
-    (z. B. 500 ms), danach `Delete` → `.ProseMirror p` Anzahl = 1 (Nachweis: wirklich bis zum
-    Dokumentende erfasst, nicht nur der sichtbare Ausschnitt).
-11. **Kontextmenü erreichbar (Req-Testfall 3/Grenzfall 16):**
-    ```ts
-    const prevented = await editor.evaluate((el) => {
-      const ev = new MouseEvent('contextmenu', { bubbles: true, cancelable: true })
-      el.dispatchEvent(ev)
-      return ev.defaultPrevented
-    })
-    expect(prevented).toBe(false)
-    ```
-    (identisches Muster wie in `kopieren-code.md` Abschnitt 9 für den analogen Testfall).
-12. **Matrix-Testfall (Req-Testfall 12):** Testfälle 1–3 laufen automatisch auf allen drei
-    Playwright-Projekten (keine Sonderbehandlung nötig, siehe Abschnitt 8); ergänzender
-    Kommentar im Testfile zur Mobile-Popup-Einschränkung (siehe Abschnitt 8).
-13. **Cursor-Kollaps nach Strg+A (Abschnitt 2.4):** Mehrere Absätze eintippen,
-    `ControlOrMeta+a`, `ArrowLeft` → Cursor am Dokumentanfang (nächster getippter Buchstabe
-    erscheint vor dem bisherigen ersten Zeichen); separat: `ControlOrMeta+a`, `ArrowRight` →
-    Cursor am Dokumentende (nächster getippter Buchstabe hängt an).
-
-**Hinweis zur Testinfrastruktur:** Der `pageerror`/Konsolen-Fehler-Sammel-Helper wurde bereits
-in `ausschneiden-code.md` Abschnitt 6.2 als „erste Einführung dieses Musters“ geplant. Da zum
-Zeitpunkt dieser Prüfung weder `ausschneiden-code.md` noch dieser Plan umgesetzt sind, wird
-hier empfohlen, den Helper **einmalig** in eine gemeinsame Datei auszulagern (z. B.
-`tests/e2e/helpers/consoleErrors.ts`) und aus beiden Spezifikationsdateien zu importieren,
-statt ihn zweimal unabhängig zu implementieren — sollte `ausschneiden-code.md` zuerst
-umgesetzt werden, übernimmt `select-all.spec.ts` einfach den dort bereits ausgelagerten Helper.
-
-### 9.2 `tests/e2e/select-all-roundtrip.spec.ts` (neu)
-
-Analog zum bestehenden Muster in `docx.spec.ts`/`odt.spec.ts` (Upload/Neu erstellen →
-editieren → „Exportieren“ → `page.waitForEvent('download')` → mit `JSZip` den Inhalt der
-heruntergeladenen Datei prüfen). Deckt `alles-auswaehlen-req.md` Abschnitt 4.2 ab:
-
-1. **Testfall 1 (DOCX):** Neues Dokument → mehrere Absätze eintippen → `ControlOrMeta+a` →
-   „Fett“ per Toolbar → Exportieren → `document.xml` aus dem Zip lesen → **jeder** `<w:r>`
-   trägt `<w:b/>` (erster **und** letzter Absatz explizit geprüft, nicht nur ein Absatz).
-2. **Testfall 2 (ODT):** Dieselbe Sequenz, `content.xml`, `fo:font-weight="bold"` bzw.
-   entsprechendes Automatik-Style-Attribut aus `styleRegistry.ts`.
-3. **Testfall 3 (vollständige Löschung, beide Formate):** `ControlOrMeta+a` → `Delete` →
-   Exportieren als DOCX **und** als (separat) ODT → Re-Import beider → jeweils eine valide
-   Datei mit einem leeren Absatz, kein Parserfehler.
-4. **Testfall 4 (Kopieren in neues Dokument):** `ControlOrMeta+a` → `ControlOrMeta+c` →
-   zweites, leeres Dokument öffnen (`odtCard`/`docxCard` „Neu erstellen“ ein zweites Mal) →
-   einfügen → Struktur (Formatierung/Listen/Tabellen/Bilder) bleibt erhalten → Export/
-   Re-Import beider Formate. Nutzt für den Zwischenablage-Zugriff denselben
-   `context.grantPermissions(['clipboard-read','clipboard-write'])`-Mechanismus wie
-   `kopieren-code.md` Abschnitt 8, nur auf `Desktop Chrome` verlässlich (dort dokumentiert).
-5. **Testfall 5 (Tabelle):** Tabelle mit Inhalt importieren/erzeugen → Cursor in Zelle →
-   `ControlOrMeta+a` → Fett → Export/Re-Import → Zeilen-/Spaltenzahl unverändert,
-   `colspan`/`rowspan` (falls vorhanden) unverändert, Formatierung auch innerhalb der Zellen
-   vorhanden.
-6. **Testfall 6 (Cross-Format DOCX→ODT):**
-   ```ts
-   test.fixme(
-     true,
-     'Blockiert durch fehlende Cross-Format-Export-UI, siehe kopieren-code.md §3.4 / ' +
-       'ausschneiden-code.md §3.5 / alles-auswaehlen-code.md §3.3 (derselbe Blocker).',
-   )
-   ```
-7. **Testfall 7 (Cross-Format ODT→DOCX):** Wie 6, `test.fixme(...)`.
-8. **Testfall 8 (doppelte Rundreise mit Formatwechsel):** Wie 6, `test.fixme(...)` — hängt
-   ebenfalls am selben Blocker.
-9. **Testfall 9 (Regressionskette + Export):** Sequenz aus `selection-regression.spec.ts`
-   Test 1 (Strg+A → Fett → Klick → Enter → Tippen) **zusätzlich** gefolgt von Export als
-   DOCX **und** ODT → Re-Import → beide Absätze aus der Regressionssequenz sind in **beiden**
-   Formaten weiterhin vorhanden. Das ist der einzige Testfall, der die bestehende
-   Selection-Sync-Fixdatei mit einer echten Datei-Rundreise verkettet (bisher nur im
-   laufenden Editor-Zustand geprüft, siehe Anforderung Abschnitt 4.2, Testfall 9).
-
-### 9.3 `tests/e2e/selection-regression.spec.ts` (erweitert, bestehende 3 Tests unverändert)
-
-Neue Tests, exakt nach dem Muster der drei vorhandenen (`odtCard`-Helper, `.ProseMirror`-
-Locator), aber mit Ausschneiden bzw. Kopieren statt Fett als auslösendem Zwischenschritt
-(Anforderung Abschnitt 2.6, letzter Punkt):
-
-4. **„select-all, cut, click to reposition, Enter, and type — no unintended full wipe“:**
-   Text „Hallo, das ist ein Test.“ eintippen → `ControlOrMeta+a` → `ControlOrMeta+x` (nativer
-   Cut-Pfad, funktioniert bereits ohne jede Anwendungscode-Änderung, siehe
-   `ausschneiden-code.md` Abschnitt 1.4) → Editor ist leer → Klick in den leeren Editor →
-   `Enter` (no-op auf leerem Absatz, erlaubt) → tippen „Zweiter Absatz.“ → **nur** „Zweiter
-   Absatz.“ ist vorhanden, kein Rest des ausgeschnittenen Textes taucht wieder auf, keine
-   Exception. Diese Variante prüft dieselbe Reconciliation wie die bestehenden drei Tests,
-   aber mit einer Transaktion, die **den Dokumentinhalt tatsächlich ändert** (im Unterschied
-   zu Fett, das nur eine Mark hinzufügt) — deckt damit einen strukturell anderen Codepfad in
-   `reconcileSelectionOnClick`/`dispatchTransaction` ab, den die bestehenden drei Tests nicht
-   berühren.
-5. **„select-all, copy, click to reposition, Enter, and type — both paragraphs must
-   survive“:** Text „Hallo, das ist ein Test.“ eintippen → `ControlOrMeta+a` →
-   `ControlOrMeta+c` (nativer Copy-Pfad — löst laut `kopieren-code.md` Abschnitt 2 **nie**
-   `view.dispatch` aus, die `AllSelection` bleibt im Modell exakt so bestehen wie vor dem
-   Kopieren) → Klick zur Neupositionierung → `End` → `Enter` → tippen „Zweiter Absatz.“ →
-   **beide** Absätze vorhanden (Text nach Kopieren unverändert + neuer Absatz), analog zu den
-   bestehenden drei Tests. Diese Variante ist wichtig, weil Kopieren die interne Selektion
-   **überhaupt nicht** verändert (kein `dispatch`-Aufruf) — sie prüft also, dass
-   `reconcileSelectionOnClick` (das an `mouseup`, nicht an `dispatchTransaction` hängt) auch
-   dann korrekt eingreift, wenn zwischen Strg+A und dem Klick **keine einzige** Transaktion
-   stattgefunden hat, nicht nur nach einer formatierenden Transaktion wie Fett.
-
-### 9.4 `src/formats/shared/editor/__tests__/select-all.test.ts` (neu, Vitest/jsdom)
-
-Erste Unit-Test-Datei, die `EditorState.create({ doc, schema: wordSchema, plugins: [history()] })`
-direkt aufbaut (bisher kein bestehendes Muster im Repo, siehe Abschnitt 0 — analog zur „ersten
-Einführung“ von `commands.test.ts` in `ausschneiden-code.md` Abschnitt 6.1). Deckt die
-Bibliotheksgarantien aus Abschnitt 2 ohne echten Browser/EditorView ab:
-
-- `new AllSelection(doc)` über `emptyDocJSON()` wirft nicht, `selection.empty === true` nur
-  wenn `doc.content.size === 0` (Nachweis für Grenzfall 1's Ausgangslage).
+- `new AllSelection(doc)` über ein Ein-Absatz-Dokument wirft nicht; `selection.empty` ist nur bei
+  `doc.content.size === 0` `true`.
 - `state.tr.setSelection(new AllSelection(state.doc))` hat `tr.steps.length === 0` und
-  `tr.docChanged === false` (direkter, browserunabhängiger Beweis für Grenzfall 8/Fund 2).
-- Für ein Dokument mit drei Absätzen: `new AllSelection(doc).replace(tr, Slice.empty)`
-  (bzw. äquivalent über `deleteSelection`-artige Logik) resultiert in einem Dokument mit
-  genau einem leeren Absatz (Nachweis für Grenzfall 1/6/Fund 3), nie in einem Fehler/leerem
-  `doc.content`.
-- Für ein Dokument, das ausschließlich aus einer `image`-Node besteht: `AllSelection` über
-  dieses Dokument lässt sich konstruieren, `setAlign('center')(state, dispatch)` liefert
-  `false` (kein anwendbarer Block gefunden) **ohne** zu werfen (Nachweis für Grenzfall 4).
-- `new AllSelection(doc).eq(new AllSelection(doc))` ist `true` für zwei unabhängig erzeugte
-  Instanzen über denselben `doc` (Nachweis für Grenzfall 2/Idempotenz auf State-Ebene, nicht
-  nur per E2E-Beobachtung).
+  `tr.docChanged === false` (direkter Beweis Grenzfall 8/Fund 2).
+- Dokument mit drei Absätzen: Löschen über `AllSelection` (bzw. `deleteSelection`-Logik)
+  resultiert in genau einem leeren Absatz (Grenzfall 1/6/Fund 3), nie in leerem `doc.content`.
+- Nur-Bild-Dokument: `AllSelection` konstruierbar; `setAlign('center')(state, dispatch)` liefert
+  `false` **ohne** zu werfen (Grenzfall 4). Ergänzt die bereits vorhandene
+  `commands.test.ts`-Prüfung `'is true for an AllSelection'` (dort gegen `canCut`) um die
+  Ausrichtungs-Seite.
+- `new AllSelection(doc).eq(new AllSelection(doc)) === true` (Idempotenz auf State-Ebene).
 
-### 9.5 Visueller Kontrast-Check (Req-Testfall 14)
+### 6.5 `src/formats/shared/editor/WordEditor.tsx` (optional, reiner Kommentar)
 
-Neu in `select-all.spec.ts` (Abschnitt 9.1) ergänzt, nicht als eigene Datei: Playwright-
-Screenshot-Vergleich der `.ProseMirror`-Fläche nach `ControlOrMeta+a` in zwei Durchläufen
-(`page.emulateMedia({ colorScheme: 'light' })` und `'dark'`), jeweils
-`expect(editorLocator).toHaveScreenshot('select-all-<scheme>.png')`. Erwartung gemäß
-Abschnitt 0, Fund 4 (Seite ist immer weiß/Text immer dunkel, unabhängig vom Schema): **beide
-Screenshots sollten sich kaum/gar nicht unterscheiden**, weil die editierbare Fläche selbst
-nicht auf Dark Mode reagiert — das ist der erwartete, dokumentierte Ausgang dieses Tests
-(kein Kontrastfehler zu erwarten), muss aber trotzdem einmal echt beobachtet und die
-Baseline-Screenshots müssen bewusst committet/geprüft werden (nicht blind akzeptiert), bevor
-der Test als dauerhafter Regressionsschutz gilt.
+Keine Verhaltensänderung. Empfohlen: analog zum bestehenden Erklärkommentar für Mod-c/x/v
+(Zeilen 86–92) einen Kommentar **über** `keymap(baseKeymap)` (Zeile 108) ergänzen:
+```ts
+// "Mod-a" (Alles auswählen) kommt bewusst aus prosemirror-commands' baseKeymap
+// (selectAll → AllSelection); keine eigene Bindung hier. Entscheidung/Verifikation:
+// specs/alles-auswaehlen-code.md; Tests: tests/e2e/select-all.spec.ts.
+keymap(baseKeymap),
+```
+Verhindert, dass ein:e künftige:r Bearbeiter:in Strg+A für ungetestet/unbeabsichtigt hält.
 
 ---
 
-## 10. Grenzfälle-Mapping (`alles-auswaehlen-req.md` Abschnitt 3, vollständig)
+## 7. ProseMirror-Schema/Commands — Detailplan
 
-| # | Grenzfall | Lösung/Beleg | Test |
+**Keine Änderung.** Weder `wordSchema` (`schema.ts`) noch `commands.ts` brauchen neue Nodes,
+Marks oder Befehle. Ein projekteigener `selectAllCommand`-Wrapper böte keinen Nutzen (kein
+zusätzlicher Zustand, keine Fehlerbehandlung nötig — `selectAll` kann strukturell nicht
+fehlschlagen) und schüfe nur eine zweite Quelle der Wahrheit neben `baseKeymap`.
+
+Einzige Ausnahme (nur falls Frage 2 später von (a) auf (b) revidiert würde): ein
+zustandsbehafteter `stagedSelectAll(): Command` plus eigene `Mod-a`-Bindung **vor**
+`keymap(baseKeymap)` in der projekteigenen `keymap({...})`. Nicht Teil dieses Auftrags.
+
+---
+
+## 8. Toolbar-Änderungen
+
+**Keine** (Frage 1, Frage 3 / 5.2). Falls die Produktentscheidung zu Frage 1 umgekehrt würde:
+Button analog zu den bestehenden, `onMouseDown → e.preventDefault(); run(view, selectAll)` (Import
+`selectAll` aus `prosemirror-commands`, kein eigener Wrapper), ohne „aktiv"-Zustand. Reine
+Handlungsoption, nicht Teil dieses Plans.
+
+---
+
+## 9. Import/Export-Anpassungen OOXML (DOCX) und ODF (ODT)
+
+**Keine Änderungen nötig.** „Alles auswählen" schreibt selbst keine Datei; die Rundreise-Relevanz
+liegt nur darin, dass eine **mit** Strg+A durchgeführte Aktion beim Export/Reimport zum selben
+Ergebnis führt wie ohne den Strg+A-Umweg. Das ist strukturell gegeben, weil Strg+A ausschließlich
+die **Selektion** ändert, nie den Dokumentbaum — Reader/Writer sehen exakt dasselbe
+ProseMirror-Dokument.
+
+| Merkmal | DOCX (`src/formats/docx/`) | ODT (`src/formats/odt/`) | Bewertung |
 |---|---|---|---|
-| 1 | Leeres Dokument | `AllSelection` + `doc: 'block+'` (Fund 3) | §9.1 Testfall 2 |
-| 2 | Wiederholtes Strg+A | `AllSelection.eq` (Abschnitt 2) | §9.1 Testfall 3, §9.4 |
-| 3 | Cursor in Tabellenzelle | Frage 2 = (a), strukturell konsistent (Fund 3) | §9.1 Testfall 4 |
-| 4 | Nur-Bild-Dokument | `setAlign` überspringt `image` wirkungslos | §9.1 Testfall 5, §9.4 |
-| 5 | Strg+A → Tippen | Standard-Replace-Verhalten, keine Codeänderung | §9.1 Testfall 6 |
-| 6 | Strg+A → Entf/Backspace | `AllSelection.replace` (Fund 3) | §9.1 Testfall 1 |
-| 7 | Regressionstest-Pflichtfall | Bestehender Fix `reconcileSelectionOnClick`, unverändert | `selection-regression.spec.ts` (3 bestehende + 2 neue Tests, §9.3) |
-| 8 | Strg+A → Undo | `tr.steps.length === 0` (Fund 2) | §9.1 Testfall 7, §9.4 |
-| 9 | IME-Komposition | Browser-/View-natives Verhalten, keine Codeänderung | §9.1 Testfall 8 |
-| 10 | Fokus außerhalb Editor | `prosemirror-keymap` bindet nur auf `view.dom` | §9.1 Testfall 9 |
-| 11 | Sehr großes Dokument | `AllSelection`-Konstruktion ist O(1) | §9.1 Testfall 10 |
-| 12 | Strg+A → Kopieren/Ausschneiden | Siehe `kopieren-code.md`/`ausschneiden-code.md`, hier nur Verkettung | §9.3 (neue Tests 4/5), §9.2 |
-| 13 | Kopf-/Fußzeile/Fußnoten/Kommentare | Existieren nicht als eigene Editor-Instanz (`WordEditor.tsx` lädt nur `doc.content.body`) — außerhalb des Scopes, nur dokumentiert | keiner (zukünftige Abhängigkeit, siehe §13) |
-| 14 | Track-Changes-Abhängigkeit | Noch nicht implementiert (Phase 3) — außerhalb des Scopes | keiner (zukünftige Abhängigkeit) |
-| 15 | Mehrfach-Strg+A + Zoom/Resize | `createPaginationPlugin()` reagiert auf Layout, nicht auf Selektion; `AllSelection` bleibt bei reiner Neuberechnung ohne Doc-Änderung unangetastet | §9.1 Testfall 10 (implizit, da Performance-Test auch scrollt); optional eigener Zusatztest, falls Kapazität vorhanden |
-| 16 | Kein globaler `contextmenu`-Handler | Bestätigt per Grep (Abschnitt 0) | §9.1 Testfall 11 |
-| 17 | Datenschutz | Keine Selektions-Telemetrie vorhanden, kein Handlungsbedarf | kein Test nötig (siehe `no-clipboard-logging.test.ts`-Muster aus `kopieren-code.md` als generischer Schutz, falls künftig ergänzt) |
+| Formatierung über gesamtes Dokument je Lauf | `reader.ts`/`writer.ts` iterieren generisch über `body.content`, kein „erster/letzter Block"-Sonderfall | analog `reader.ts`/`writer.ts` | Vollständig, kein Bedarf |
+| `colspan`/`rowspan` nach Strg+A+Formatierung | `writer.ts` (`w:gridSpan`/`w:vMerge`, verifiziert Zeilen 174/187–188), `reader.ts` | `writer.ts` (`table:number-columns-/rows-spanned`, Zeilen 150–151), `reader.ts` | Reader/Writer vollständig, kein Bedarf — **aber** die UI (`Toolbar.tsx`, `insertTable(2,2)`) kann selbst keine gemergte Zelle erzeugen; der Testnachweis läuft daher über Fixture-Upload (§6.2 Testfall 4b) bzw. direkt gebautes doc-JSON (§6.2a), nicht über eine per Editor gebaute Tabelle (Korrektur J) |
+| Vollständige Löschung → valide leere Datei | Schema `doc: 'block+'` garantiert ≥ 1 leeren Absatz (Fund 3) | analog | Vollständig, kein Bedarf |
+| Bilder in `AllSelection`-Formatierung unverändert | `setAlign` überspringt `image`; `docx/imageCollector.ts` je Node unabhängig | analog `odt/imageCollector.ts` | Vollständig, kein Bedarf |
+
+Einziger indirekter Blocker: der Cross-Format-Export in `DocumentWorkspace.tsx` (5.3) — liegt an
+der UI, nicht an Reader/Writer (die sind cross-format-fähig).
 
 ---
 
-## 11. Reihenfolge der Umsetzung
+## 10. Playwright-Konfiguration
+
+**Empfohlene reale Änderung** (im Unterschied zur Vorfassung, die keine für nötig hielt): Da die
+Projekte `Desktop Safari (Clipboard)` und `Desktop Firefox (Clipboard)` inzwischen existieren und
+auf `testMatch: /clipboard.*\.spec\.ts/` gescoped sind, erfassen sie `select-all*.spec.ts` nicht.
+Um Cmd+A / den WebKit-`selectAll`-Codepfad auf **Desktop** (statt nur touch-emuliert über
+`Tablet`) abzudecken — genau wie `alles-auswaehlen-req.md` Frage 4 es vorsieht — beide `testMatch`
+erweitern:
+```ts
+testMatch: /(clipboard.*|select-all)\.spec\.ts/,
+```
+**Nicht** die naheliegendere `/(clipboard|select-all).*\.spec\.ts/` verwenden (Korrektur I,
+Abschnitt 1): dort matcht `.*` **nach** der Gruppe auch beliebigen Text zwischen `select-all` und
+`.spec.ts`, sodass die Regex **auch** `select-all-roundtrip.spec.ts` erfasst — genau die Datei,
+die laut nächstem Absatz bewusst ausgeschlossen bleiben soll. Die korrigierte Form verschiebt
+`.*` in die `clipboard`-Alternative hinein, sodass `select-all` nur bei **exakt** anschließendem
+`.spec.ts` matcht (`select-all.spec.ts` ja, `select-all-roundtrip.spec.ts` nein), während
+`clipboard.spec.ts` **und** `clipboard-roundtrip.spec.ts` weiterhin beide erfasst bleiben (sonst
+träte eine stille Regression der bestehenden Desktop-Safari/Firefox-Clipboard-Abdeckung ein).
+Unabhängig verifiziert durch den companion-QA-Plan `alles-auswaehlen-qa.md` §6.5 (Korrektur K9).
+
+Danach läuft der Tastatur-Kern von `select-all.spec.ts` zusätzlich auf Desktop-WebKit und
+Desktop-Firefox. `select-all-roundtrip.spec.ts` bleibt bewusst **außen vor**, weil dessen
+Clipboard-/Download-Schritte auf diesen Engines unzuverlässig sind (Cross-Engine-Download-
+Handling, dieselbe Einschränkung wie bei `clipboard-roundtrip.spec.ts`); der reine Tastatur-Kern
+genügt für die Frage-4-Abdeckung.
+
+Kein neues Projekt anlegen (vermeidet doppelte CI-Laufzeit für dasselbe Gerät). Ist die
+`testMatch`-Erweiterung nicht erwünscht, bleibt „echtes Desktop-macOS/Cmd+A" ein dokumentierter
+offener Punkt (nicht stillschweigend als erledigt markieren).
+
+---
+
+## 11. Grenzfälle-Mapping (`alles-auswaehlen-req.md` Abschnitt 3, vollständig)
+
+| # | Grenzfall | Beleg | Test (neu, sofern nicht bereits abgedeckt) |
+|---|---|---|---|
+| 1 | Leeres Dokument | `AllSelection` + `doc: 'block+'` (Fund 3) | §6.1 Testfall 2, §6.4 |
+| 2 | Wiederholtes Strg+A | `AllSelection.eq` (Abschnitt 4) | §6.1 Testfall 3, §6.4 |
+| 3 | Cursor in Tabellenzelle | Frage 2 = (a) (Fund 3) | §6.1 Testfall 4 |
+| 4 | Nur-Bild-Dokument | `setAlign` überspringt `image` | §6.1 Testfall 5, §6.4 |
+| 5 | Strg+A → Tippen | Standard-Replace | §6.1 Testfall 6 |
+| 6 | Strg+A → Entf/Backspace | `AllSelection.replace` (Fund 3) | §6.1 Testfall 1; **Strg+X-Variante bereits** in `cut.spec.ts` Testfall 4 |
+| 7 | Regressions-Pflichtfall | `reconcileSelectionOnClick` unverändert | **bereits abgedeckt:** `selection-regression.spec.ts` (4 Tests) + `cut.spec.ts` Testfall 5 |
+| 8 | Strg+A → Undo | `tr.steps.length === 0` (Fund 2) | §6.1 Testfall 7, §6.4 |
+| 9 | IME-Komposition | View-natives Verhalten | §6.1 Testfall 8 |
+| 10 | Fokus außerhalb Editor | Keymap nur auf `view.dom` | §6.1 Testfall 9 (Strg+X-Analogon bereits `cut.spec.ts` Grenzfall 14) |
+| 11 | Großes Dokument | `AllSelection` O(1) | §6.1 Testfall 10 |
+| 12 | Strg+A → Kopieren/Ausschneiden | siehe `kopieren`/`ausschneiden` | **bereits abgedeckt** (Abschnitt 3); Verkettung §6.2 Testfall 5/7; `colspan`/`rowspan`-Erhalt zusätzlich §6.2a |
+| 13 | Kopf-/Fußzeile/Fußnoten | keine eigene Editor-Instanz (`WordEditor.tsx` lädt nur `doc.content.body`) | keiner (außerhalb Scope, §15) |
+| 14 | Track-Changes | nicht implementiert (Phase 3) | keiner (außerhalb Scope) |
+| 15 | Mehrfach-Strg+A + Zoom/Resize | `createPaginationPlugin()` reagiert auf Layout, nicht Selektion | §6.1 Testfall 10 (implizit); optionaler Zusatztest |
+| 16 | Kein globaler `contextmenu`-Handler | nur Kommentar (Abschnitt 0) | §6.1 Testfall 11 |
+| 17 | Datenschutz | keine Selektions-Telemetrie | kein Test nötig |
+
+---
+
+## 12. Reihenfolge der Umsetzung
 
 1. `src/formats/shared/editor/__tests__/select-all.test.ts` — schnellste, risikoärmste
-   Absicherung zuerst (reine State-/Transform-Prüfungen, kein Browser nötig).
-2. `tests/e2e/select-all.spec.ts` — Kernanforderung dieses Tickets (Abschnitt 9.1).
-3. `tests/e2e/selection-regression.spec.ts` — zwei neue Tests ergänzen (Abschnitt 9.3); dabei
-   **zwingend** die drei bestehenden Tests unverändert lassen und weiterhin grün laufen
-   lassen (Pflichtbestandteil laut Anforderung Abschnitt 2.6).
-4. `tests/e2e/select-all-roundtrip.spec.ts` — Rundreise-Tests, mit `test.fixme(...)` für die
-   drei cross-format-blockierten Fälle (Abschnitt 9.2, Testfälle 6–8).
-5. `specs/alles-auswaehlen-req.md` Abschnitt 8 — die vier Entscheidungen aus Abschnitt 1 dieses
-   Plans nachtragen, Status **erst nach** grünem Lauf aller Tests aus Schritt 1–4 von „nicht
-   vertrauenswürdig“ auf „verifiziert“ heben.
-6. Optional (keine Pflicht für dieses Ticket): Kommentar-Ergänzung in `WordEditor.tsx` über
-   `keymap(baseKeymap)` (Abschnitt 4.1).
+   Absicherung zuerst (State-/Transform-Prüfungen, kein Browser), nach dem `commands.test.ts`-Muster.
+2. `src/formats/docx/__tests__/select-all-roundtrip.test.ts` +
+   `src/formats/odt/__tests__/select-all-roundtrip.test.ts` (6.2a) — ebenfalls Vitest, kein
+   Browser; klärt den `colspan`/`rowspan`-Fall (Korrektur J) unabhängig von Schritt 3/4, bevor
+   der langsamere E2E-Weg drankommt.
+3. `tests/e2e/select-all.spec.ts` — Kernauftrag (Abschnitt 6.1). Vor dem Schreiben jedes
+   Testfalls Abschnitt 3 prüfen, um Duplikate mit `cut.spec.ts`/`clipboard.spec.ts` zu vermeiden.
+4. `tests/e2e/select-all-roundtrip.spec.ts` — Formatier-Rundreisen (6.2), inkl. Testfall 4a/4b
+   (Korrektur J: 4b lädt eine vorgefertigte Fixture mit gemergter Zelle hoch), Cross-Format als
+   `test.fixme(...)` + Same-Format-Ersatz.
+5. `playwright.config.ts` — `testMatch` beider Clipboard-Projekte auf
+   `/(clipboard.*|select-all)\.spec\.ts/` erweitern (Abschnitt 10, Korrektur I — **nicht** die
+   naheliegendere `/(clipboard|select-all).*\.spec\.ts/`, die `select-all-roundtrip.spec.ts`
+   ungewollt mit hineinzöge); `select-all.spec.ts` auf Desktop-WebKit/Firefox grün bestätigen.
+6. (Optional) `selection-regression.spec.ts` — höchstens der eine „Kopieren-ohne-Fett"-Test
+   (6.3), **nur** falls literale §2.6-Deckung gefordert; bestehende 4 Tests unverändert lassen.
+7. (Optional) `WordEditor.tsx` — Klarstellungskommentar (6.5).
+8. `specs/alles-auswaehlen-req.md` Abschnitt 8 um die Entscheidungen (Abschnitt 2) ergänzen;
+   Backlog-Status **erst nach** grünem Lauf von Schritt 1–5 von „nicht vertrauenswürdig" auf
+   „verifiziert" heben.
 
 ---
 
-## 12. Abnahmekriterien — Abgleich mit `alles-auswaehlen-req.md` Abschnitt 8, Punkt 5
+## 13. Abnahmekriterien — Abgleich mit `alles-auswaehlen-req.md` Abschnitt 8, Punkt 5
 
-- **„Jeder Testfall aus Abschnitt 1, 3 und 6 als automatisierter, dauerhaft in der Suite
-  verbleibender Test existiert und grün ist“** → Abschnitt 9.1/9.4 dieses Plans, Mapping in
-  Abschnitt 10.
-- **„Die drei bestehenden Selection-Sync-Regressionstests weiterhin grün sind und um die
-  Ausschneiden/Kopieren-Variante ergänzt wurden“** → Abschnitt 9.3, Schritt 3 in Abschnitt 11
-  garantiert, dass die drei Bestandstests unangetastet bleiben.
-- **„Rundreise-Anforderung aus Abschnitt 4 für beide Formate und beide
-  Konvertierungsrichtungen nachgewiesen“** → Teilweise: Testfälle 1–5, 9 vollständig
-  umsetzbar (Abschnitt 9.2); Testfälle 6–8 (Cross-Format) bleiben **blockiert**, bis der in
-  Abschnitt 3.3 referenzierte, fremde Blocker gelöst ist — das ist kein Widerspruch zu diesem
-  Plan, sondern eine korrekt dokumentierte Abhängigkeit (analog zu `kopieren-code.md`/
-  `ausschneiden-code.md`, die denselben Blocker für ihre jeweiligen Cross-Format-Testfälle
-  ebenfalls offen lassen mussten).
-- **„Visueller Kontrast-Check durchgeführt und dokumentiert“** → Abschnitt 9.5; erwarteter
-  Ausgang bereits durch Codeanalyse (Fund 4) vorhergesagt, muss aber trotzdem einmal real
-  beobachtet werden, bevor der Screenshot-Test als Baseline gilt.
-- **„Offene Fragen 1–4 beantwortet und in die Datei nachgetragen“** → Abschnitt 1 dieses
-  Plans, wörtlich übernehmbar.
+- **„Jeder Testfall aus Abschnitt 1, 3 und 6 als dauerhafter Test, grün"** → teils neu
+  (§6.1/§6.4, Mapping §11), teils **bereits** durch `cut.spec.ts`/`clipboard.spec.ts`/
+  `selection-regression.spec.ts` erfüllt (Abschnitt 3) — kein Duplikat nötig.
+- **„Drei [recte: vier] Selection-Sync-Regressionstests grün, um Ausschneiden/Kopieren-Variante
+  ergänzt"** → Ausschneiden-Variante **bereits** `cut.spec.ts` Testfall 5; Kopieren-Variante
+  **bereits** `selection-regression.spec.ts` Test 4; literale „Kopieren-ohne-Fett"-Ergänzung
+  optional (6.3). Die vier bestehenden Tests bleiben unverändert grün.
+- **„Rundreise Abschnitt 4 für beide Formate/Richtungen"** → §6.2 Testfälle 1–5, 7 vollständig
+  (Testfall 5 zweigeteilt in 4a/4b, Korrektur J); `colspan`/`rowspan`-Formatierungsfall zusätzlich
+  browserunabhängig über §6.2a abgesichert; 6–8 (Cross-Format) via `test.fixme(...)` +
+  Same-Format-Ersatz, bis der Blocker (5.3) gelöst ist.
+- **„Visueller Kontrast-Check Light/Dark durchgeführt und dokumentiert"** → §6.1 Testfall 13;
+  erwarteter Ausgang (Fund 4) vorhergesagt, aber real zu beobachten, bevor die Baseline gilt.
+- **„Fragen 1–4 beantwortet und nachgetragen"** → Abschnitt 2; Frage 4 jetzt konkret umsetzbar
+  (Abschnitt 10), nicht mehr nur deferrt.
 
 ---
 
-## 13. Was noch offen bleibt (zurück an `alles-auswaehlen-req.md`/das Backlog zu melden)
+## 14. Zusammenfassung der Datei-Änderungen (Schnellreferenz)
 
-- **Frage-3-Koordinationsrisiko (Abschnitt 3.2):** Vier unabhängige Pläne
-  (`fett-code.md`, `kursiv-code.md`, `durchgestrichen-code.md`, `unterstrichen-einfach-code.md`)
-  ändern potenziell dieselbe neue Funktion in `commands.ts`/dieselbe Zeile in `Toolbar.tsx`
-  mit unterschiedlichen Implementierungsdetails. Empfehlung: einen dieser vier Pläne als
-  kanonisch bestimmen, bevor mit der Umsetzung eines davon begonnen wird.
-- **Cross-Format-Export-UI fehlt weiterhin** (Abschnitt 3.3) — bereits in `kopieren-code.md`
-  Abschnitt 3.4 und `ausschneiden-code.md` Abschnitt 3.5 gemeldet, hier zum dritten Mal
-  bestätigt unverändert vorgefunden. Blockiert drei Testfälle dieses Tickets zusätzlich zu
-  den bereits dort gemeldeten.
-- **Fehlendes Default-ProseMirror-CSS** (`.ProseMirror-selectednode` u. Ä., Abschnitt 0,
-  Fund 5) — kein Blocker für „Alles auswählen“, aber ein real existierender, bisher
-  unentdeckter Darstellungsfehler bei Einzelklick-Bildauswahl. Gehört zu
-  `bild-einfuegen-req.md`/`bild-groesse-aendern-req.md`, hier nur zur Kenntnisnahme vermerkt.
-- **Kopf-/Fußzeile/Fußnote/Kommentar** (Grenzfall 13) bleibt wie im Anforderungsdokument selbst
-  vermerkt zurückgestellt — keine eigene Editor-Instanz vorhanden (`WordEditor.tsx` lädt
-  ausschließlich `doc.content.body`).
-- **Track-Changes-Abhängigkeit** (Grenzfall 14) — Phase 3, noch nicht umgesetzt, keine Aktion
-  in diesem Ticket.
-- **Echtes macOS/Cmd+A** bleibt ein offener Punkt, solange kein `Desktop Safari`-Playwright-
-  Projekt existiert (Abschnitt 1, Frage 4) — nicht stillschweigend als erledigt zu betrachten.
+- **Neu:** `tests/e2e/select-all.spec.ts`, `tests/e2e/select-all-roundtrip.spec.ts`,
+  `src/formats/docx/__tests__/select-all-roundtrip.test.ts`,
+  `src/formats/odt/__tests__/select-all-roundtrip.test.ts`,
+  `src/formats/shared/editor/__tests__/select-all.test.ts`.
+- **Geändert (empfohlen):** `playwright.config.ts` (`testMatch` ×2, korrigierte Regex — Korrektur I),
+  `specs/alles-auswaehlen-req.md` (Abschnitt 8).
+- **Optional:** `tests/e2e/selection-regression.spec.ts` (≤ 1 Test), `WordEditor.tsx` (Kommentar).
+- **Bewusst NICHT geändert:** `commands.ts`, `Toolbar.tsx`, `schema.ts`, `src/index.css`,
+  `DocumentWorkspace.tsx`, `src/formats/docx/writer.ts`/`reader.ts`,
+  `src/formats/odt/writer.ts`/`reader.ts` (nur ihre Tests werden ergänzt, siehe 6.0).
+
+---
+
+## 15. Was noch offen bleibt (zurück an Backlog/Anforderung)
+
+- **Frage-3-Koordinationsrisiko** (5.2): vier Tickets ändern dieselbe `Toolbar.tsx`-Zeile 69 /
+  potenziell dieselbe neue `commands.ts`-Funktion mit unterschiedlichen Details. Eines
+  (empfohlen `kursiv-code.md`) als kanonisch bestimmen, bevor eines umgesetzt wird.
+- **Cross-Format-Export-UI fehlt weiterhin** (5.3) — bereits von Kopieren/Ausschneiden gemeldet,
+  hier erneut unverändert vorgefunden. Blockiert §4.2 #6–#8 (mit `test.fixme` + Same-Format-Ersatz
+  überbrückt).
+- **Fehlendes Default-ProseMirror-CSS** (`.ProseMirror-selectednode`, Fund 5) — kein Blocker für
+  „Alles auswählen", aber ein realer Darstellungsfehler bei Einzelklick-Bildauswahl. Gehört
+  `bild-einfuegen`/`bild-groesse-aendern`, hier nur vermerkt.
+- **Kopf-/Fußzeile/Fußnote/Kommentar** (Grenzfall 13) — keine eigene Editor-Instanz vorhanden,
+  zurückgestellt.
+- **Track-Changes** (Grenzfall 14) — Phase 3, nicht umgesetzt.
+- **Echtes physisches macOS/Cmd+A** bleibt außerhalb des CI-Scopes; der WebKit-**Desktop**-
+  Codepfad ist nach der `testMatch`-Erweiterung (Abschnitt 10) jedoch abgedeckt — deutlich mehr
+  als die Vorfassung für möglich hielt.

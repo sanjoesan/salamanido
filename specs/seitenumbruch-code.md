@@ -1,120 +1,169 @@
 # Umsetzungsplan „Seitenumbruch einfügen" — dateigenau, gegen den tatsächlichen Code geprüft
 
 Bezug: `E:\docs\specs\seitenumbruch-req.md` (Anforderung), `E:\docs\FEATURE-SPEC-DOCX-ODT.md`
-(Rahmenbedingungen, Abschnitte 2/8/15/17/18/19/20/21). Code-Stand geprüft am 2026-07-04 in
-`E:\docs` (kein Git-Repo; Datei-Inhalte direkt gelesen, alle Zeilenangaben unten gegen den
-tatsächlichen Dateiinhalt verifiziert, nicht aus der Anforderungsdatei übernommen).
+(Rahmenbedingungen, Abschnitte 2/8/15/17/18/19/20/21). Code-Stand **erneut** direkt gelesen und
+verifiziert am 2026-07-04 in `E:\docs` (kein Git-Repo im Sinne von `git status`, aber
+`git log` vorhanden; alle Zeilenangaben unten wurden gegen den **aktuellen** Dateiinhalt
+geprüft, nicht aus einer früheren Fassung übernommen).
 
-Rolle dieses Dokuments: legt fest, was am **bestehenden Code** fehlt (Abschnitt 0 bestätigt
-den Befund aus `seitenumbruch-req.md` Abschnitt 0 und ergänzt ihn um mehrere beim eigenen
-Nachprüfen zusätzlich gefundene, für die Umsetzung entscheidende Tatsachen), trifft die
+Rolle dieses Dokuments: legt fest, was am **bestehenden Code** fehlt bzw. falsch ist, trifft die
 Architekturentscheidung zum Datenmodell (Abschnitt 1), spezifiziert Schema/Commands
-(Abschnitte 2–3), Editor-Verdrahtung/Toolbar/Visualisierung (Abschnitte 4–7), die
-Import-/Export-Anpassungen für OOXML/DOCX (Abschnitt 8–9) und ODF/ODT (Abschnitt 11–12),
-inklusive eines neuen kleinen Shared-Moduls (Abschnitt 10), und schließt mit
-Grenzfall-Mapping, Testplan und Abnahme-Checkliste (Abschnitte 13–16).
+(Abschnitte 2–3), Editor-Verdrahtung/Toolbar/Visualisierung/Paginierung (Abschnitte 4–7), die
+Import-/Export-Anpassungen für OOXML/DOCX (Abschnitte 8–9) und ODF/ODT (Abschnitte 11–12),
+inklusive eines neuen kleinen Shared-Moduls (Abschnitt 10), und schließt mit Grenzfall-Mapping,
+Testplan und Abnahme-Checkliste (Abschnitte 13–16).
 
 ---
 
-## 0. Bestätigung des Codebefunds aus `seitenumbruch-req.md` Abschnitt 0 + Zusatzbefunde
+## 0.0 Korrekturen gegenüber der vorherigen Fassung dieses Dokuments
 
-### 0.1 Bestätigt
+Diese Datei existierte bereits, wurde aber **vor** mehreren Umbauten am Editor-/Reader-/
+Writer-Code geschrieben (u. a. `insertHardBreak`/`Shift-Enter`, `cutSelection`/`Shift-Delete`,
+`unsupported_block`, der `collectRuns`/`decodeRunElement`-Split im DOCX-Reader, der
+`listContext`-Umbau im DOCX-Writer, der `tableNames`-Parameter im ODT-Writer, `strike`/
+`textColor`/`highlight`). Ihre Zeilenangaben und mehrere Code-Schnipsel waren dadurch **veraltet
+und teils direkt falsch**. Beim erneuten Nachprüfen gegen den echten Code wurden folgende
+Punkte korrigiert — jeder einzelne würde bei wörtlicher Umsetzung der alten Fassung entweder
+den Build brechen oder bestehende Funktionen zerstören:
 
-Gegen den tatsächlichen Dateiinhalt geprüft, Befund aus der Anforderungsdatei **vollständig
-bestätigt**:
+1. **Keymap-Regression (Abschnitt 4):** Die alte Fassung zeigte ein `keymap({...})`, das
+   `'Shift-Enter': insertHardBreak()` **und** `'Shift-Delete': cutSelection(...)` **weggelassen**
+   hätte — beides ist heute vorhanden (`WordEditor.tsx:97` bzw. `:106`) und würde beim
+   Ersetzen gelöscht. Korrigiert: nur additiv ergänzen.
+2. **DOCX-`<w:br>`-Stelle (Abschnitt 9.2):** Das `w:br`-Handling liegt **nicht mehr** in
+   `decodeParagraphRuns` (Z. 132–133 der alten Fassung), sondern in `decodeRunElement`
+   (`reader.ts:177–178`). `decodeParagraphRuns` (`:218–222`) delegiert heute an `collectRuns`.
+3. **`RunLike` (Abschnitt 9.1):** hat heute bereits die Variante `'unsupported'` samt
+   `unsupportedKind`/`unsupportedBlocks` (`reader.ts:117–125`). `'pageBreak'` wird **ergänzt**,
+   nicht die alte, zu kleine Union ersetzt.
+4. **`paragraphToBlocks` (Abschnitt 9.3):** hat heute einen `depth`-Parameter, behandelt
+   `unsupported`-Runs **und** wird von **drei** Stellen aufgerufen (inkl. der Textbox-Rekursion
+   in `decodeDrawingOrPict`, `reader.ts:161–163`), nicht nur zwei. Alle drei müssen bei einer
+   Signaturänderung mitgezogen werden.
+5. **`runsToInline` (Abschnitt 9.3):** ist heute **allowlist**-basiert
+   (`r.kind === 'text' || r.kind === 'break'`, `reader.ts:282–287`) — `pageBreak` fällt damit
+   automatisch heraus, **keine Änderung nötig**. Die alte, denylist-basierte Umschreibung
+   (`kind !== 'image' && kind !== 'pageBreak'`) hätte `unsupported`-Runs fälschlich in den
+   Inline-Text durchgelassen.
+6. **DOCX-Writer (Abschnitt 8):** der `paragraph`-Zweig nutzt heute `listContext`
+   (`writer.ts:112–116`), nicht die alte Variable `listNumId`.
+7. **ODT-Writer (Abschnitt 11):** `blockToOdt` hat heute einen vierten Parameter
+   `tableNames: TableNameSequence` (`writer.ts:85`).
+8. **Shared-Helfer-Präzedenz (Abschnitt 10):** die alte Fassung berief sich auf ein
+   `src/formats/shared/imageFallback.ts` — **das existiert nicht**. Die real existierenden,
+   Format-übergreifend geteilten, PM-/React-freien Helfer sind `shared/zipDeterminism.ts`
+   (von beiden Writern importiert) und `shared/validateDocument.ts` (von beiden Readern).
+9. **`ListMarker` (Abschnitt 9.5):** trägt heute zusätzlich `ilvl: number`
+   (`reader.ts:289–292`); synthetische Marker müssen `{ numId: null, ilvl: 0 }` sein.
+10. **Leere Absätze ohne `content: []` (Abschnitte 9.5/10):** beide Reader lassen für leere
+    Absätze das `content`-Feld **bewusst weg** (`emptyParagraph()`, `reader.ts:224–226` DOCX /
+    `:93–95` ODT; Begründung im Code: `Node.toJSON()`-Parität, sonst `toEqual`-Bruch bei der
+    Leerdokument-Rundreise). Synthetische Umbruch-Absätze müssen dieselbe Form haben
+    (`content` weglassen), nicht `content: []` setzen.
+11. **`removePageBreak*` (Abschnitt 3.4):** vereinfacht zu **reinem Attribut-Löschen** (eine
+    `setNodeAttribute`-Transaktion) statt der fragilen `state.apply(tr)`+Step-Replay-plus-
+    `joinBackward/joinForward`-Konstruktion der alten Fassung — einfacher, sicherer, erfüllt 3.9
+    trivial und ist für „Umbruch entfernen" sogar korrekter (entfernt genau den Umbruch, nichts
+    sonst; Begründung in 3.4).
+12. **ODT-Reader `fo:break-after` (Abschnitt 12.4):** sauberere Umsetzung — das
+    „endet-mit-break-after"-Signal wird direkt im Top-Level-Loop aus dem Style-Namen des Kindes
+    gelesen, **ohne** das in der alten Fassung vorgeschlagene, exception-anfällige
+    Pseudo-Attribut `breakAfterHint` durch `elementToBlocks` zu fädeln.
+13. **Fixture-Zahlen (Abschnitt 0.3):** durch Entpacken der echten ZIPs korrigiert (siehe dort):
+    `60329.docx` = **3×** `lastRenderedPageBreak` **und 85×** einfaches `<w:br/>` (alte Fassung
+    nannte nur „3×", die Anforderungsdatei fälschlich „1×"); `pagebreaks.odt` = **2×**
+    `fo:break-before` **+ 1×** `fo:break-after`; `text-extract.odt` = **2×** `soft-page-break`.
+14. **Bestehende Testdateien (Abschnitt 14):** `commands.test.ts` **und** `pagination.test.ts`
+    existieren bereits (`src/formats/shared/editor/__tests__/`) — sie werden **erweitert**, nicht
+    neu angelegt (die alte Fassung nannte `commands.test.ts` „(neu)").
+15. **Zeilennummern `WordEditor.tsx` (Re-Verifikation 2026-07-05):** Der Datei-Kopf ist seit der
+    vorigen Prüfung um ~8 Zeilen gewachsen (zusätzlicher Kommentarblock im `keymap`). Korrigiert
+    auf den echten Stand: `keymap({...})` **85–107**, `keymap(baseKeymap)` **108**, Plugins-Array
+    **83–114**, `Shift-Enter` **97**, `Shift-Delete` **106** (vorher 77–99/100/75–106/89/98). Die
+    Import-Zeile (Z. 12) und `reconcileSelectionOnClick` (43–50) sind unverändert korrekt.
+    **Load-bearing bleibt das Verhalten, nicht die Zahl** — alle übrigen Datei/Zeilen-Angaben
+    (Schema, Commands, Pagination, DOCX/ODT-Reader+Writer, `styleRegistry`, `pageLayout`,
+    `index.css`) wurden am 2026-07-05 erneut gegen den echten Dateiinhalt geprüft und stimmen; die
+    `prosemirror-transform ^1.12.0`-Dependency und der `canSplit`-Export sind bestätigt; alle
+    realen Fixtures aus 0.3 wurden per Entpacken re-gezählt und stimmen exakt (saut_page 2+1,
+    60329 3×lastRendered/85×`<w:br/>`, pagebreaks 2×before/1×after/1×soft, text-extract 2×soft/0,
+    no_pagebreak 1×before-in-Zelle).
+16. **Zwei durch tatsächliches Durchrechnen des eigenen Pseudocodes gefundene Logikfehler dieser
+    Fassung, jetzt korrigiert (dritte, kritische Prüfrunde):**
+    - **9.3, `paragraphToBlocks`:** die vorherige Version dieses Abschnitts rief den finalen
+      `flush()` nur auf, wenn `endsWithPageBreak` falsch war (`if (!endsWithPageBreak) flush()`).
+      Durchgerechnet an `<w:p><w:r><w:t>foo</w:t></w:r><w:r><w:br w:type="page"/></w:r>
+      <w:r><w:t>bar</w:t></w:r></w:p>` (ein `w:br[type=page]`, gefolgt von **weiterem Text im
+      selben Absatz** — laut OOXML zulässig, auch wenn keine der beiden Pflicht-Fixtures aus 0.3
+      diesen Fall enthält) hätte das den finalen `buffer` (`"bar"`) **stillschweigend verworfen**,
+      da `pendingBreakBefore` zu diesem Zeitpunkt noch `true` war. Behoben: `endsWithPageBreak`
+      wird **vor** dem letzten `flush()` ausgewertet (`pendingBreakBefore && buffer.length === 0`),
+      der letzte `flush()` läuft danach **unbedingt**.
+    - **7.5, Testfall „resets cumulative height after a forced break":** die vorherige Fassung
+      behauptete `computePageBreakIndices([100, 100, 250], 300, new Set([1]))` ergebe `[1]`. Echtes
+      Durchrechnen des in 7.1 spezifizierten Algorithmus ergibt `[1, 2]` (nach dem erzwungenen
+      Bruch bei Index 1 zählt dessen eigene Höhe, 100, bereits zur neuen Seite; 100+250=350 > 300
+      löst dort **zusätzlich und korrekt** einen Überlauf-Bruch aus) — die Testerwartung war
+      schlicht falsch, kein Fehler im Algorithmus. Behoben durch Ersetzen von `250` durch `150`
+      (100+150=250 ≤ 300, kein zweiter Bruch), womit der Test tatsächlich nur den Reset prüft.
 
-1. `src/formats/shared/schema.ts` (154 Zeilen) kennt `doc`, `paragraph` (9–17), `heading`
-   (19–31), `text` (33), `hard_break` (35–43), `image` (45–72), `bullet_list`/`ordered_list`/
-   `list_item` (74–104), Tabellen-Nodes aus `tableNodes(...)` (106). Kein `page_break`-Node,
-   kein `breakBefore`-Attribut.
-2. `src/formats/shared/editor/commands.ts` (108 Zeilen) hat `setAlign`, `isAlignActive`,
-   `setHeading`, `toggleList`, `liftFromList`, `insertImage`, `insertTable`,
-   `applyMarkColor`/`clearMarkColor` — kein `insertPageBreak`.
-3. `Toolbar.tsx` (247 Zeilen) hat keinen „Seitenumbruch"-Eintrag.
-   `WordEditor.tsx:71–79` bindet `Mod-z`, `Mod-y`, `Mod-Shift-z`, `Enter`
-   (`splitListItem`), `Mod-b`, `Mod-i`, `Mod-u`, dann `keymap(baseKeymap)` (Zeile 80) —
-   kein `Mod-Enter`.
-4. `src/formats/shared/editor/pagination.ts` (116 Zeilen) berechnet Umbrüche ausschließlich
-   aus gemessenen DOM-Höhen (`computePageBreakIndices`, 12–25;
-   `measureAndBuildDecorations`, 33–63) und ist an keiner Stelle mit Dokumentinhalt
-   verknüpft.
-5. `src/formats/docx/writer.ts:58–61` (`inlineToRuns`) erzeugt für `hard_break`
-   ausschließlich `<w:r><w:br/></w:r>` — kein `w:type`. `src/formats/docx/reader.ts` hat
-   keine Fallunterscheidung für `w:type="page"`.
-6. `src/formats/odt/writer.ts:50` erzeugt für `hard_break` nur `<text:line-break/>` — kein
-   `fo:break-before`/`fo:break-after` irgendwo im Writer. `src/formats/odt/reader.ts:36–77`
-   (`parseAutomaticStyles`) liest nur `fo:text-align`, nicht `fo:break-before`/
-   `fo:break-after`.
-7. `grep -rn "page-break\|pagebreak\|seitenumbruch" src tests` (case-insensitiv) liefert nur
-   Treffer in `pagination.ts`/`pagination.test.ts` (anderes Feature, siehe Punkt 4).
+---
 
-### 0.2 Zusatzbefund A (wichtig, ändert die Einschätzung des DOCX-Readers): kein „Ignorieren", sondern aktive Fehlinterpretation
+## 0.1 Bestätigter Codebefund (gegen aktuellen Dateiinhalt)
 
-`seitenumbruch-req.md` Abschnitt 0 Punkt 5 formuliert vorsichtig „wird … entweder komplett
-ignoriert oder (zu verifizieren) fälschlich wie ein normaler Zeilenumbruch behandelt". Das ist
-jetzt verifiziert: **Fall zwei trifft zu.** `src/formats/docx/reader.ts:132–133`
-(`decodeParagraphRuns`):
+Der Kernbefund der Anforderungsdatei (Abschnitt 0: Funktion fehlt vollständig) ist bestätigt.
+`grep -rniE "breakBefore|pageBreak|page_break|break-before|break-after" src --include=*.ts(x)`
+liefert **null** Treffer außerhalb von `pagination.ts`/`pagination.test.ts` (das die rein
+höhenbasierte Automatik betrifft, ein anderes Feature). Im Detail, mit **aktuellen**
+Zeilenangaben:
+
+| Datei | Zeilen | Ist-Zustand |
+|---|---|---|
+| `src/formats/shared/schema.ts` (202 Z.) | `alignAttr` 4; `paragraph` 16–24; `heading` 26–38; `hard_break` 42–56; `image` 58–85; `unsupported_block` 92–113; Listen 115–152; `tableNodes(...)` 154; Marks `strong`/`em`/`underline`/`strike`/`textColor`/`highlight` 158–195 | `paragraph` trägt nur `align`, `heading` nur `level`+`align`. Kein `page_break`-Node, kein `breakBefore`. |
+| `src/formats/shared/editor/commands.ts` (168 Z.) | `alignableTypes` 10; `isInTable` re-exportiert 3+6; `insertHardBreak` 83–90; `cutSelection` 149–166 | kein `insertPageBreak`, kein `removePageBreak*`. |
+| `src/formats/shared/editor/WordEditor.tsx` (185 Z.) | `keymap({...})` 85–107, danach `keymap(baseKeymap)` 108; Plugins-Array 83–114; Import aus `./commands` Z. 12; `reconcileSelectionOnClick` 43–50 | gebunden: `Mod-z/-y/-Shift-z`, `Enter`(splitListItem), **`Shift-Enter`(insertHardBreak, 97)**, `Mod-b/-i/-u`, **`Shift-Delete`(cutSelection, 106)**. `Mod-Enter` **frei**. `Backspace`/`Delete` nur via `baseKeymap`. |
+| `src/formats/shared/editor/Toolbar.tsx` (298 Z.) | `run` 28–31; `ScissorsIcon` (SVG) 33–53; „Tabelle" 277–289; „Bild" 291–294 | kein „Seitenumbruch"-Button. **Es gibt bereits ein eingebettetes SVG-Icon** (`ScissorsIcon`) als Präzedenz — die pauschale „durchgängig Unicode/Emoji"-Behauptung der alten Fassung stimmt nicht mehr. |
+| `src/formats/shared/editor/pagination.ts` (116 Z.) | `computePageBreakIndices` 12–25 (Frühausstieg `if (pageContentHeight <= 0) return []` Z. 13); `measureAndBuildDecorations` 33–63; `sameDecorationSet` 107–115 | rein höhenbasiert, kein Bezug zum Dokumentinhalt, nur 2 Argumente. Spacer-Klasse fix `'page-break-spacer'` (Z. 50). |
+| `src/formats/shared/editor/pageLayout.ts` | `PAGE_CONTENT_HEIGHT_PX` 13; `PAGE_GAP_PX` 16; `pageBackgroundStyle` 23–31 | Editor-„Seite" per Gradient **immer weiß** (Z. 26 `white`), unabhängig vom App-Dark-Mode. |
+| `src/index.css` | `.page-break-spacer` 69–71 (nur `width:100%`; Höhe wird in `pagination.ts` inline gesetzt) | kein `.pm-page-break-before`, kein `--manual`-Modifikator. |
+| `src/formats/docx/writer.ts` (319 Z.) | `inlineToRuns` 41–67 (`hard_break`→`<w:r><w:br/></w:r>` Z. 62); `paragraphPropsXml` 69–72; `blockToDocx(node, images, rels, listContext=null)` 105–156 (`paragraph` 112–118, `heading` 119–124) | kein `<w:br w:type="page"/>`-Pfad. |
+| `src/formats/docx/reader.ts` (555 Z.) | `RunLike` 117–125; `decodeRunElement` 170–184 (`w:br`→`{kind:'break'}` **Z. 177–178**); `collectRuns` 194–216; `decodeParagraphRuns` 218–222; `emptyParagraph` 224–226; `paragraphToBlocks(pEl,…,depth=0)` 229–280; `runsToInline` 282–287; `ListMarker` 289–292; `parseTable` 311–364; `readBodyChildren` 464–485 | **aktive Fehlinterpretation** (siehe 0.2). |
+| `src/formats/odt/writer.ts` (305 Z.) | `blockToOdt(node, styles, images, tableNames)` 85–195 (`paragraph` 87–92 nutzt `PARAGRAPH_ALIGN_STYLE_NAME`, `heading` 93–98 nutzt `headingStyleName`); Imports 4–14 | kein `fo:break-before`/`fo:break-after`. |
+| `src/formats/odt/reader.ts` (409 Z.) | `ParsedStyles` 23–27; `parseAutomaticStyles` 37–78 (paragraph-Zweig 63–67, liest **nur** `fo:text-align` Z. 65); `decodeInline`/`walk` 97–172; `paragraphToBlocks(pEl,styles,depth=0)` 175–213; `elementToBlocks` 250–324 (`text:h` 256–262); `readOfficeTextChildren` 351–355 | liest **weder** `fo:break-before` **noch** `fo:break-after`. |
+| `src/formats/odt/styleRegistry.ts` (103 Z.) | `PARAGRAPH_ALIGN_STYLE_NAME` 61–66; `paragraphAlignStyleDefs` 68–75; `HEADING_FONT_SIZES` 77; `ALIGNS` 78; `headingStyleName` 80–82; `headingStyleDefs` 84–93 | erzeugt Absatz-/Überschrift-Styles nur nach Ausrichtung/Ebene, keine Umbruch-Dimension. |
+
+### 0.2 DOCX-Reader: aktive Fehlinterpretation (bestätigt)
+
+`decodeRunElement` (`reader.ts:177–178`):
 
 ```ts
 } else if (child.namespaceURI === OOXML_NAMESPACES.w && child.localName === 'br') {
-  runs.push({ kind: 'break' })
+  out.push({ kind: 'break' })
 }
 ```
 
-Jedes `<w:br>`-Element — mit oder ohne `w:type="page"` — wird identisch als `{kind: 'break'}`
-gelesen und in `runsToInline` (Zeile 188) zu `{type: 'hard_break'}`. Ein aus einer echten
-Word-Datei importierter manueller Seitenumbruch verschwindet damit nicht nur als *Konzept*,
-er wird **stillschweigend zu einem einfachen Zeilenumbruch degradiert** — genau der in
-Anforderung 3.5 explizit verbotene Fall.
+Jedes `<w:br>` — mit oder ohne `w:type="page"` — wird identisch als `{kind:'break'}` gelesen und
+in `runsToInline` (`:282–287`) zu `{type:'hard_break'}`. Ein echter Word-Seitenumbruch wird also
+**stillschweigend zu einem Zeilenumbruch degradiert** (Anforderung 3.5/0.6, verboten).
+`<w:lastRenderedPageBreak>` fällt heute nur durch Abwesenheit eines Falls **zufällig** korrekt
+durch — muss in einen expliziten, kommentierten, getesteten Fall überführt werden (Abschnitt 9.2).
 
-`<w:lastRenderedPageBreak/>` dagegen wird schon heute **korrekt ignoriert** — allerdings nur,
-weil `decodeParagraphRuns`s `if/else if`-Kette (Zeilen 130–139) keinen Fall dafür hat und der
-Knoten stillschweigend durchfällt. Das ist **richtig durch Zufall**, nicht durch Absicht —
-muss in einen expliziten, kommentierten, getesteten Fall überführt werden (Abschnitt 9.3),
-damit es nicht bei einer künftigen Refaktorierung unbeabsichtigt kaputtgeht.
+### 0.3 Reale Test-Fixtures — vorhanden, Inhalte durch Entpacken der ZIPs **gezählt**
 
-### 0.3 Zusatzbefund B (wichtig, widerspricht `seitenumbruch-req.md` Abschnitt 6 Punkt 5): reale Test-Fixtures mit echten manuellen Seitenumbrüchen sind **bereits im Repo vorhanden**
+Alle folgenden Dateien existieren (`test -f` bestätigt) und ihre Umbruch-Marker wurden per
+`unzip -p … | grep -o … | wc -l` gegen den echten ZIP-Inhalt **gezählt**, nicht geschätzt:
 
-Die Anforderungsdatei geht davon aus, reale Word-/LibreOffice-Fixtures mit manuellem
-Seitenumbruch seien „laut aktueller Repo-Durchsicht nicht vorhanden". Das ist nach
-Durchsicht von `tests/fixtures/external/{docx,odt}/` **nicht zutreffend** — dort liegen
-bereits mehrere brauchbare reale Dateien, nur bisher ungenutzt für dieses Feature (die
-vorhandenen `external-fixtures.test.ts` prüfen nur „importiert ohne Absturz", nicht den
-Seitenumbruch-Inhalt selbst). Verifiziert per Skript (JSZip, Node) gegen die tatsächlichen
-ZIP-Inhalte:
-
-| Datei | Format | Inhalt (verifiziert) |
+| Datei | Verifizierter Inhalt | Rolle |
 |---|---|---|
-| `tests/fixtures/external/docx/saut_page.docx` | DOCX | 2× `<w:br w:type="page"/>` (jeweils als **letzter** Run des jeweiligen `<w:p>`) + 1× einfaches `<w:br/>` mitten in Fließtext (`BLA<w:br/>BLA`) — ideale Positiv-/Negativ-Kombination in einer Datei |
-| `tests/fixtures/external/docx/60329.docx` | DOCX | 3× `<w:lastRenderedPageBreak/>`, **0×** `w:br[type=page]` — sauberer „muss ignoriert werden"-Testfall |
-| `tests/fixtures/external/odt/pagebreaks.odt` | ODT | Automatic-Styles `P1`/`P2` mit `fo:break-before="page"` (einer davon per Kommentar im Fließtext als „(ctrl+return)" markiert, referenziert von `<text:p text:style-name="P1">`/`P2` direkt im Text-Body), **und** `P3` mit `fo:break-after="page"` — einziger real gefundener `break-after`-Beleg, siehe 0.4 |
-| `tests/fixtures/external/odt/AB_pageBreakBefore.odt` | ODT | Zwei Absätze `A`/`B`, `B`s Style trägt `fo:break-before="page"` |
-| `tests/fixtures/external/odt/pageBreakProblem.odt` | ODT | Gleiche Struktur wie `AB_pageBreakBefore.odt` |
-| `tests/fixtures/external/odt/no_pagebreak.odt` **und** `35585_-_no_pagebreak.odt` | ODT | `fo:break-before="page"` auf einem Absatz-Style, der aber **innerhalb einer Tabellenzelle** referenziert wird (`<table:table-cell><text:p text:style-name="ad7a907"/></table:table-cell>`) — siehe 0.5, entscheidend für Grenzfall 4 |
-| `tests/fixtures/external/odt/text-extract.odt` | ODT | Enthält `<text:soft-page-break/>`, **kein** `fo:break-before`/`fo:break-after` irgendwo in der Datei — sauberer „darf nicht fehlinterpretiert werden"-Testfall (Anforderung 3.7) |
+| `tests/fixtures/external/docx/saut_page.docx` | **2×** `<w:br w:type="page"/>`, **1×** einfaches `<w:br/>`, **0×** `lastRenderedPageBreak`, 1× `w:sectPr` | Positiv+Negativ in einer Datei (2 Seitenumbrüche erkennen, 1 Zeilenumbruch **nicht** befördern) |
+| `tests/fixtures/external/docx/60329.docx` | **3×** `<w:lastRenderedPageBreak/>`, **85×** einfaches `<w:br/>`, **0×** `w:br[type=page]` | „lastRendered ignorieren" **und** „85 Zeilenumbrüche bleiben Zeilenumbrüche" (Grenzfall 14) |
+| `tests/fixtures/external/odt/pagebreaks.odt` | **2×** `fo:break-before="page"`, **1×** `fo:break-after="page"`, **1×** `soft-page-break` | alle drei ODF-Kodierungen in einer Datei (belegt, dass `fo:break-after` real vorkommt) |
+| `tests/fixtures/external/odt/AB_pageBreakBefore.odt` | **1×** `fo:break-before="page"` (+1× beiläufiger `soft-page-break`) | sauberer `fo:break-before`-Test |
+| `tests/fixtures/external/odt/pageBreakProblem.odt` | **1×** `fo:break-before="page"` (+1× `soft-page-break`) | zweiter `fo:break-before`-Beleg |
+| `tests/fixtures/external/odt/no_pagebreak.odt` **und** `35585_-_no_pagebreak.odt` | **1×** `fo:break-before="page"` **innerhalb einer `<table:table-cell>`** | reale Evidenz Grenzfall 4 (LO-Bug 35585: dort rendert LO selbst **keinen** Umbruch) |
+| `tests/fixtures/external/odt/text-extract.odt` | **2×** `soft-page-break`, **0×** `fo:break-before`/`-after`, enthält eine Tabelle | „darf nicht als manueller Umbruch fehlinterpretiert werden" (3.7) |
 
-Diese Dateien werden in Abschnitt 14.3 als Pflicht-Fixtures für die realen Rundreise-/
-Erkennungstests verwendet — **Anforderung Abschnitt 6 Punkt 5 gilt damit als bereits
-erfüllbar ohne neue Dateien**, das dortige „müssen … aufgenommen werden" ist bereits
-erledigt vorgefunden.
-
-### 0.4 Zusatzbefund C: `fo:break-after` kommt in echten Dateien vor und darf nicht ignoriert werden
-
-`pagebreaks.odt`s Style `P3` (`style:paragraph-properties style:page-number="auto"
-fo:break-after="page"`) zeigt, dass reale ODF-Erzeugung (hier vermutlich LibreOffice, über
-Absatzattribut statt Strg+Eingabe) auch `fo:break-after` statt `fo:break-before` verwendet.
-`seitenumbruch-req.md` Abschnitt 3.7/3.6 erwähnt nur `fo:break-before` — wird hier bewusst um
-`fo:break-after` erweitert (Abschnitt 12.2), sonst ginge beim Import dieser realen Datei ein
-Umbruch still verloren (Verstoß gegen `FEATURE-SPEC-DOCX-ODT.md` Abschnitt 18).
-
-### 0.5 Zusatzbefund D: reale Evidenz für die Grenzfall-4-Entscheidung (Seitenumbruch in Tabellenzelle)
-
-`no_pagebreak.odt`/`35585_-_no_pagebreak.odt` (Dateiname deutet auf einen dokumentierten
-LibreOffice-Bug „35585" hin) zeigen: ein `fo:break-before="page"` **innerhalb einer
-Tabellenzelle** wird von LibreOffice selbst **nicht** als echter Seitenumbruch gerendert
-(daher der Dateiname „no pagebreak"). Das ist direkte reale Evidenz für die in Abschnitt 3.2
-unten getroffene Design-Entscheidung zu Grenzfall 4 und wird als Regressionstest verwendet
-(Abschnitt 14.1).
+Anforderung Abschnitt 6/0.10 ist damit ohne neue Dateien erfüllbar.
 
 ---
 
@@ -125,65 +174,51 @@ unten getroffene Design-Entscheidung zu Grenzfall 4 und wird als Regressionstest
 
 ### 1.1 Begründung
 
-`seitenumbruch-req.md` Abschnitt 3.3 verlangt explizit, die Wahl zu treffen und zu
-dokumentieren, weil beide Modelle unterschiedliche Cross-Format-Konsequenzen haben:
-
-- **Bildet das ODF-Modell direkt ab** (`fo:break-before` ist selbst schon ein
-  Absatz-Attribut) — der ODT-Export wird dadurch **trivial**: das Attribut sitzt bereits auf
-  genau dem Knoten, dessen Style es braucht, ganz ohne „nächster Absatz"-Suche.
-- **Der in Abschnitt 3.6 der Anforderung antizipierte Fallback („Umbruch am Dokumentende,
-  kein nachfolgender Absatz vorhanden → leeren Absatz anhängen") entfällt für den
-  ODT-Writer vollständig**, weil `breakBefore` bei diesem Modell **immer** auf einem
-  real existierenden Knoten liegt (unser Schema erzwingt `doc: 'block+'`, das Dokument kann
-  nie leer sein) — es gibt nie eine Situation, in der „der nächste Absatz" fehlt, weil das
-  Attribut nie auf „den nächsten Absatz" verweist, sondern immer auf sich selbst. Die vom
-  Anforderungsdokument erwartete Komplexität verschwindet nicht — sie verschiebt sich (siehe
-  1.2) auf die **Reader**-Seite (DOCX-Reader Abschnitt 9.4, ODT-Reader Abschnitt 12.3), wo
-  echte Fremddateien den Umbruch strukturell anders (inline-Run bzw. „vorheriger Absatz
-  bricht danach") codieren können.
-- **Einfügen an der Cursor-Position wird strukturell identisch zu „Enter"**: „Absatz an
-  Cursor-Position teilen, zweiter Teil bekommt das Attribut" (Anforderung 3.1) lässt sich
-  direkt mit `Transform.split` (siehe Abschnitt 3) umsetzen — keine neue
-  Node-Einfüge-Logik nötig, volle Wiederverwendung des in ProseMirror eingebauten
-  Split-Mechanismus samt dessen etabliertem Heading/Listen-Verhalten.
-- **DOCX-Export erfordert einen synthetischen Run** (`<w:br w:type="page"/>` als erster Run
-  des Absatzes) — das ist in der Anforderung selbst als Konsequenz dieser Wahl genannt
-  (Abschnitt 3.3) und wird in Abschnitt 8 umgesetzt.
+- **Bildet das ODF-Modell direkt ab** (`fo:break-before` ist selbst ein Absatz-Attribut) → der
+  ODT-Export wird trivial (Attribut sitzt bereits auf genau dem Absatz, dessen Style es braucht,
+  ohne „nächster-Absatz"-Suche).
+- **Der in Anforderung 3.6 antizipierte Fallback „Umbruch am Dokumentende → leeren Absatz
+  anhängen" entfällt für den ODT-Writer** vollständig: `breakBefore` liegt **immer** auf einem
+  real existierenden Knoten (Schema erzwingt `doc: 'block+'`, `schema.ts:14`, das Dokument ist
+  nie leer). Die Komplexität verschwindet nicht, sondern verschiebt sich auf die **Reader**-Seite
+  (Abschnitte 9.5/12.4), wo Fremddateien den Umbruch strukturell anders codieren.
+- **Einfügen an der Cursor-Position wird strukturell identisch zu „Enter"** (Absatz teilen,
+  zweiter Teil bekommt das Attribut) — direkt über `Transform.split` (Abschnitt 3), volle
+  Wiederverwendung des eingebauten Split-Mechanismus samt Heading-/Listen-Verhalten.
+- **DOCX-Export erfordert einen synthetischen Run** (`<w:br w:type="page"/>` als erster Run des
+  Absatzes) — in der Anforderung (3.3) als Konsequenz dieser Wahl vorgesehen (Abschnitt 8).
 
 ### 1.2 Verworfene Alternative: eigener `page_break`-Block-Node
 
-Wurde geprüft und verworfen: bildet DOCX direkter ab, verlagert aber die vom
-Anforderungsdokument beschriebene Fallback-Komplexität (3.6) auf den ODT-**Writer**
-(Style müsste am „nächsten Geschwister-Knoten" ansetzen, mit Sonderfall „kein nächster
-Knoten vorhanden"). Da ODT band der beiden Zielformate der **originär native** Fall ist
-(`fo:break-before` ist wortwörtlich ein Absatzattribut), hätte diese Alternative die
-Komplexität an die falsche Stelle verschoben. Das Attribut-Modell macht stattdessen den
-DOCX-Reader komplexer (Abschnitt 9), weil dort echte Dateien den Bruch **inline, nicht am
-Absatzanfang** codieren können (siehe `saut_page.docx`-Befund 0.3: beide echten
-Seitenumbrüche stehen als **letzter** Run ihres Absatzes, nicht als eigener, isolierter
-Absatz) — das ist aber ohnehin nötig, unabhängig vom Datenmodell, weil eine Fremddatei
-so aussehen *kann*.
+Bildet DOCX direkter ab, verlagert aber die Fallback-Komplexität (3.6) auf den ODT-**Writer**
+(Style müsste am „nächsten Geschwister" ansetzen, mit Sonderfall „kein nächster Knoten"). Da ODT
+der originär native Fall ist (`fo:break-before` ist wortwörtlich ein Absatzattribut), wäre das die
+falsche Stelle. Das Attribut-Modell macht stattdessen den DOCX-**Reader** komplexer (Abschnitt 9),
+weil echte Dateien den Bruch inline codieren (`saut_page.docx`: beide Umbrüche als **letzter** Run
+ihres Absatzes) — das ist aber ohnehin nötig, unabhängig vom Datenmodell.
 
 ### 1.3 Konsequenz für verschachtelte Container (Listen/Tabellen)
 
-`breakBefore` ist ein Attribut auf `paragraph`/`heading` — es ist damit strukturell
-**überall** gültig, wo diese Node-Typen vorkommen dürfen, also auch verschachtelt in
-`list_item` (`content: 'paragraph block*'`, `schema.ts:99`) und in Tabellenzellen
-(`cellContent: 'block+'`, `schema.ts:106`). Das ist **gewollt** (verhindert Datenverlust
-beim Import realer Dateien wie `no_pagebreak.odt`, die genau das tun) — hat aber
-Konsequenzen für die automatische Paginierung, siehe Abschnitt 7.4.
+`breakBefore` auf `paragraph`/`heading` ist strukturell überall gültig, wo diese Typen
+vorkommen — auch in `list_item` (`content: 'block+'`, `schema.ts:146`) und Tabellenzellen
+(`cellContent: 'block+'`, `schema.ts:154`). Gewollt (verhindert Datenverlust beim Import von
+`no_pagebreak.odt`), hat aber Konsequenzen für die Live-Paginierung (Abschnitt 7.4).
 
 ---
 
-## 2. Schema-Änderungen — `src/formats/shared/schema.ts`
+## 2. Schema — `src/formats/shared/schema.ts`
+
+Neben `alignAttr` (Z. 4) ein zweites Attribut-Fragment einführen:
 
 ```ts
 const alignAttr = { align: { default: 'left', validate: 'string' } }
 const pageBreakAttr = { breakBefore: { default: false, validate: 'boolean' } }
 ```
 
-`paragraph` (aktuell Zeilen 9–17) und `heading` (aktuell Zeilen 19–31) erhalten je
-`...pageBreakAttr` zusätzlich zu `...alignAttr`:
+`paragraph` (16–24) und `heading` (26–38) je um `...pageBreakAttr` erweitern und `toDOM`/`parseDOM`
+so anpassen, dass das Attribut auch einen **internen** Copy/Paste-Roundtrip übersteht (ProseMirror
+serialisiert dabei über `toDOM`/`parseDOM`; ohne das ginge `breakBefore` beim In-App-Kopieren
+still verloren — Anforderung 3.11):
 
 ```ts
 paragraph: {
@@ -198,8 +233,9 @@ paragraph: {
     }),
   }],
   toDOM(node) {
-    const cls = node.attrs.breakBefore ? 'pm-page-break-before' : ''
-    return ['p', { style: `text-align: ${node.attrs.align}`, class: cls }, 0]
+    const attrs: Record<string, string> = { style: `text-align: ${node.attrs.align}` }
+    if (node.attrs.breakBefore) attrs.class = 'pm-page-break-before'
+    return ['p', attrs, 0]
   },
 },
 
@@ -217,25 +253,17 @@ heading: {
     }),
   })),
   toDOM(node) {
-    const cls = node.attrs.breakBefore ? 'pm-page-break-before' : ''
-    return [`h${node.attrs.level}`, { style: `text-align: ${node.attrs.align}`, class: cls }, 0]
+    const attrs: Record<string, string> = { style: `text-align: ${node.attrs.align}` }
+    if (node.attrs.breakBefore) attrs.class = 'pm-page-break-before'
+    return [`h${node.attrs.level}`, attrs, 0]
   },
 },
 ```
 
-`validate: 'boolean'` ist bereits vom vorhandenen Muster gedeckt — geprüft gegen
-`node_modules/prosemirror-model/dist/index.js:2294–2301` (`validateType`): der String wird
-per `typeof value` gegen die Pipe-getrennten Typnamen geprüft, `'boolean'` funktioniert
-identisch zu den bereits verwendeten `'string'`/`'number'`.
-
-Die `parseDOM`/`class`-Ergänzung ist **nicht** von der Anforderung explizit verlangt, aber
-ohne sie ginge das Attribut bei einem **internen** Kopieren/Einfügen innerhalb des Editors
-(ProseMirror serialisiert bei Copy/Paste über `toDOM`/`parseDOM` desselben Schemas) sang-
-und klanglos verloren — ein stiller Datenverlust im Sinne des allgemeinen Grundsatzes aus
-`FEATURE-SPEC-DOCX-ODT.md` Abschnitt 18, auch wenn dafür kein expliziter Testfall in der
-Anforderungsdatei existiert. Günstig mitgenommen, da praktisch kostenlos.
-
-**Keine Änderung** an `hard_break`, `image`, Listen-/Tabellen-Nodes nötig.
+`validate: 'boolean'` ist vom bestehenden Muster gedeckt (`prosemirror-model`s `validateType`
+prüft per `typeof` gegen den String, identisch zu `'string'`/`'number'`). Die `class` wird
+**nur** gesetzt, wenn `breakBefore` wahr ist (kein `class=""` im Normalfall). **Keine Änderung**
+an `hard_break`, `image`, `unsupported_block`, Listen-/Tabellen-Nodes, Marks.
 
 ---
 
@@ -243,27 +271,22 @@ Anforderungsdatei existiert. Günstig mitgenommen, da praktisch kostenlos.
 
 ### 3.1 Vorarbeit: `alignableTypes` exportieren
 
-Zeile 10 (`const alignableTypes = new Set(['paragraph', 'heading'])`) wird zu
-`export const alignableTypes = ...` — exakt die Menge der Node-Typen, die `breakBefore`
-tragen können, ist identisch zu der, die `align` trägt. Kein zweites, potenziell
-divergierendes Set anlegen.
+Z. 10 `const alignableTypes = …` → `export const alignableTypes = …`. Exakt die Typen, die
+`breakBefore` tragen können, sind identisch mit denen, die `align` tragen. `isInTable` und
+`wordSchema` sind bereits importiert (Z. 3/4), `isInTable` wird bereits re-exportiert (Z. 6).
 
 ### 3.2 `insertPageBreak(): Command` — neu
 
-Referenzimplementierung (Kernlogik; Feinschliff/Fehlerfälle beim Schreiben durch die
-Unit-Tests aus Abschnitt 14.1 abzusichern):
-
 ```ts
-import { canSplit } from 'prosemirror-transform'
+import { canSplit } from 'prosemirror-transform' // prosemirror-transform ^1.12.0 ist direkte
+                                                  // Dependency; canSplit ist exportiert (geprüft)
 
 export function insertPageBreak(): Command {
   return (state, dispatch) => {
-    // Grenzfall 4 — durch reale Evidenz gestützt (Zusatzbefund D, Abschnitt 0.5):
-    // LibreOffice selbst rendert fo:break-before innerhalb einer Tabellenzelle NICHT als
-    // echten Seitenumbruch. Word-Parität: Strg+Eingabe in einer Zelle erzeugt dort einen
-    // Zeilenumbruch, keinen Seitenumbruch. Bewusste, dokumentierte Abweichung von einem
-    // "echten" Umbruch, aber kein stiller Fehlschlag (Anforderung 3.10) und keine
-    // Tabellenstruktur-Beschädigung.
+    // Grenzfall 4 (reale Evidenz no_pagebreak.odt/LO-Bug 35585): in einer Tabellenzelle KEIN
+    // echter Seitenumbruch, sondern Zeilenumbruch-Fallback (Word-Parität: Strg+Eingabe in einer
+    // Zelle erzeugt dort einen Zeilenumbruch). Bewusst, dokumentiert, KEIN stiller Fehlschlag
+    // (3.10), KEINE Tabellenstruktur-Beschädigung.
     if (isInTable(state)) {
       if (dispatch) {
         dispatch(state.tr.replaceSelectionWith(wordSchema.nodes.hard_break.create()).scrollIntoView())
@@ -279,33 +302,26 @@ export function insertPageBreak(): Command {
     while (depth > 0 && !alignableTypes.has($pos.node(depth).type.name)) depth--
 
     const insertStandaloneFallback = () => {
-      // Kein paragraph/heading-Vorfahre an der Cursor-Position (z. B. GapCursor direkt
-      // neben einem Bild/einer Tabelle ohne Text drumherum, Grenzfall 12) — statt eines
-      // stillen No-Ops (verboten laut Anforderung 3.10) einen eigenen, leeren Absatz mit
-      // gesetztem Umbruch einfügen.
-      const node = wordSchema.nodes.paragraph.create({ breakBefore: true })
-      tr.insert($pos.pos, node)
+      // Kein paragraph/heading-Vorfahre (z. B. GapCursor neben Bild/Tabelle, Grenzfall 12) —
+      // statt eines verbotenen stillen No-Ops (3.10) einen eigenen leeren Absatz mit Umbruch.
+      tr.insert($pos.pos, wordSchema.nodes.paragraph.create({ breakBefore: true }))
       if (dispatch) dispatch(tr.scrollIntoView())
       return true
     }
-
     if (depth === 0) return insertStandaloneFallback()
 
     const originalType = $pos.node(depth).type
     const atEnd = $pos.end(depth) === $pos.pos
-    // Enter-am-Ende-einer-Überschrift-Parität (Grenzfall 6): das ist exakt die Regel, die
-    // prosemirror-commands' eigenes splitBlock (node_modules/prosemirror-commands/dist/
-    // index.js:402–454, "atEnd && deflt") für normales Enter anwendet — hier bewusst
-    // dieselbe Regel repliziert, damit sich "Seitenumbruch mitten in/am Ende einer
-    // Überschrift" ununterscheidbar von "Enter mitten in/am Ende einer Überschrift"
-    // verhält, wie von der Anforderung gefordert.
+    // Enter-in/-am-Ende-einer-Überschrift-Parität (Grenzfall 6): dieselbe Regel wie
+    // prosemirror-commands' splitBlock (atEnd → Standardabsatz, sonst gleicher Typ), damit sich
+    // "Seitenumbruch in einer Überschrift" ununterscheidbar von "Enter in einer Überschrift"
+    // verhält.
     const afterType = atEnd ? wordSchema.nodes.paragraph : originalType
     const afterAttrs = afterType === wordSchema.nodes.heading ? $pos.node(depth).attrs : undefined
 
-    // Grenzfall 5 (Liste): auch das list_item mitteilen, damit der zweite Teil ein neues
-    // list_item **derselben** Liste wird (Nummerierung bleibt lückenlos) — analog zu
-    // splitListItem, aber mit eigenem breakBefore-Attribut auf dem inneren Absatz statt
-    // reinem Enter-Verhalten. Bewusst NICHT die Liste selbst aufsplitten (siehe 3.3).
+    // Grenzfall 5 (Liste): bis zum list_item mitsplitten, damit der zweite Teil ein neues
+    // list_item DERSELBEN Liste wird (Nummerierung lückenlos). Bewusst NICHT die Liste selbst
+    // aufsplitten (3.3).
     const parentIsListItem = $pos.node(depth - 1)?.type.name === 'list_item'
     const splitDepth = parentIsListItem ? 2 : 1
     const types = parentIsListItem
@@ -326,61 +342,44 @@ export function insertPageBreak(): Command {
 }
 ```
 
-**Wichtig — genau eine Transaktion:** `deleteSelection()`, `split()` und
-`setNodeAttribute()` laufen alle auf demselben `tr`-Objekt (`Transform`-Methodenkette,
-keine separaten `dispatch`-Aufrufe) — damit ist Anforderung 3.9 („ein einziger
-Undo-Schritt") strukturell erfüllt, nicht nur zufällig, weil `prosemirror-history` jede
-`dispatch`-Transaktion grundsätzlich als eigenen Undo-Eintrag behandelt (mehrere Aufrufe
-auf **einer** Transaktion zählen dagegen als ein Eintrag).
+**Genau eine Transaktion:** `deleteSelection()`, `split()`, `setNodeAttribute()` laufen auf
+demselben `tr` (Methodenkette, ein `dispatch`) → Anforderung 3.9 („ein Undo-Schritt")
+strukturell erfüllt.
 
-### 3.3 Verworfene Alternative: Liste selbst am Umbruch aufsplitten
+### 3.3 Verworfene Alternative: Liste am Umbruch in zwei Top-Level-Listen aufsplitten
 
-Geprüft und verworfen: eine Variante, bei der `insertPageBreak` innerhalb eines
-`list_item` die **gesamte** `ordered_list`/`bullet_list` in zwei Top-Level-Listen
-aufspaltet (mit `start`-Attribut-Fortsetzung auf der zweiten), hätte den Vorteil, dass die
-automatische Paginierung (Abschnitt 7, die nur Top-Level-Kinder von `doc` betrachtet) den
-Umbruch direkt „sähe" und visuell umsetzen könnte. Verworfen, weil dabei eine **bereits
-vorhandene, vom Seitenumbruch-Feature unabhängige Lücke** sichtbar würde: `groupLists` in
-`src/formats/docx/reader.ts:258–283` setzt beim Wiederzusammenbau eines durch einen
-Nicht-Listen-Absatz unterbrochenen `w:numId`-Laufs **kein** `start`-Attribut auf die zweite
-`ordered_list` (bleibt beim Schema-Default `1`) — eine eigene Top-Level-Aufspaltung würde
-also in unserer **eigenen** Editor-Vorschau fälschlich wieder bei „1." beginnen, obwohl der
-Export nach DOCX (gemeinsame `w:numId`, siehe `docx/writer.ts:112–118`) vermutlich korrekt
-fortlaufend bliebe — eine verwirrende, nur in der eigenen Vorschau falsche Inkonsistenz.
-Das ist ein eigenständiger, vorbestehender Nummerierungs-Bug außerhalb des Geltungsbereichs
-dieses Tickets (`seitenumbruch-req.md` Abschnitt „Geltungsbereich" begrenzt explizit auf
-Seitenumbruch) und wird **nicht** hier mitbehoben. Die gewählte, einfachere Variante
-(3.2: Split nur bis `list_item`, Liste bleibt **eine** Liste) umgeht dieses Problem
-vollständig, weil nie eine zweite Liste entsteht. Konsequenz: das Feature bekommt für
-Listen (und aus demselben, in `pagination.ts:8–10` bereits dokumentierten Grund auch für
-Tabellenzellen) **keine** automatische visuelle Live-Vorschau-Aufteilung — dokumentiert als
-bewusste Einschränkung in Abschnitt 7.4/13 (Grenzfall 5).
+Verworfen, weil dabei eine **vorbestehende, feature-fremde** Lücke sichtbar würde: `groupLists`
+(`docx/reader.ts:379–440`) setzt beim Wiederzusammenbau eines durch einen Nicht-Listen-Absatz
+unterbrochenen `w:numId`-Laufs **kein** `start`-Attribut auf die zweite `ordered_list`
+(Schema-Default `1`, `schema.ts:127`) — eine Top-Level-Aufspaltung würde in der eigenen Vorschau
+fälschlich wieder bei „1." beginnen. Das ist ein eigenständiger Nummerierungs-Bug außerhalb des
+Geltungsbereichs (`seitenumbruch-req.md` „Geltungsbereich") und wird hier **nicht** mitbehoben.
+Die gewählte Variante (Split nur bis `list_item`) umgeht ihn vollständig. Konsequenz: für Listen
+(und Tabellenzellen) **keine** automatische visuelle Live-Vorschau-Aufteilung (Abschnitt 7.4,
+Grenzfälle 4/5) — Datenebene/Rundreise bleiben vollständig korrekt.
 
-### 3.4 `removePageBreakBackward()` / `removePageBreakForward(): Command` — neu
+### 3.4 `removePageBreakBackward()` / `removePageBreakForward(): Command` — neu (vereinfacht)
 
-Zuständig für Anforderung 1 Zeile 4 (Löschen mit Entf/Backspace) und Grenzfall 13
-(Undo nach Löschen — hier über den normalen Undo-Mechanismus, da wieder nur eine
-Transaktion pro Aufruf).
+Für Anforderung 1 Zeile 4 (Löschen mit Entf/Backspace). **Bewusst reines Attribut-Löschen** —
+nicht zusätzlich Blöcke verschmelzen. Begründung: der Umbruch ist genau das `breakBefore`-Attribut;
+ihn zu „entfernen" heißt, das Attribut zu löschen — danach fließt der Folgeinhalt wieder auf die
+vorige Seite zurück (Anforderung 1 Zeile 4: „danach fließt nachfolgender Inhalt wieder normal
+zurück"), ohne dass die beiden Absätze zwangsweise verschmolzen werden. Das ist vorhersehbar
+(genau ein Konzept pro Tastendruck), trivial **ein** Undo-Schritt (3.9), und vermeidet die
+fragile `state.apply`+Step-Replay-Konstruktion der alten Fassung. Ein zweites Backspace (Attribut
+jetzt `false`) fällt via `false`-Rückgabe transparent an `baseKeymap`s eigenes
+`joinBackward`/`joinForward` durch — also normales Verschmelzen als getrennter, zweiter Schritt.
 
 ```ts
-import { joinBackward, joinForward } from 'prosemirror-commands'
-
 export function removePageBreakBackward(): Command {
   return (state, dispatch) => {
     const { $from, empty } = state.selection
     if (!empty || $from.parentOffset !== 0) return false
     const parent = $from.parent
     if (!alignableTypes.has(parent.type.name) || !parent.attrs.breakBefore) return false
-
-    const tr = state.tr.setNodeAttribute($from.before($from.depth), 'breakBefore', false)
-    // Transaktions-Verkettung durch Steps-Replay: joinBackward wird gegen den
-    // Zwischenzustand NACH dem Attribut-Löschen ausgeführt (state.apply(tr) hat exakt
-    // dasselbe Dokument wie tr.doc — derselbe Positionsraum), seine Schritte werden auf
-    // dieselbe externe tr repliziert, statt eine zweite Transaktion zu dispatchen — damit
-    // bleibt das Ganze EIN Undo-Schritt (Anforderung 3.9).
-    const midState = state.apply(tr)
-    joinBackward(midState, (joinTr) => joinTr.steps.forEach((step) => tr.step(step)))
-    if (dispatch) dispatch(tr.scrollIntoView())
+    if (dispatch) {
+      dispatch(state.tr.setNodeAttribute($from.before($from.depth), 'breakBefore', false).scrollIntoView())
+    }
     return true
   }
 }
@@ -394,40 +393,30 @@ export function removePageBreakForward(): Command {
     if (!nextSibling || !alignableTypes.has(nextSibling.type.name) || !nextSibling.attrs.breakBefore) {
       return false
     }
-    const nextPos = $from.after($from.depth)
-    const tr = state.tr.setNodeAttribute(nextPos, 'breakBefore', false)
-    const midState = state.apply(tr)
-    joinForward(midState, (joinTr) => joinTr.steps.forEach((step) => tr.step(step)))
-    if (dispatch) dispatch(tr.scrollIntoView())
+    if (dispatch) {
+      dispatch(state.tr.setNodeAttribute($from.after($from.depth), 'breakBefore', false).scrollIntoView())
+    }
     return true
   }
 }
 ```
 
-Beide geben `false` zurück, wenn die Bedingung nicht zutrifft — genau wie
-`Enter: splitListItem(...)` in `WordEditor.tsx:75` heute schon **vor** `baseKeymap`
-eingehängt ist und bei Rückgabe `false` transparent an `baseKeymap`s eigenes
-`Backspace`/`Delete` (`chainCommands(deleteSelection, joinBackward, selectNodeBackward)`
-bzw. `chainCommands(deleteSelection, joinForward, selectNodeForward)`, siehe
-`node_modules/prosemirror-commands/dist/index.js:807–848`) durchgereicht wird — bereits
-etabliertes, funktionierendes Muster in diesem Code, kein neuer Mechanismus.
+`false`-Rückgabe bei Nicht-Zutreffen ist exakt das bereits etablierte Muster von
+`Enter: splitListItem(...)` (`WordEditor.tsx:88`), das bei `false` an `baseKeymap` durchreicht.
+Kein neuer Mechanismus.
 
-Falls das Zusammenführen mit dem vorherigen/nächsten Block strukturell nicht möglich ist
-(z. B. der Umbruch sitzt auf dem allerersten Dokument-Knoten und es gibt nichts, womit er
-verschmelzen könnte), bleibt nach `joinBackward`/`joinForward` (die dann selbst `false`
-liefern und nichts anhängen) trotzdem das saubere, sichtbare Ergebnis „Attribut entfernt,
-zwei getrennte Absätze bleiben bestehen" — kein Absturz, kein stiller Fehlschlag.
+### 3.5 Exportliste
 
-### 3.5 `commands.ts`-Exportliste — Ergänzung
-
-`insertPageBreak`, `removePageBreakBackward`, `removePageBreakForward`, `alignableTypes`
-(neu exportiert) zur bestehenden Exportliste hinzufügen.
+`insertPageBreak`, `removePageBreakBackward`, `removePageBreakForward`, `alignableTypes` (neu
+exportiert) zur Exportliste ergänzen.
 
 ---
 
-## 4. `src/formats/shared/editor/WordEditor.tsx` — Keymap-Verdrahtung
+## 4. `WordEditor.tsx` — Keymap (nur additiv!)
 
-`keymap({...})`-Objekt (aktuell Zeilen 71–79) ergänzen:
+Das bestehende `keymap({...})`-Objekt (Z. 85–107) **additiv** ergänzen — die vorhandenen Zeilen
+`Shift-Enter`/`Shift-Delete` **bleiben** (sonst Zeilenumbruch/Ausschneiden kaputt, siehe 0.0
+Punkt 1). Nur die drei fett markierten Zeilen sind neu:
 
 ```ts
 keymap({
@@ -435,59 +424,51 @@ keymap({
   'Mod-y': redo,
   'Mod-Shift-z': redo,
   Enter: splitListItem(wordSchema.nodes.list_item),
+  'Shift-Enter': insertHardBreak(),                 // BLEIBT (Zeilenumbruch)
   'Mod-b': toggleMark(wordSchema.marks.strong),
   'Mod-i': toggleMark(wordSchema.marks.em),
   'Mod-u': toggleMark(wordSchema.marks.underline),
-  'Mod-Enter': insertPageBreak(),
-  Backspace: removePageBreakBackward(),
-  Delete: removePageBreakForward(),
+  'Shift-Delete': cutSelection({ onCutBlocked: setCutError }), // BLEIBT (Ausschneiden)
+  'Mod-Enter': insertPageBreak(),                   // NEU — Strg+Enter/Cmd+Enter
+  Backspace: removePageBreakBackward(),             // NEU (fällt sonst an baseKeymap durch)
+  Delete: removePageBreakForward(),                 // NEU (fällt sonst an baseKeymap durch)
 }),
 ```
 
-`'Mod-Enter'` ist auf Windows/Linux `Strg+Enter`, auf Mac `Cmd+Enter` — genau die von
-`prosemirror-keymap`s `Mod`-Normalisierung abgedeckte, plattformübliche Abbildung
-(dieselbe Konvention wie `Mod-z`/`Mod-b`/etc. bereits im selben Objekt), erfüllt
-Anforderung 1 Zeile 2 ohne eigene Plattformerkennung.
+`Mod-Enter` = Windows/Linux `Strg+Enter`, Mac `Cmd+Enter` (prosemirror-keymap-`Mod`-
+Normalisierung, wie `Mod-b` etc.). Import in Z. 12 ergänzen:
+`import { cutSelection, insertHardBreak, insertPageBreak, removePageBreakBackward, removePageBreakForward } from './commands'`.
 
-Import-Ergänzung: `insertPageBreak, removePageBreakBackward, removePageBreakForward` aus
-`./commands`.
-
-**Keine Änderung** an `plugins: [...]` (Zeilen 69–86) nötig — `createPaginationPlugin()`
-bleibt unverändert eingehängt; die Integration des manuellen Umbruchs geschieht **innerhalb**
-von `pagination.ts` selbst (Abschnitt 7), nicht über ein zusätzliches Plugin. **Keine
-Änderung** an `reconcileSelectionOnClick` (Zeilen 42–53) nötig: `insertPageBreak` /
-`removePageBreak*` lösen wie jede andere Command-Ausführung eine reguläre, über
-`dispatchTransaction` verarbeitete Transaktion aus — kein DOM-Mutations-ohne-Transaktion-Pfad,
-der den bekannten Selection-Sync-Bug auslösen könnte. Trotzdem **muss** dies laut
-`FEATURE-SPEC-DOCX-ODT.md` Abschnitt 2 / Anforderung Grenzfall 7 mit einem dedizierten
-Regressionstest bestätigt werden (Abschnitt 14.4).
+**Keine Änderung** an `plugins` (Array 83–114): `createPaginationPlugin()` bleibt unverändert; die
+Umbruch-Integration passiert **innerhalb** `pagination.ts` (Abschnitt 7). **Keine Änderung** an
+`reconcileSelectionOnClick` (43–50): `insertPageBreak`/`removePageBreak*` lösen reguläre, über
+`dispatchTransaction` verarbeitete Transaktionen aus — kein DOM-Mutations-ohne-Transaktion-Pfad,
+der den Selection-Sync-Bug auslösen könnte. Trotzdem laut `FEATURE-SPEC-DOCX-ODT.md` Abschnitt 2 /
+Grenzfall 7 mit dediziertem Regressionstest zu bestätigen (Abschnitt 14.4).
 
 ---
 
-## 5. `src/formats/shared/editor/Toolbar.tsx` — neuer Button
+## 5. `Toolbar.tsx` — neuer Button
 
-Platzierung: in der bestehenden „Einfügen"-Gruppe, direkt nach „Tabelle einfügen"
-(Zeilen 228–239) und vor „Bild" (Zeilen 241–244) — entspricht Anforderung 1 Zeile 1
-(„sinnvoll platziert … neben Tabelle/Bild einfügen").
+Platzierung: in der „Einfügen"-Gruppe direkt nach dem „Tabelle einfügen"-Button (Z. 277–289) und
+vor dem „Bild"-`<label>` (Z. 291–294) — Anforderung 1 Zeile 1.
 
-**Eingebettetes SVG, kein Unicode/Emoji** (Anforderung 1 Zeile 1, `FEATURE-SPEC-DOCX-ODT.md`
-Abschnitt 20.1): der Rest der Toolbar verwendet aktuell durchgängig Unicode/Emoji
-(`⊞`, `🖼`, `🖍`, `⌫`, `⇤`, `↔`, `⇥`, `≡`) — das ist als **eigenständiges, umfassenderes**
-Problem bereits in Abschnitt 20.1 der Hauptspezifikation dokumentiert und **nicht**
-Gegenstand dieses Tickets; hier wird nur sichergestellt, dass der **neue** Button dieses
-Muster nicht fortschreibt.
+**Eingebettetes SVG, kein Unicode/Emoji.** Es existiert bereits ein SVG-Präzedenzfall in dieser
+Datei — `ScissorsIcon` (Z. 33–53) — dem der neue Icon-Baustein 1:1 folgt (gleiche `viewBox`,
+`stroke="currentColor"`, `aria-hidden`):
 
 ```tsx
 function PageBreakIcon() {
   return (
-    <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-      <path d="M2 5V2h4M14 5V2h-4M2 11v3h4M14 11v3h-4" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
-      <path d="M2 8h12" stroke="currentColor" strokeWidth="1.4" strokeDasharray="2 1.6" strokeLinecap="round" />
+    <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor"
+         strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" focusable="false">
+      <path d="M6 3H4v4M18 3h2v4M6 21H4v-4M18 21h2v-4" />
+      <line x1="3" y1="12" x2="21" y2="12" strokeDasharray="3 2.5" />
     </svg>
   )
 }
 
-// … innerhalb von Toolbar(), nach dem Tabelle-Button (Zeile 239), vor dem Bild-Label (241):
+// … nach dem Tabelle-Button (Z. 289), vor dem Bild-Label (Z. 291):
 <button
   type="button"
   title="Seitenumbruch einfügen"
@@ -502,33 +483,25 @@ function PageBreakIcon() {
 </button>
 ```
 
-Symbol: zwei angedeutete Eckenpaare (Blattecken oben/unten) mit gestrichelter Trennlinie
-dazwischen — ein in Word/LibreOffice geläufiges Icon-Motiv für „Seitenumbruch", eindeutig
-von Tabelle (`⊞`-artiges Gitter) und Bild (Bildrahmen-Piktogramm) unterscheidbar, auch bei
-deaktivierter Emoji-Schriftart korrekt darstellbar (reines Vektor-SVG, kein Zeichen-Font
-nötig). `title`/`aria-label` liefern den in Playwright per
-`getByRole('button', { name: 'Seitenumbruch einfügen' })` bzw. `getByTitle(...)`
-adressierbaren, für Screenreader UND E2E-Tests identischen Namen — folgt demselben Muster
-wie die bereits vorhandenen `title`-Attribute der übrigen Buttons.
+Motiv: zwei Blattecken (oben/unten) mit gestrichelter Trennlinie — geläufiges „Seitenumbruch"-
+Icon, eindeutig von Tabelle (`⊞`) und Bild (`🖼`) unterscheidbar, reines Vektor-SVG (kein
+Emoji-Font nötig). `title` **und** `aria-label` liefern den identischen, für Screenreader **und**
+Playwright (`getByRole('button', { name: 'Seitenumbruch einfügen' })`) adressierbaren Namen.
 
-Import-Ergänzung: `insertPageBreak` aus `./commands`.
+Import ergänzen: `insertPageBreak` aus `./commands` (der `run`-Helfer Z. 28–31 wird
+unverändert genutzt: `command(view.state, view.dispatch, view); view.focus()`).
 
-Kein Deaktivieren des Buttons in Tabellen-Kontext (`isInTable(view.state)`) — bewusst:
-`insertPageBreak` bleibt dort funktional (Fallback auf `hard_break`, Abschnitt 3.2), ein
-deaktivierter Button widerspräche der bewussten Fallback-Entscheidung und würde selbst
-wieder wie ein stiller Fehlschlag wirken.
+Kein Deaktivieren im Tabellen-Kontext — `insertPageBreak` bleibt dort funktional
+(`hard_break`-Fallback, 3.2); ein deaktivierter Button widerspräche der Fallback-Entscheidung und
+wirkte selbst wie ein stiller Fehlschlag.
 
 ---
 
-## 6. Visuelle Kennzeichnung (Anforderung 1 Zeile 3, 3.8)
+## 6. Visuelle Kennzeichnung (Anforderung 1 Zeile 3, 3.8) — `src/index.css`
 
-### 6.1 CSS — `src/index.css`
-
-Ergänzung nach dem bestehenden `.page-break-spacer`-Block (aktuell Zeilen 69–71). Die
-Editor-„Seite" ist laut `pageBackgroundStyle()` (`pageLayout.ts:22–30`) immer weiß
-gerendert, unabhängig vom App-weiten Hell-/Dunkel-Modus (wie ein Blatt Papier) — deshalb
-genügen feste Farben ohne `prefers-color-scheme`-Variante, konsistent mit dem Rest der
-Editor-Fläche:
+Ergänzung **nach** dem bestehenden `.page-break-spacer`-Block (Z. 69–71). Die Editor-„Seite" ist
+laut `pageBackgroundStyle()` (`pageLayout.ts:26`) immer weiß — feste Farben ohne
+`prefers-color-scheme`-Variante für Linie/Label auf dem Absatz genügen:
 
 ```css
 .ProseMirror .pm-page-break-before {
@@ -552,26 +525,22 @@ Editor-Fläche:
   user-select: none;
 }
 
+/* Der Spacer selbst liegt über der Seiten-Zwischenraum-Chrome (bg-neutral-200 / dark:neutral-950);
+   ein blau gestricheltes Outline hat auf beiden ausreichend Kontrast. */
 .page-break-spacer--manual {
   outline: 2px dashed #2563eb;
   outline-offset: -2px;
 }
 ```
 
-Damit sind ein manueller Umbruch (blau gestrichelte Linie + Label direkt am Absatz,
-**unabhängig** von jeder Höhenmessung sichtbar) und ein automatischer Umbruch (nur der
-neutrale graue `page-break-spacer`-Zwischenraum ohne Label) klar unterscheidbar — erfüllt
-Anforderung 1 Zeile 3 mit zwei unabhängigen, jeweils per DOM-Attribut/Klasse prüfbaren
-Signalen (Testplan Punkt 6).
-
-### 6.2 Zusammenspiel mit `pagination.ts`
-
-Siehe Abschnitt 7 — der `page-break-spacer--manual`-Klassenzusatz wird dort beim Bau der
-Decoration gesetzt.
+Damit sind manueller Umbruch (blaue Linie + Label direkt am Absatz, **unabhängig** von jeder
+Höhenmessung sichtbar) und automatischer Umbruch (neutraler grauer Spacer ohne Label)
+unterscheidbar — zwei unabhängige, jeweils per DOM-Klasse prüfbare Signale (Testplan Punkt 7). Die
+`--manual`-Klasse setzt `pagination.ts` (Abschnitt 7.2).
 
 ---
 
-## 7. `src/formats/shared/editor/pagination.ts` — Integration erzwungener Umbrüche
+## 7. `pagination.ts` — Integration erzwungener Umbrüche
 
 ### 7.1 `computePageBreakIndices` — Signaturerweiterung (rückwärtskompatibel)
 
@@ -597,26 +566,16 @@ export function computePageBreakIndices(
 }
 ```
 
-**Wichtig — Einzelpass, nicht zweiphasig (erst Höhen, dann Merge):** ein zweiphasiger Ansatz
-(erst `computePageBreakIndices` unverändert höhenbasiert rechnen, danach erzwungene Indizes
-per Vereinigungsmenge hinzufügen) wäre **falsch**, sobald nach einem erzwungenen Umbruch
-weitere natürliche Überlauf-Umbrüche folgen müssten: deren `cumulative`-Basis muss ab dem
-erzwungenen Umbruch neu bei 0 beginnen (Anforderung 3.8, „Kombination beider Mechanismen …
-muss korrekt zusammenwirken"). Der obige Einzelpass setzt `cumulative = 0` exakt wie beim
-bereits vorhandenen natürlichen Fall, egal ob der Umbruch durch `forced` oder `overflow`
-ausgelöst wurde — dadurch bleibt jede nachfolgende Höhen-Messung korrekt.
+**Einzelpass, nicht zweiphasig:** die `cumulative`-Basis muss ab **jedem** Umbruch (erzwungen
+**oder** Überlauf) neu bei 0 beginnen (Anforderung 3.8, „Kombination beider Mechanismen").
 
-**Rückwärtskompatibilität:** alle 8 bestehenden Tests in `pagination.test.ts` rufen die
-Funktion **ohne** drittes Argument auf (Default `new Set()`) — `forced` ist dann für jedes
-`i` `false`, Verhalten bleibt bytegleich zum Ist-Zustand. Einzige Verhaltensänderung
-gegenüber der Ist-Fassung: der bisherige Frühausstieg `if (pageContentHeight <= 0) return []`
-entfällt (ersetzt durch die `overflow`-Bedingung, die `pageContentHeight > 0` selbst prüft) —
-**ohne** funktionalen Unterschied für die bestehenden Tests (`computePageBreakIndices([100,
-100], 0)`/`(...,-10)` liefern weiterhin `[]`, weil `overflow` dann für jedes `i` `false`
-bleibt und ohne `forcedBreakIndices`-Argument auch `forced` immer `false` ist), aber jetzt
-korrekt für den (in den bestehenden Tests nicht vorkommenden) Fall „`pageContentHeight`
-unbekannt/0, aber ein Umbruch ist erzwungen" — der erzwungene Umbruch muss auch dann
-sichtbar bleiben.
+**Rückwärtskompatibilität:** alle bestehenden Aufrufe (`pagination.test.ts` sowie
+`computePageCount` Z. 28 und `measureAndBuildDecorations` Z. 37) rufen **ohne** drittes Argument
+auf (Default `new Set()`) → `forced` immer `false`, Verhalten unverändert. Der bisherige
+Frühausstieg `if (pageContentHeight <= 0) return []` (Z. 13) entfällt; die `overflow`-Bedingung
+prüft `pageContentHeight > 0` selbst. Für die Bestandstests bytegleich (`computePageBreakIndices([100,100],0)`
+liefert weiterhin `[]`), aber jetzt korrekt für den neuen Fall „`pageContentHeight` unbekannt/0,
+aber Umbruch erzwungen".
 
 ### 7.2 `measureAndBuildDecorations` — erzwungene Indizes aus dem Dokument ableiten
 
@@ -624,66 +583,44 @@ sichtbar bleiben.
 function forcedBreakIndicesFrom(doc: ProseMirrorNode): Set<number> {
   const forced = new Set<number>()
   doc.forEach((node, _offset, index) => {
-    // Bewusst nur Top-Level-Kinder von doc (siehe Abschnitt 7.4) — ein verschachtelter
-    // breakBefore (Listenpunkt/Tabellenzelle) wird für die Live-Vorschau NICHT ausgewertet.
+    // Bewusst nur Top-Level-Kinder von doc (Abschnitt 7.4) — verschachtelte breakBefore
+    // (Listenpunkt/Tabellenzelle) werden für die Live-Vorschau NICHT ausgewertet.
     if ((node.type.name === 'paragraph' || node.type.name === 'heading') && node.attrs.breakBefore) {
       forced.add(index)
     }
   })
   return forced
 }
-
-function measureAndBuildDecorations(view: EditorView): DecorationSet {
-  const dom = view.dom
-  const children = Array.from(dom.children) as HTMLElement[]
-  const heights = children.map((el) => el.getBoundingClientRect().height)
-  const forced = forcedBreakIndicesFrom(view.state.doc)
-  const breakIndices = computePageBreakIndices(heights, PAGE_CONTENT_HEIGHT_PX, forced)
-
-  if (breakIndices.length === 0) return DecorationSet.empty
-
-  const breakIndexSet = new Set(breakIndices)
-  const decorations: Decoration[] = []
-  view.state.doc.forEach((_node, offset, index) => {
-    if (breakIndexSet.has(index)) {
-      const isManual = forced.has(index)
-      decorations.push(
-        Decoration.widget(
-          offset,
-          () => {
-            const spacer = document.createElement('div')
-            spacer.className = isManual ? 'page-break-spacer page-break-spacer--manual' : 'page-break-spacer'
-            spacer.style.height = `${PAGE_GAP_PX}px`
-            spacer.setAttribute('aria-hidden', 'true')
-            spacer.setAttribute('contenteditable', 'false')
-            spacer.dataset.manualPageBreak = String(isManual)
-            return spacer
-          },
-          { side: -1, key: `page-break-${index}-${isManual ? 'manual' : 'auto'}` },
-        ),
-      )
-    }
-  })
-
-  return DecorationSet.create(view.state.doc, decorations)
-}
 ```
 
-`spacer.dataset.manualPageBreak` liefert ein zweites, von der CSS-Klasse unabhängiges
-DOM-Attribut-Signal für Testplan Punkt 6 („mindestens eine DOM-Attribut-Assertion").
+`measureAndBuildDecorations` (33–63) leitet `forced` ab und reicht es an
+`computePageBreakIndices` weiter; beim Widget-Bau die Klasse und ein DOM-Attribut je nach
+`isManual = forced.has(index)` setzen:
 
-**Der `key` im Decoration-Widget wurde bewusst um `-manual`/`-auto` erweitert.** Grund: die
-Widget-Fabrik-Funktion (das zweite Argument von `Decoration.widget`) wird von ProseMirror
-nur bei tatsächlicher Neuerzeugung der Decoration aufgerufen; ändert sich **nur** der
-`isManual`-Status eines Bruchs an einer bereits vorher als Bruch erkannten Position (z. B.
-weil dort schon ein automatischer Höhen-Überlauf-Bruch lag und der Absatz jetzt zusätzlich
-`breakBefore: true` bekommt), bliebe die alte Fabrik ohne diese Erweiterung sonst
-möglicherweise gecached — mit dem eindeutigen `key` wird stattdessen zuverlässig neu
-gebaut.
+```ts
+const forced = forcedBreakIndicesFrom(view.state.doc)
+const breakIndices = computePageBreakIndices(heights, PAGE_CONTENT_HEIGHT_PX, forced)
+// … pro Bruch-Index:
+const isManual = forced.has(index)
+const spacer = document.createElement('div')
+spacer.className = isManual ? 'page-break-spacer page-break-spacer--manual' : 'page-break-spacer'
+spacer.style.height = `${PAGE_GAP_PX}px`
+spacer.setAttribute('aria-hidden', 'true')
+spacer.setAttribute('contenteditable', 'false')
+spacer.dataset.manualPageBreak = String(isManual)
+// … Decoration.widget(offset, () => spacer, { side: -1, key: `page-break-${index}-${isManual ? 'manual' : 'auto'}` })
+```
+
+`dataset.manualPageBreak` ist das von der CSS-Klasse unabhängige zweite DOM-Attribut-Signal
+(Testplan Punkt 7). Der `key` codiert `manual`/`auto`, damit ein Wechsel des Status an **derselben**
+Position eine echte Neuerzeugung des Widgets erzwingt.
 
 ### 7.3 `sameDecorationSet` — Korrektur (sonst verpasste Neu-Darstellung)
 
-Die bestehende Vergleichsfunktion (Zeilen 107–115) vergleicht nur `.from`-Positionen:
+Die Bestandsfunktion (107–115) vergleicht nur `.from`. Liegt an Index N bereits ein automatischer
+Bruch und wird dort zusätzlich `breakBefore: true` gesetzt, bleiben die `.from`-Werte identisch →
+sie meldet fälschlich „keine Änderung", der alte (nicht-manuelle) Spacer bliebe stehen. Vergleich
+um den `key` (der jetzt `manual`/`auto` codiert) erweitern:
 
 ```ts
 function sameDecorationSet(a: DecorationSet, b: DecorationSet): boolean {
@@ -692,88 +629,61 @@ function sameDecorationSet(a: DecorationSet, b: DecorationSet): boolean {
   if (aLocal.length !== bLocal.length) return false
   for (let i = 0; i < aLocal.length; i++) {
     if (aLocal[i].from !== bLocal[i].from) return false
+    const ak = (aLocal[i] as unknown as { type: { spec: { key?: string } } }).type.spec.key
+    const bk = (bLocal[i] as unknown as { type: { spec: { key?: string } } }).type.spec.key
+    if (ak !== bk) return false
   }
   return true
 }
 ```
 
-**Das ist unzureichend für diese Erweiterung:** liegt an Index `N` bereits ein
-höhenbasierter automatischer Bruch, und wird an genau diesem Index zusätzlich
-`breakBefore: true` gesetzt, bleibt die Positions-Liste (`.from`-Werte) identisch — die
-Funktion meldet fälschlich „keine Änderung", die neue Transaktion mit dem
-`manual`-gekennzeichneten Widget würde **nicht** dispatcht, das alte (nicht-manuelle)
-Spacer-Element bliebe stehen. Korrektur: Vergleich um den `key` erweitern (der jetzt den
-manuellen/automatischen Status codiert, siehe 7.2):
+(Gleichwertig robuste Alternative: `measureAndBuildDecorations` gibt zusätzlich eine
+Vergleichs-Signatur `breakIndices.map(i => `${i}:${forced.has(i)}`).join(',')` zurück, gegen die
+`recompute()` prüft. Ziel ist nur: ein reiner Attribut-Wechsel ohne Positionsverschiebung löst
+zuverlässig eine Neuzeichnung aus.)
 
-```ts
-function sameDecorationSet(a: DecorationSet, b: DecorationSet): boolean {
-  const aLocal = a.find()
-  const bLocal = b.find()
-  if (aLocal.length !== bLocal.length) return false
-  for (let i = 0; i < aLocal.length; i++) {
-    if (aLocal[i].from !== bLocal[i].from) return false
-    if (String((aLocal[i] as unknown as { type: { spec: { key?: string } } }).type.spec.key) !==
-        String((bLocal[i] as unknown as { type: { spec: { key?: string } } }).type.spec.key)) {
-      return false
-    }
-  }
-  return true
-}
-```
+### 7.4 Bewusste Einschränkung: keine Live-Vorschau-Aufteilung bei verschachtelten Umbrüchen
 
-(Falls sich der interne `Decoration`-Typ als zu unhandlich für einen sauberen Zugriff auf
-`spec.key` erweist, ist die einfachere, robustere Alternative: `measureAndBuildDecorations`
-gibt zusätzlich zum `DecorationSet` eine kleine Vergleichs-Signatur zurück — z. B. ein
-`string` aus `breakIndices.map(i => `${offset(i)}:${forced.has(i)}`).join(',')` — und
-`recompute()` vergleicht **diese** Signatur statt `sameDecorationSet` aufzurufen. Beide
-Varianten sind gleichwertig korrekt; das Ziel ist ausschließlich, dass ein reiner
-Attribut-Wechsel ohne Positionsverschiebung zuverlässig eine Neuzeichnung auslöst.)
+`forcedBreakIndicesFrom` betrachtet nur direkte Top-Level-Kinder von `doc`. Ein `breakBefore` in
+einem `list_item` (Grenzfall 5) oder einer Tabellenzelle (Grenzfall 4) wird **nicht** in einen
+Seiten-Spacer umgesetzt — Konsequenz des bereits im Code dokumentierten Architektur-Constraints:
 
-### 7.4 Bewusste Einschränkung: keine visuelle Live-Vorschau-Aufteilung für verschachtelte Umbrüche
+> „A block taller than a whole page is simply left to overflow that page rather than split — true
+> intra-block splitting would require duplicating DOM nodes across pages, which ProseMirror's
+> single-EditorView model doesn't support." — `pagination.ts:6–10` (unverändert)
 
-`forcedBreakIndicesFrom` (7.2) betrachtet **ausschließlich** direkte Top-Level-Kinder von
-`doc`. Ein `breakBefore: true` auf einem Absatz **innerhalb** eines `list_item` (Grenzfall 5)
-oder einer Tabellenzelle (Grenzfall 4) wird von der Live-Vorschau **nicht** in einen
-zusätzlichen Seiten-Spacer umgesetzt. Das ist **keine neue Lücke dieses Tickets**, sondern
-Konsequenz eines bereits bestehenden, im Code selbst dokumentierten Architektur-Constraints:
+Gilt für automatische **und** manuelle Umbrüche. Datenebene (Schema, Commands, Import, Export,
+Rundreise inkl. Listen-Nummerierung) ist **nicht** betroffen und vollständig korrekt — nur die
+Live-Vorschau zeigt in diesem verschachtelten Fall keinen zusätzlichen Spacer (Abschnitt 13,
+Grenzfälle 4/5, als bewusst nicht behobenes Verhalten festgehalten).
 
-> „A block taller than a whole page is simply left to overflow that page rather than
-> split — true intra-block splitting would require duplicating DOM nodes across pages,
-> which ProseMirror's single-EditorView model doesn't support." — `pagination.ts:8–10`
-> (unverändert)
-
-Das gilt für automatische **und** manuelle Umbrüche gleichermaßen: die gesamte Paginierung
-arbeitet ausschließlich auf Höhe von Top-Level-Blöcken; eine Liste oder Tabelle wird schon
-heute nie *innerhalb* aufgeteilt. Datenebene (Schema, Commands, Import, Export,
-Rundreise-Fähigkeit inkl. korrekter Listen-Nummerierung) ist davon **nicht** betroffen und
-vollständig korrekt (Abschnitt 3.2 spaltet auf `list_item`-Ebene, bleibt in derselben
-Liste) — nur die Live-Editor-Vorschau zeigt in diesem verschachtelten Fall keinen
-zusätzlichen Seitenumbruch-Spacer an. Wird in Abschnitt 13 (Grenzfall 4/5) explizit als
-befundetes, bewusst nicht behobenes Verhalten festgehalten (kein stiller Mangel).
-
-### 7.5 `pagination.test.ts` — neue Testfälle
+### 7.5 `pagination.test.ts` — neue Fälle (Datei existiert bereits)
 
 ```ts
 describe('computePageBreakIndices: forced (manual) breaks', () => {
-  it('forces a break at the given index even when there is plenty of room left', () => {
+  it('forces a break even with room left', () => {
     expect(computePageBreakIndices([100, 100, 100], 1000, new Set([2]))).toEqual([2])
   })
-
-  it('never forces a break at index 0 (nothing precedes it)', () => {
+  it('never forces a break at index 0', () => {
     expect(computePageBreakIndices([100, 100], 1000, new Set([0]))).toEqual([])
   })
-
-  it('resets the cumulative height after a forced break, so later overflow is measured fresh', () => {
-    // page height 300: forced break at index 1 resets the running total; the following
-    // [100, 250] would NOT overflow measured from zero, so no further break is expected.
-    expect(computePageBreakIndices([100, 100, 250], 300, new Set([1]))).toEqual([1])
+  it('resets cumulative height after a forced break', () => {
+    // NICHT [100, 100, 250]: die Korrektur ist real durchgerechnet (nicht nur behauptet) —
+    // nach dem erzwungenen Bruch bei Index 1 startet Index 1 selbst bereits die neue Seite
+    // und zählt mit seinen 100 zur neuen `cumulative`; ein direkt folgendes 250-hohes Element
+    // (100+250=350 > 300) löste in einer früheren Fassung dieses Tests **zusätzlich** einen
+    // (korrekten!) Überlauf-Bruch bei Index 2 aus, wodurch die dort behauptete Erwartung
+    // `[1]` **nicht** zu `computePageBreakIndices` aus 7.1 passte (tatsächliches Ergebnis
+    // wäre `[1, 2]` gewesen) — kein Reset-Fehler im Code, sondern eine falsche Testerwartung.
+    // Mit 150 statt 250 passt Index 2 ohne weiteren Überlauf auf die neue Seite (100+150=250
+    // ≤ 300) und der Test prüft tatsächlich nur den Reset, ohne einen zweiten,
+    // ungewollten Überlauf-Bruch mit hineinzumischen.
+    expect(computePageBreakIndices([100, 100, 150], 300, new Set([1]))).toEqual([1])
   })
-
-  it('combines a forced break with a later natural overflow break correctly', () => {
+  it('combines a forced break with a later natural overflow', () => {
     expect(computePageBreakIndices([100, 100, 200, 200], 300, new Set([1]))).toEqual([1, 3])
   })
-
-  it('is a no-op (identical to no third argument) when the set is empty', () => {
+  it('is a no-op with an empty set (identical to no 3rd arg)', () => {
     expect(computePageBreakIndices([100, 100, 100, 150], 300, new Set())).toEqual([3])
   })
 })
@@ -783,8 +693,10 @@ describe('computePageBreakIndices: forced (manual) breaks', () => {
 
 ## 8. DOCX-Export — `src/formats/docx/writer.ts`
 
-`blockToDocx` (aktuell Zeilen 94–126), Fälle `paragraph` (101–105) und `heading`
-(106–111) — synthetischer Run **vor** dem eigentlichen Inhalt (Anforderung 3.3/3.4):
+`blockToDocx` (105–156), Fälle `paragraph` (112–118) und `heading` (119–124): synthetischen Run
+**vor** dem Inhalt einfügen. **Wichtig:** der `paragraph`-Zweig nutzt heute `listContext` (nicht
+`listNumId`) — die vorhandene `numPr`-Berechnung bleibt unverändert, es wird nur `pageBreakRunXml`
+eingeschoben:
 
 ```ts
 function pageBreakRunXml(node: JsonNode): string {
@@ -793,7 +705,9 @@ function pageBreakRunXml(node: JsonNode): string {
 
 case 'paragraph': {
   const align = (node.attrs?.align as string) ?? 'left'
-  const numPr = listNumId ? `<w:numPr><w:ilvl w:val="0"/><w:numId w:val="${listNumId}"/></w:numPr>` : ''
+  const numPr = listContext
+    ? `<w:numPr><w:ilvl w:val="${listContext.level}"/><w:numId w:val="${listContext.numId}"/></w:numPr>`
+    : ''
   return `<w:p>${paragraphPropsXml(align, numPr)}${pageBreakRunXml(node)}${inlineToRuns(node.content)}</w:p>`
 }
 case 'heading': {
@@ -804,106 +718,90 @@ case 'heading': {
 }
 ```
 
-- **Eindeutig unterscheidbar vom `hard_break`-Run** (`<w:r><w:br/></w:r>`, weiterhin ohne
-  `w:type`, unverändert in `inlineToRuns:60`) — Anforderung 3.4 erfüllt, kein
-  Verwechslungsrisiko, da beide Fälle an vollständig getrennten Code-Stellen erzeugt werden.
-- **Nie `<w:lastRenderedPageBreak/>`** — trivial erfüllt, dieses Element wird an keiner
-  Stelle des Writers je erzeugt.
-- List-Fall (`bullet_list`/`ordered_list`, Zeilen 112–118) ruft für jedes `list_item`-Kind
-  rekursiv `blockToDocx` auf — die obige Änderung greift dort automatisch mit, **keine**
-  Zusatzänderung am Listen-Zweig nötig.
+- **Eindeutig vom `hard_break`-Run unterscheidbar** (`<w:r><w:br/></w:r>` ohne `w:type`,
+  `inlineToRuns:62`, unverändert) — Anforderung 3.4, kein Verwechslungsrisiko (getrennte Stellen).
+- **Nie `<w:lastRenderedPageBreak/>`, nie `w:sectPr`** — der Writer erzeugt beides nirgends für
+  Inhaltsknoten (`w:sectPr` nur einmalig als Layout-Container, `writer.ts:210/275`).
+- Der Listen-Zweig (125–140) ruft rekursiv `blockToDocx` je `list_item`-Kind — greift automatisch
+  mit, keine Zusatzänderung.
+- `unsupported_block` (145–152) hat kein `breakBefore` (Schema) → nicht betroffen.
 
 ---
 
 ## 9. DOCX-Import — `src/formats/docx/reader.ts`
 
-Der aufwendigste Teil, weil reale Dateien den Umbruch **innerhalb** eines Runs, an
-**beliebiger** Position im Absatz codieren (belegt durch `saut_page.docx`, Zusatzbefund
-0.3: beide echten Umbrüche stehen als **letzter** Run ihres jeweiligen Absatzes, gefolgt
-von einem komplett separaten `<w:p>`).
+Aufwendigster Teil: echte Dateien codieren den Umbruch **inline** an beliebiger Run-Position
+(`saut_page.docx`: beide Umbrüche als **letzter** Run ihres Absatzes, gefolgt von einem separaten
+`<w:p>`).
 
-### 9.1 `RunLike` — neue Art
+### 9.1 `RunLike` — Variante ergänzen (nicht ersetzen)
+
+Die bestehende Union (117–125) hat bereits `'unsupported'`. Nur `'pageBreak'` ergänzen:
 
 ```ts
 interface RunLike {
-  kind: 'text' | 'break' | 'image' | 'pageBreak'
-  text?: string
-  marks?: Array<{ type: string; attrs?: Record<string, unknown> }>
-  imageRelId?: string
-  imageAlt?: string
+  kind: 'text' | 'break' | 'image' | 'unsupported' | 'pageBreak'
+  // … alle bestehenden Felder unverändert (text, marks, imageRelId, imageAlt,
+  //    unsupportedKind, unsupportedBlocks) …
 }
 ```
 
-### 9.2 `decodeParagraphRuns` — `w:br`-Fallunterscheidung nach `w:type`
-
-Aktuell (Zeilen 132–133):
-
-```ts
-} else if (child.namespaceURI === OOXML_NAMESPACES.w && child.localName === 'br') {
-  runs.push({ kind: 'break' })
-}
-```
-
-Neu:
+### 9.2 `decodeRunElement` — `w:br`-Fallunterscheidung nach `w:type` (Z. 177–178)
 
 ```ts
 } else if (child.namespaceURI === OOXML_NAMESPACES.w && child.localName === 'br') {
   const brType = child.getAttributeNS(OOXML_NAMESPACES.w, 'type')
-  // Nur "page" ist im Geltungsbereich dieses Tickets ein manueller Seitenumbruch.
-  // "column" (Spaltenumbruch) und alle anderen/unbekannten Werte werden bewusst wie ein
-  // gewöhnlicher Zeilenumbruch behandelt (verlustfrei bzgl. Textinhalt, aber ohne
-  // Sonderbedeutung) — Spaltenumbrüche sind nicht Gegenstand dieser Anforderung und
-  // würden sonst fälschlich als Seitenumbruch fehlinterpretiert.
-  runs.push({ kind: brType === 'page' ? 'pageBreak' : 'break' })
+  // Nur "page" ist im Geltungsbereich ein manueller Seitenumbruch. "column" und alle
+  // anderen/unbekannten Werte werden bewusst wie ein gewöhnlicher Zeilenumbruch behandelt
+  // (textinhaltsverlustfrei, aber ohne Sonderbedeutung) — Spaltenumbrüche sind nicht
+  // Gegenstand dieser Anforderung.
+  out.push({ kind: brType === 'page' ? 'pageBreak' : 'break' })
 }
 ```
 
-`<w:lastRenderedPageBreak>` bleibt weiterhin durch Abwesenheit eines eigenen Falls
-ignoriert — jetzt **mit explizitem Kommentar** an der `if/else`-Kette dokumentiert:
+`<w:lastRenderedPageBreak>` bleibt durch Abwesenheit eines Falls ignoriert — jetzt **mit
+explizitem Kommentar** an der `if/else`-Kette in `decodeRunElement`:
 
 ```ts
-// w:lastRenderedPageBreak (falls vorhanden) fällt hier bewusst durch: es ist ein von
-// Word selbst erzeugter, rein informativer Marker für einen AUTOMATISCHEN Umbruch, kein
-// manueller Seitenumbruch — Anforderung 3.5. Abgesichert durch
-// docx/__tests__/roundtrip.test.ts ("ignores lastRenderedPageBreak…", Abschnitt 14.1)
-// gegen die reale Fixture 60329.docx.
+// Hinweis: w:lastRenderedPageBreak fällt hier bewusst durch — ein von Word selbst erzeugter,
+// rein informativer Marker für einen AUTOMATISCHEN Umbruch, KEIN manueller Seitenumbruch
+// (Anforderung 3.5). Abgesichert gegen die reale Fixture 60329.docx (3× lastRendered),
+// Abschnitt 14.
 ```
 
-### 9.3 `paragraphToBlocks` — Aufsplitten an `pageBreak`-Runs, Rückgabe erweitert
+### 9.3 `paragraphToBlocks` — an `pageBreak`-Runs aufsplitten, `endsWithPageBreak` melden
 
-Aktuell liefert die Funktion (Zeilen 146–183) `JsonNode[]`. Neue Signatur:
-`{ blocks: JsonNode[]; endsWithPageBreak: boolean }`. Die bestehende Bild-Aufsplitt-Logik
-(Puffer/`flush`, Zeilen 164–182) wird um den `pageBreak`-Fall erweitert:
+Aktuelle Signatur (229): `paragraphToBlocks(pEl, headingInfo, imageRels, depth = 0): JsonNode[]`;
+behandelt heute `image` **und** `unsupported` (`hasBlockRun`, Z. 244). Neue Rückgabe:
+`{ blocks: JsonNode[]; endsWithPageBreak: boolean }`. **Wichtig:** `unsupported`-Behandlung und
+`depth`-Parameter **bleiben** erhalten. Skizze (die bestehende `flush`/Puffer-Logik nur um den
+`pageBreak`-Fall und `breakBefore` erweitert):
 
 ```ts
-function paragraphToBlocks(
-  pEl: Element,
-  headingInfo: HeadingInfo,
-  imageRels: Map<string, string>,
-): { blocks: JsonNode[]; endsWithPageBreak: boolean } {
-  // … align/level/styleId wie bisher (Zeilen 147–153) …
-  const runs = decodeParagraphRuns(pEl)
-  const hasImage = runs.some((r) => r.kind === 'image')
+function paragraphToBlocks(pEl, headingInfo, imageRels, depth = 0): { blocks: JsonNode[]; endsWithPageBreak: boolean } {
+  // … align/level/styleId wie bisher (Z. 235–241) …
+  const runs = decodeParagraphRuns(pEl, headingInfo, imageRels, depth)
+  const hasBlockRun = runs.some((r) => r.kind === 'image' || r.kind === 'unsupported')
   const hasPageBreak = runs.some((r) => r.kind === 'pageBreak')
 
-  if (!hasImage && !hasPageBreak) {
-    const content = runsToInline(runs)
-    const block = level
-      ? { type: 'heading', attrs: { level, align }, content }
-      : { type: 'paragraph', attrs: { align }, content }
-    return { blocks: [block], endsWithPageBreak: false }
+  if (!hasBlockRun && !hasPageBreak) {
+    // unveränderter Schnellpfad inkl. der bewussten content-Weglassung bei leerem Fragment
+    // (Z. 246–255) …
+    return { blocks: [ /* heading|paragraph wie bisher */ ], endsWithPageBreak: false }
   }
 
   const blocks: JsonNode[] = []
   let buffer: RunLike[] = []
   let pendingBreakBefore = false
-  const makeBlock = (content: JsonNode[]): JsonNode =>
-    level
-      ? { type: 'heading', attrs: { level, align, breakBefore: pendingBreakBefore }, content }
-      : { type: 'paragraph', attrs: { align, breakBefore: pendingBreakBefore }, content }
+  const makeParagraph = (content: JsonNode[]): JsonNode => {
+    const attrs: Record<string, unknown> = { align }
+    if (pendingBreakBefore) attrs.breakBefore = true
+    return level ? { type: 'heading', attrs: { ...attrs, level }, content } : { type: 'paragraph', attrs, content }
+  }
   const flush = () => {
     if (buffer.length === 0) { pendingBreakBefore = false; return }
-    blocks.push(makeBlock(runsToInline(buffer)))
+    const content = runsToInline(buffer)
+    if (content.length > 0) blocks.push(makeParagraph(content))
     buffer = []
     pendingBreakBefore = false
   }
@@ -911,9 +809,16 @@ function paragraphToBlocks(
     if (run.kind === 'image') {
       flush()
       const target = run.imageRelId ? imageRels.get(run.imageRelId) : undefined
-      attachPendingBreakBefore(blocks, pendingBreakBefore, () => blocks.push({
-        type: 'image', attrs: { src: target ?? '', alt: run.imageAlt ?? '' },
-      }))
+      const img: JsonNode = { type: 'image', attrs: { src: target ?? '', alt: run.imageAlt ?? '' } }
+      attachPendingBreakBefore([img], pendingBreakBefore) // Bild trägt kein breakBefore → ggf. leerer Vorab-Absatz
+      blocks.push(img)                                    //   (Abschnitt 10)
+      pendingBreakBefore = false
+    } else if (run.kind === 'unsupported') {
+      flush()
+      const content = run.unsupportedBlocks?.length ? run.unsupportedBlocks : [emptyParagraph()]
+      const ub: JsonNode = { type: 'unsupported_block', attrs: { kind: run.unsupportedKind ?? 'object' }, content }
+      attachPendingBreakBefore([ub], pendingBreakBefore)
+      blocks.push(ub)
       pendingBreakBefore = false
     } else if (run.kind === 'pageBreak') {
       flush()
@@ -922,65 +827,55 @@ function paragraphToBlocks(
       buffer.push(run)
     }
   }
-  const endsWithPageBreak = pendingBreakBefore
-  if (!endsWithPageBreak) flush()
+  // WICHTIG (Korrektheits-Fix gegenüber einer früheren Fassung dieses Abschnitts, siehe
+  // 0.0 Punkt 16): `endsWithPageBreak` MUSS vor dem letzten `flush()` ausgewertet werden,
+  // und dieser letzte `flush()` MUSS unbedingt laufen — nicht nur, wenn kein Umbruch
+  // aussteht. Grund: `w:br[type=page]` muss laut OOXML nicht der letzte Run eines `<w:p>`
+  // sein; folgt im selben Absatz noch Text (`<w:p><w:r><w:t>foo</w:t></w:r>
+  // <w:r><w:br w:type="page"/></w:r><w:r><w:t>bar</w:t></w:r></w:p>`), landet dieser Text
+  // nach der `pageBreak`-Verzweigung erneut im (nun wieder leeren) `buffer`. Ein
+  // `if (!endsWithPageBreak) flush()` — wie in einer vorherigen Fassung dieses Abschnitts —
+  // würde diesen finalen `flush()` bei weiterhin `pendingBreakBefore === true`
+  // überspringen und "bar" damit **stillschweigend verwerfen** (Verstoß gegen
+  // `FEATURE-SPEC-DOCX-ODT.md` §18). Real durchgespielt an genau diesem Beispiel: ohne
+  // diesen Fix verschwindet "bar" ersatzlos. Mit dem Fix unten entstehen zwei Absätze —
+  // "foo" (kein Umbruch) und "bar" (`breakBefore:true`) — beide Textteile bleiben erhalten.
+  const endsWithPageBreak = pendingBreakBefore && buffer.length === 0
+  flush() // unbedingt, s.o. — flush() selbst ist bereits ein No-Op, wenn buffer leer ist
   return { blocks, endsWithPageBreak }
 }
 ```
 
-`runsToInline` (Zeile 185–190) muss zusätzlich `pageBreak`-Runs aus dem Inline-Ergebnis
-herausfiltern (sie sind reine Strukturmarker, kein Inhalt):
+**`runsToInline` (282–287) braucht KEINE Änderung** — es ist allowlist-basiert
+(`r.kind === 'text' || r.kind === 'break'`) und schließt `pageBreak` (wie `image`/`unsupported`)
+bereits automatisch aus. (Die alte Fassung schlug hier fälschlich eine denylist-Umschreibung vor.)
+
+**Kein erzwungenes leeres Fragment am Absatzende:** steht `pageBreak` als **letzter** Run (der
+reale `saut_page.docx`-Fall), ist `buffer` beim finalen `flush()` leer (No-Op), und
+`endsWithPageBreak = true` geht an den Aufrufer (9.5), der entscheidet, wer das Attribut übernimmt.
+Folgt dagegen — wie im obigen Beispiel — noch Text im selben `<w:p>` **nach** dem Umbruch, wird
+dieser Text durch den unbedingten finalen `flush()` als **eigener** Absatz mit `breakBefore:true`
+ausgegeben (`makeParagraph` liest `pendingBreakBefore`, das zu diesem Zeitpunkt noch `true` ist,
+bevor `flush()` es am Ende zurücksetzt) — `endsWithPageBreak` ist in diesem Fall `false`, der
+Umbruch wurde bereits **innerhalb** dieses Aufrufs vollständig verarbeitet.
+
+**Drei Aufrufstellen mitziehen** (alle geben heute `JsonNode[]` weiter, künftig `.blocks`):
+1. `decodeDrawingOrPict` (161–163, Textbox-Rekursion mit `depth+1`): `…, imageRels, depth + 1).blocks`
+   — `endsWithPageBreak` hier **verwerfen** (ein Umbruch am Ende eines Textbox-Absatzes hat keine
+   Cross-Textbox-Wirkung; bleibt lokal, verlustfrei).
+2. `parseTable` (337–339): `…paragraphToBlocks(p, headingInfo, imageRels).blocks` — `endsWithPageBreak`
+   ebenfalls **verwerfen** (keine Weiterreichung über Zellgrenzen, konsistent mit 7.4/Grenzfall 4).
+3. `readBodyChildren` (siehe 9.5): wertet `endsWithPageBreak` aus.
+
+### 9.4 Neuer Shared-Helfer `attachPendingBreakBefore` — Abschnitt 10.
+
+### 9.5 `readBodyChildren` — über Absatz-/Tabellengrenzen weiterreichen
+
+Aktuell (464–485). Neu — `pendingBreakBefore` über die Kinder tragen; `ListMarker` braucht
+`ilvl: 0`; der Dokumentende-Fallback nutzt die `emptyParagraph`-Form **ohne** `content`:
 
 ```ts
-function runsToInline(runs: RunLike[]): JsonNode[] {
-  return runs
-    .filter((r) => r.kind !== 'image' && r.kind !== 'pageBreak')
-    .map((r) => (r.kind === 'break' ? { type: 'hard_break' } : { type: 'text', text: r.text ?? '', marks: r.marks }))
-    .filter((n) => n.type !== 'text' || n.text)
-}
-```
-
-**Wichtig — kein erzwungenes leeres Fragment am Absatzende:** steht `pageBreak` als
-**letzter** Run des Absatzes (genau der in `saut_page.docx` beobachtete reale Fall), bleibt
-`buffer` beim Erreichen des Schleifenendes leer — `flush()` wird dann **bewusst nicht**
-aufgerufen (`if (!endsWithPageBreak) flush()`), und `endsWithPageBreak = true` wird an den
-Aufrufer zurückgegeben. Der Aufrufer (`readBodyChildren`, 9.4) entscheidet, ob der nächste
-`<w:p>`/`<w:tbl>` das Attribut übernimmt oder — am Dokumentende — ein neuer leerer Absatz
-synthetisiert wird. Eine frühere Entwurfs-Idee dieses Plans, hier **immer** ein leeres
-Fragment mit `breakBefore: true` zu erzwingen, wäre **falsch** gewesen: bei einem Umbruch
-am Absatzende mit direkt folgendem `<w:p>` (der Normalfall lt. `saut_page.docx`) entstünde
-dadurch ein überflüssiger, in echten Word-/LibreOffice-Dateien nicht vorhandener leerer
-Zwischenabsatz.
-
-### 9.4 Neuer Shared Helper `attachPendingBreakBefore` — siehe Abschnitt 10
-
-### 9.5 `readBodyChildren` — Weiterreichen über Absatz-/Tabellengrenzen hinweg
-
-Aktuell (Zeilen 307–328):
-
-```ts
-async function readBodyChildren(bodyEl, headingInfo, kindByNumId, imageRels, zip) {
-  const items: Array<{ marker: ListMarker; block: JsonNode }> = []
-  for (const child of Array.from(bodyEl.children)) {
-    if (child.namespaceURI === OOXML_NAMESPACES.w && child.localName === 'p') {
-      const marker = listMarkerFor(child)
-      for (const block of paragraphToBlocks(child, headingInfo, imageRels)) {
-        items.push({ marker: block.type === 'paragraph' ? marker : { numId: null }, block })
-      }
-    } else if (child.namespaceURI === OOXML_NAMESPACES.w && child.localName === 'tbl') {
-      items.push({ marker: { numId: null }, block: parseTable(child, headingInfo, imageRels) })
-    }
-  }
-  const grouped = groupLists(items, kindByNumId)
-  await resolveImageSources(zip, grouped)
-  return grouped
-}
-```
-
-Neu:
-
-```ts
-async function readBodyChildren(bodyEl, headingInfo, kindByNumId, imageRels, zip) {
+async function readBodyChildren(bodyEl, headingInfo, kindByNumId, imageRels, zip): Promise<JsonNode[]> {
   const items: Array<{ marker: ListMarker; block: JsonNode }> = []
   let pendingBreakBefore = false
   for (const child of Array.from(bodyEl.children)) {
@@ -990,23 +885,20 @@ async function readBodyChildren(bodyEl, headingInfo, kindByNumId, imageRels, zip
       attachPendingBreakBefore(blocks, pendingBreakBefore)
       pendingBreakBefore = endsWithPageBreak
       for (const block of blocks) {
-        items.push({ marker: block.type === 'paragraph' ? marker : { numId: null }, block })
+        items.push({ marker: block.type === 'paragraph' ? marker : { numId: null, ilvl: 0 }, block })
       }
     } else if (child.namespaceURI === OOXML_NAMESPACES.w && child.localName === 'tbl') {
       const blocks = [parseTable(child, headingInfo, imageRels)]
       attachPendingBreakBefore(blocks, pendingBreakBefore)
       pendingBreakBefore = false
-      for (const block of blocks) items.push({ marker: { numId: null }, block })
+      for (const block of blocks) items.push({ marker: { numId: null, ilvl: 0 }, block })
     }
   }
-  // Grenzfall 2/10 — Umbruch am Dokumentende: hier, nicht im ODT-Writer (siehe
-  // Abschnitt 1.1/1.2), lebt der von seitenumbruch-req.md Abschnitt 3.6 antizipierte
-  // Fallback tatsächlich.
+  // Grenzfall 2/10 — Umbruch am Dokumentende: hier (nicht im ODT-Writer, siehe 1.1) lebt der von
+  // Anforderung 3.6 antizipierte Fallback. content BEWUSST weggelassen (emptyParagraph-Parität,
+  // sonst toEqual-Bruch bei der Rundreise — Z. 224–226/248–252).
   if (pendingBreakBefore) {
-    items.push({
-      marker: { numId: null },
-      block: { type: 'paragraph', attrs: { align: 'left', breakBefore: true }, content: [] },
-    })
+    items.push({ marker: { numId: null, ilvl: 0 }, block: { type: 'paragraph', attrs: { align: 'left', breakBefore: true } } })
   }
   const grouped = groupLists(items, kindByNumId)
   await resolveImageSources(zip, grouped)
@@ -1014,76 +906,54 @@ async function readBodyChildren(bodyEl, headingInfo, kindByNumId, imageRels, zip
 }
 ```
 
-`parseTable`s eigener rekursiver `paragraphToBlocks`-Aufruf für Zelleninhalte (aktuell
-Zeile 236) wird zu `paragraphToBlocks(p, headingInfo, imageRels).blocks` angepasst;
-`endsWithPageBreak` wird dort **bewusst verworfen** — keine Weiterreichung über
-Zellen-/Zeilen-/Tabellengrenzen hinweg (konsistente Scope-Entscheidung mit Grenzfall 4,
-Abschnitt 7.4: ein Umbruch, der wörtlich als letzter Run einer Tabellenzelle steht, ist ein
-extrem seltener Grenzfall ohne reale Fixture-Evidenz und bleibt lokal auf die Zelle
-beschränkt, verlustfrei aber ohne Cross-Zellen-Wirkung).
-
-`readBodyChildren` wird unverändert auch für Kopf-/Fußzeilen-Inhalt aufgerufen
-(`readDocx`, Zeilen 363/372) — ein Seitenumbruch-Attribut in einer Kopf-/Fußzeile ist
-semantisch wirkungslos, wird aber verlustfrei mit übernommen (kein Sonderfall nötig,
-außerhalb des Geltungsbereichs dieser Anforderung laut deren einleitendem Abschnitt).
+`readBodyChildren` wird unverändert auch für Kopf-/Fußzeilen genutzt (`readDocx`, 520/529) — ein
+`breakBefore` dort ist semantisch wirkungslos, wird aber verlustfrei mitgeführt (kein Sonderfall,
+außerhalb des Geltungsbereichs).
 
 ---
 
 ## 10. Neu: `src/formats/shared/pageBreakBlocks.ts`
 
-Kleines, ProseMirror-/React-freies Hilfsmodul (dieselbe Layer-Begründung wie
-`src/formats/shared/imageFallback.ts` aus dem `einfuegen`-Ticket: der Reader/Writer-Layer
-bleibt bewusst frei von `prosemirror-model`/React-Abhängigkeiten), von **beiden** Readern
-(`docx/reader.ts` **und** `odt/reader.ts`, Abschnitt 12) importiert, um Drift zwischen zwei
-unabhängig gepflegten Kopien derselben Logik zu vermeiden:
+Kleines, PM-/React-freies Hilfsmodul im Reader/Writer-Layer — dieselbe Layer-Begründung wie die
+real existierenden geteilten Helfer `src/formats/shared/zipDeterminism.ts` (von beiden Writern
+importiert) und `src/formats/shared/validateDocument.ts` (von beiden Readern importiert). Von
+beiden Readern (`docx/reader.ts` **und** `odt/reader.ts`) genutzt, um Drift zwischen zwei Kopien
+zu vermeiden:
 
 ```ts
-interface MinimalBlockNode {
-  type: string
-  attrs?: Record<string, unknown>
-}
+interface MinimalBlockNode { type: string; attrs?: Record<string, unknown> }
 
-/** Attaches a pending "manual page break before this" flag (propagated across an
- *  element/paragraph boundary — from a trailing w:br[type=page] run in DOCX, or a
- *  fo:break-after="page" style in ODF) onto the first upcoming block. If that block is a
- *  paragraph/heading, the flag becomes its `breakBefore` attribute directly. If it is
- *  anything else (image, table — neither carries `breakBefore` in the schema) or if there
- *  is no upcoming block at all (this was the last element in the document body), a new
- *  empty paragraph carrying the flag is inserted/appended instead — never silently
- *  dropped (kein stiller Datenverlust, FEATURE-SPEC-DOCX-ODT.md Abschnitt 18). */
-export function attachPendingBreakBefore<T extends MinimalBlockNode>(
-  blocks: T[],
-  pending: boolean,
-): void {
+/** Hängt ein „manueller Umbruch vor diesem Block"-Flag (über eine Element-/Absatzgrenze hinweg
+ *  propagiert — aus einem abschließenden w:br[type=page]-Run in DOCX oder einem
+ *  fo:break-after="page"-Style in ODF) an den ersten folgenden Block. Ist dieser ein
+ *  paragraph/heading, wird das Flag dessen breakBefore-Attribut. Ist er etwas anderes (image,
+ *  table — beide tragen kein breakBefore) ODER fehlt er ganz (letztes Element im Body), wird ein
+ *  neuer leerer Absatz mit dem Flag davorgestellt — nie still verworfen (kein stiller
+ *  Datenverlust, FEATURE-SPEC-DOCX-ODT.md §18). Der synthetische Absatz lässt content bewusst
+ *  weg (emptyParagraph-Parität beider Reader). */
+export function attachPendingBreakBefore<T extends MinimalBlockNode>(blocks: T[], pending: boolean): void {
   if (!pending) return
   const first = blocks[0]
   if (first && (first.type === 'paragraph' || first.type === 'heading')) {
     first.attrs = { ...first.attrs, breakBefore: true }
     return
   }
-  blocks.unshift({
-    type: 'paragraph',
-    attrs: { align: 'left', breakBefore: true },
-    content: [],
-  } as unknown as T)
+  blocks.unshift({ type: 'paragraph', attrs: { align: 'left', breakBefore: true } } as unknown as T)
 }
 ```
 
-Wiederverwendet an **drei** Stellen: DOCX-Reader (9.3 innerhalb eines Absatzes vor einem
-eingebetteten Bild, 9.5 über Absatz-/Tabellengrenzen hinweg inkl. Dokumentende) und
-ODT-Reader (12.3, über Element-Grenzen hinweg inkl. Dokumentende) — eine einzige,
-gemeinsam getestete Implementierung statt vier potenziell divergierender Kopien.
+Wiederverwendet an **vier** Stellen: DOCX-Reader (9.3 vor eingebettetem Bild/`unsupported`, 9.5
+über Absatz-/Tabellengrenzen inkl. Dokumentende) und ODT-Reader (12.4, über Element-Grenzen inkl.
+Dokumentende) — eine gemeinsam getestete Implementierung.
 
 ---
 
-## 11. ODT-Export — `src/formats/odt/writer.ts` + `src/formats/odt/styleRegistry.ts`
+## 11. ODT-Export — `styleRegistry.ts` + `writer.ts`
 
 ### 11.1 `styleRegistry.ts` — Style-Erzeugung um `breakBefore`-Dimension erweitern
 
-Bestehendes, endliches Enumerations-Muster (4 Ausrichtungen für Absätze, Zeilen 61–75;
-6 Ebenen × 4 Ausrichtungen für Überschriften, Zeilen 77–93) wird um eine zusätzliche
-boolesche Dimension erweitert — **kein** Architekturwechsel, nur Verdopplung der
-vorhandenen Enumeration, analog zum bestehenden Muster:
+Bestehendes Enumerations-Muster (Ausrichtungen 61–75; 6 Ebenen × 4 Ausrichtungen 84–93) um eine
+boolesche Dimension verdoppeln — **kein** Architekturwechsel:
 
 ```ts
 export function paragraphStyleName(align: string, breakBefore: boolean): string {
@@ -1116,126 +986,90 @@ export function headingStyleDefs(): string {
 }
 ```
 
-`PARAGRAPH_ALIGN_STYLE_NAME` selbst (Zeilen 61–66) bleibt unverändert — weiterhin die
-„ohne Umbruch"-Namen, direkt referenziert von `paragraphStyleName(align, false)`.
+`PARAGRAPH_ALIGN_STYLE_NAME` (61–66), `HEADING_FONT_SIZES` (77), `ALIGNS` (78) bleiben unverändert.
+**Achtung Signaturänderung:** `headingStyleName` bekommt einen dritten Parameter — die einzige
+weitere Aufrufstelle ist `writer.ts:97` (11.2), die mitgezogen wird.
 
 ### 11.2 `writer.ts` — Aufrufstellen anpassen
 
-`blockToOdt` (Zeilen 61–123), Fälle `paragraph` (63–68) und `heading` (69–74):
+`blockToOdt(node, styles, images, tableNames)` (85–195), Fälle `paragraph` (87–92) und `heading`
+(93–98) — der vierte Parameter `tableNames` bleibt unberührt:
 
 ```ts
 case 'paragraph': {
   const align = (node.attrs?.align as string) ?? 'left'
   const styleName = paragraphStyleName(align, Boolean(node.attrs?.breakBefore))
-  const inner = inlineToOdt(node.content, styles)
-  return `<text:p text:style-name="${styleName}">${inner}</text:p>`
+  return `<text:p text:style-name="${styleName}">${inlineToOdt(node.content, styles)}</text:p>`
 }
 case 'heading': {
   const level = Number(node.attrs?.level ?? 1)
   const align = (node.attrs?.align as string) ?? 'left'
   const styleName = headingStyleName(level, align, Boolean(node.attrs?.breakBefore))
-  const inner = inlineToOdt(node.content, styles)
-  return `<text:h text:style-name="${styleName}" text:outline-level="${level}">${inner}</text:h>`
+  return `<text:h text:style-name="${styleName}" text:outline-level="${level}">${inlineToOdt(node.content, styles)}</text:h>`
 }
 ```
 
-Import-Zeile (aktuell Zeile 4–14) um `paragraphStyleName` ergänzen (ersetzt den bisherigen
-direkten `PARAGRAPH_ALIGN_STYLE_NAME`-Import, der dann nur noch intern in
-`styleRegistry.ts` gebraucht wird).
-
-**Kein Fallback für „Umbruch am Dokumentende" nötig** (siehe Begründung Abschnitt 1.1) —
-`breakBefore` sitzt in diesem Modell immer auf einem real existierenden Knoten, auch wenn
-dieser Knoten (wie in 9.5 beschrieben) erst vom DOCX-**Reader** synthetisiert wurde, bevor
-er den ODT-Writer überhaupt erreicht.
+Import-Block (4–14): `PARAGRAPH_ALIGN_STYLE_NAME` wird im Writer nicht mehr direkt gebraucht
+(nur noch intern in `styleRegistry.ts`), stattdessen `paragraphStyleName` importieren;
+`headingStyleName` bleibt importiert (neue Signatur). **Kein Dokumentende-Fallback nötig** (1.1):
+`breakBefore` sitzt immer auf einem realen Knoten, auch wenn dieser (9.5) erst vom DOCX-Reader
+synthetisiert wurde.
 
 ---
 
 ## 12. ODT-Import — `src/formats/odt/reader.ts`
 
-### 12.1 `ParsedStyles` — neue Map
+### 12.1 `ParsedStyles` — neue Map (23–27)
 
-Aktuell (Zeilen 22–26):
+`paragraphBreaks: Map<string, { before: boolean; after: boolean }>` ergänzen; im
+`parseAutomaticStyles`-Kopf (37–41) und der Rückgabe (77) mitführen.
 
-```ts
-interface ParsedStyles {
-  textStyles: Map<string, RunStyle>
-  paragraphAligns: Map<string, string>
-  listKinds: Map<string, 'bullet' | 'ordered'>
-}
-```
-
-Neu: `paragraphBreaks: Map<string, { before: boolean; after: boolean }>` ergänzen.
-
-### 12.2 `parseAutomaticStyles` — `fo:break-before`/`fo:break-after` lesen
-
-Im `family === 'paragraph'`-Zweig (aktuell Zeilen 62–66):
+### 12.2 `parseAutomaticStyles` — `fo:break-before`/`fo:break-after` lesen (paragraph-Zweig 63–67)
 
 ```ts
 } else if (family === 'paragraph') {
   const props = firstChildNS(styleEl, ODF_NAMESPACES.style, 'paragraph-properties')
   const align = props?.getAttributeNS(ODF_NAMESPACES.fo, 'text-align')
   if (align) paragraphAligns.set(name, align)
-
-  // Nur der Wert "page" ist im Geltungsbereich (Anforderung 3.6/3.7) — "column"/"auto"
-  // und alle anderen Werte werden bewusst NICHT als Seitenumbruch gewertet (analoge
-  // Entscheidung zu w:type="column" im DOCX-Reader, Abschnitt 9.2).
+  // Nur "page" ist im Geltungsbereich (3.6/3.7); "column"/"auto"/andere werden NICHT als
+  // Seitenumbruch gewertet (analog zu w:type="column" im DOCX-Reader, 9.2).
   const before = props?.getAttributeNS(ODF_NAMESPACES.fo, 'break-before') === 'page'
   const after = props?.getAttributeNS(ODF_NAMESPACES.fo, 'break-after') === 'page'
   if (before || after) paragraphBreaks.set(name, { before, after })
 }
 ```
 
-Reale Belegung: `pagebreaks.odt`s `P1`/`P2` (`break-before`) und `P3` (`break-after`,
-Zusatzbefund 0.4) — beide Fälle müssen für diese eine reale Datei korrekt gelesen werden.
+Reale Belegung: `pagebreaks.odt` (2× `break-before` **+** 1× `break-after`) — beide Varianten
+müssen für diese Datei korrekt gelesen werden.
 
-**Nicht umgesetzt (dokumentierte Lücke, kein Blocker):** vollständige
-`style:parent-style-name`-Vererbungskette über `office:styles` (benannte/„common" Styles,
-in `content.xml` **und** `styles.xml`) hinweg — die Anforderung (3.7) verlangt das zwar
-wörtlich („direkt … oder über einen per Style-Vererbung wirksamen Wert"), aber **keine**
-der unter 0.3 gesichteten realen Fixtures benötigt das (alle deklarieren
-`fo:break-before`/`fo:break-after` direkt auf dem referenzierten Automatic-Style selbst,
-auch wenn dieser wiederum `style:parent-style-name="Standard"` trägt — die Vererbung
-betrifft dort nur andere Eigenschaften, nicht den Umbruch selbst). Sollte künftig eine
-Fixture auftauchen, die das braucht, ist das ein Nachtrag zu diesem Plan, keine Annahme
-für die aktuelle Abnahme.
+**Nicht umgesetzt (dokumentierte Lücke, kein Blocker):** die vollständige
+`style:parent-style-name`-Vererbungskette über `office:styles` hinweg — **keine** der realen
+Fixtures (0.3) benötigt sie (alle deklarieren `fo:break-before`/`-after` direkt auf dem
+referenzierten Automatic-Style). Tritt künftig eine solche Fixture auf, ist das ein Nachtrag.
 
-### 12.3 `paragraphToBlocks`/`elementToBlocks` — Attribut setzen + `endsWithBreakAfter` melden
+### 12.3 `breakBefore` setzen — nur auf dem **ersten** erzeugten Fragment
 
-Anders als bei DOCX gibt es **keine** Inline-Aufsplitt-Logik nötig (ODF-Umbrüche sind reine
-Style-Attribute, nie inline im Textfluss) — nur Attribut-Übernahme + Signal für die
-Grenz-Weiterreichung. `paragraphToBlocks` (Zeilen 122–157) und der `text:h`-Zweig von
-`elementToBlocks` (Zeilen 170–175) werden erweitert, ihr Rückgabewert für den
-**Top-Level-Aufruf** (siehe 12.4) auf `{ blocks: JsonNode[]; endsWithBreakAfter: boolean }`
-umgestellt; `align`-Ermittlung (Zeile 126/173) bekommt eine Schwester-Ermittlung:
+`paragraphToBlocks` (175–213) und der `text:h`-Zweig von `elementToBlocks` (256–262) ermitteln
+bereits `styleName`/`align`. Dort zusätzlich:
 
 ```ts
 const breakInfo = (styleName && styles.paragraphBreaks.get(styleName)) || { before: false, after: false }
-// … in jedem erzeugten paragraph/heading-JsonNode: attrs: { align, breakBefore: breakInfo.before, ... }
 ```
 
-`endsWithBreakAfter = breakInfo.after` wird von der **Top-Level**-Aufrufstelle
-(`readOfficeTextChildren`, 12.4) ausgewertet; rekursive Aufrufe **innerhalb** von
-`text:list`/`table:table` (Zeilen 179–203) verwerfen dieses Signal bewusst (identische,
-konsistente Scope-Entscheidung zu Abschnitt 9.5/7.4 — kein Weiterreichen über
-Zellen-/Listen-Grenzen hinweg). Ein `breakBefore`/`fo:break-before` **innerhalb** eines
-`text:list-item` oder einer `table:table-cell` wird trotzdem korrekt gelesen und
-verlustfrei auf dem jeweiligen verschachtelten Knoten abgelegt (bestätigt exakt den in
-`no_pagebreak.odt`/Zusatzbefund D beobachteten Fall: das Attribut wird übernommen, aber
-nicht zu einem sichtbaren Seiten-Spacer, siehe Abschnitt 7.4).
+und im erzeugten `paragraph`/`heading`-Knoten `attrs: { align, breakBefore: breakInfo.before }`
+(die `breakBefore`-Eigenschaft nur setzen, wenn `true`, um `emptyParagraph`-Parität zu wahren).
+**Achtung Split-Fall:** enthält ein `text:p` mit `fo:break-before` zusätzlich ein `draw:frame`
+(Bild), teilt `paragraphToBlocks` in mehrere Blöcke (190–212) — `breakBefore: true` darf dann
+**nur auf den ersten** erzeugten Block, nicht auf alle Fragmente (sonst mehrere Umbrüche statt
+einem). Praktisch: `breakInfo.before` nur beim ersten `blocks.push(...)` bzw. im
+Nicht-Frame-Schnellpfad (187) berücksichtigen.
 
-### 12.4 `readOfficeTextChildren` — Weiterreichen über Element-Grenzen hinweg
+`fo:break-after` wird hier **nicht** verarbeitet, sondern im Top-Level-Loop (12.4).
 
-Aktuell (Zeilen 233–237):
+### 12.4 `readOfficeTextChildren` — `fo:break-after` sauber am Top-Level (351–355)
 
-```ts
-async function readOfficeTextChildren(bodyTextEl: Element, styles: ParsedStyles, zip: JSZip): Promise<JsonNode[]> {
-  const blocks = Array.from(bodyTextEl.children).flatMap((child) => elementToBlocks(child, styles))
-  await resolveImageSources(zip, blocks)
-  return blocks
-}
-```
-
-Neu:
+Anders als die alte Fassung **kein** Pseudo-Attribut `breakAfterHint` durch `elementToBlocks`
+fädeln. Stattdessen den Style-Namen des Kindes direkt lesen (wir haben `styles.paragraphBreaks`):
 
 ```ts
 async function readOfficeTextChildren(bodyTextEl: Element, styles: ParsedStyles, zip: JSZip): Promise<JsonNode[]> {
@@ -1245,61 +1079,45 @@ async function readOfficeTextChildren(bodyTextEl: Element, styles: ParsedStyles,
     const childBlocks = elementToBlocks(child, styles)
     attachPendingBreakBefore(childBlocks, pendingBreakBefore)
     blocks.push(...childBlocks)
-    // Nur text:p/text:h melden ein etwaiges fo:break-after; text:list/table:table geben
-    // hier strukturell kein Signal (siehe 12.3) — endsWithBreakAfter wird direkt aus dem
-    // *letzten* erzeugten Blocks-Eintrag gelesen, weil elementToBlocks für text:p/text:h
-    // immer genau einen Block liefert.
-    pendingBreakBefore =
-      (child.namespaceURI === ODF_NAMESPACES.text && (child.localName === 'p' || child.localName === 'h')) &&
-      Boolean((childBlocks[childBlocks.length - 1] as { attrs?: { breakAfterHint?: boolean } })?.attrs?.breakAfterHint)
+    // Nur text:p/text:h können fo:break-after tragen; deren Style-Name ist direkt am Element
+    // ablesbar — kein Durchfädeln durch elementToBlocks nötig. text:list/table:table melden
+    // hier bewusst kein Signal (konsistent mit 7.4/Grenzfall 4: keine Cross-Grenzen-Wirkung).
+    const isPorH = child.namespaceURI === ODF_NAMESPACES.text && (child.localName === 'p' || child.localName === 'h')
+    const styleName = isPorH ? child.getAttributeNS(ODF_NAMESPACES.text, 'style-name') : null
+    pendingBreakBefore = Boolean(styleName && styles.paragraphBreaks.get(styleName)?.after)
   }
   if (pendingBreakBefore) {
-    blocks.push({ type: 'paragraph', attrs: { align: 'left', breakBefore: true }, content: [] })
+    blocks.push({ type: 'paragraph', attrs: { align: 'left', breakBefore: true } }) // content weggelassen (Parität)
   }
   await resolveImageSources(zip, blocks)
   return blocks
 }
 ```
 
-**Hinweis zur genauen Signal-Übergabe:** da `elementToBlocks` (anders als der DOCX-Reader,
-der dafür extra `{blocks, endsWithPageBreak}` zurückgibt) an vielen Stellen rekursiv
-verschachtelt aufgerufen wird (Listen/Tabellen, 12.3), ist es einfacher, das
-„hat `fo:break-after`"-Signal **vorübergehend** als internes, nicht exportiertes
-Pseudo-Attribut `breakAfterHint` auf dem erzeugten `paragraph`/`heading`-JsonNode
-mitzuführen (wie oben skizziert) und es in `readOfficeTextChildren` unmittelbar nach dem
-Auslesen wieder zu entfernen (`delete node.attrs.breakAfterHint`), statt die Rückgabetypen
-von `elementToBlocks` und all seinen rekursiven Fällen (Listen, Tabellen) auf ein
-Tupel umzustellen — das hielte den Diff deutlich kleiner und lokaler. Alternative,
-gleichwertig saubere Variante: `elementToBlocks` auf `{blocks, endsWithBreakAfter}`
-umstellen wie beim DOCX-Reader, mit `endsWithBreakAfter: false` als Default in allen
-rekursiven/Listen-/Tabellen-Zweigen — reine Geschmacksfrage, in der Umsetzung zu
-entscheiden; **wichtig ist nur, dass am Ende exakt ein Signalweg existiert, konsistent
-für `text:p` und `text:h`, und dass `breakAfterHint` (falls Variante 1 gewählt wird)
-niemals im tatsächlich nach außen zurückgegebenen `WordDocumentContent`/`ProseMirrorJSON`
-landet** (sonst schriebe `wordSchema.nodeFromJSON` beim Laden eine Exception, da
-`breakAfterHint` kein deklariertes Attribut von `paragraph`/`heading` ist).
+Rekursive Aufrufe innerhalb von `text:list`/`table:table` (`elementToBlocks` 286–321) bleiben
+unverändert — `fo:break-before` **innerhalb** eines `text:list-item`/`table:table-cell` wird über
+12.3 trotzdem verlustfrei auf dem verschachtelten Knoten abgelegt (exakt der `no_pagebreak.odt`-
+Fall: Attribut übernommen, aber kein Top-Level-Spacer, siehe 7.4). Kopf-/Fußzeilen
+(`readOdt:380/384`) rufen `elementToBlocks` direkt — dort ist `fo:break-after`-Weiterreichung
+irrelevant (wirkungslos), kein Sonderfall.
 
-### 12.5 `text:soft-page-break` und `text:use-soft-page-breaks` — bewusst ignoriert
+### 12.5 `text:soft-page-break` — bewusst ignoriert (Kommentar + Test)
 
-`decodeInline`s `walk`-Funktion (Zeilen 96–116) hat für `text:soft-page-break` **keinen**
-eigenen Fall — das Element fällt bereits heute stillschweigend durch (weder Text-Knoten
-noch einer der behandelten `text:span`/`line-break`/`s`/`tab`-Fälle). Das ist **korrekt**
-(Anforderung 3.7: „darf nicht als manueller Seitenumbruch fehlinterpretiert werden"), muss
-aber wie beim DOCX-Pendant (Abschnitt 9.2) durch einen **expliziten Kommentar** an der
-`walk`-Funktion **und** einen Test gegen die reale Fixture `text-extract.odt`
-(Zusatzbefund 0.3) abgesichert werden, damit es nicht „richtig durch Zufall" bleibt:
+In `decodeInline`s `walk` (138–168) hat `text:soft-page-break` keinen eigenen Fall: es fällt in
+den generischen `else`-Zweig (160–167), der in die Kinder absteigt — da das Element leer ist,
+passiert nichts, es wird verworfen. Korrekt (3.7). Mit **explizitem Kommentar** am `else`-Zweig
+absichern:
 
 ```ts
-// text:soft-page-break (falls vorhanden) fällt hier bewusst durch: es ist ein reiner
-// Paginierungs-Hinweis für den Renderer, KEIN erzwungener Seitenumbruch — Anforderung
-// 3.7. Abgesichert durch odt/__tests__/roundtrip.test.ts gegen die reale Fixture
-// text-extract.odt (Abschnitt 14.1).
+// Hinweis: text:soft-page-break trägt keinen Text und landet hier im generischen else — ein
+// reiner Paginierungs-Hinweis für den Renderer, KEIN erzwungener Seitenumbruch (3.7).
+// Abgesichert gegen die reale Fixture text-extract.odt (2× soft-page-break, 0× break-before),
+// Abschnitt 14.
 ```
 
-Das Dokument-Attribut `text:use-soft-page-breaks="true"` auf `<office:text>` (in mehreren
-der realen Fixtures vorhanden, z. B. `pagebreaks.odt`) wird an keiner Stelle des Readers
-ausgewertet und braucht das auch nicht — reiner Darstellungs-Hinweis auf Dokumentebene,
-ohne Bezug zu einzelnen Umbrüchen.
+Das Dokument-Attribut `text:use-soft-page-breaks="true"` auf `<office:text>` (u. a. in
+`pagebreaks.odt`) wird nicht ausgewertet und muss es nicht — reiner Darstellungs-Hinweis auf
+Dokumentebene.
 
 ---
 
@@ -1307,138 +1125,128 @@ ohne Bezug zu einzelnen Umbrüchen.
 
 | # | Grenzfall | Umsetzung |
 |---|---|---|
-| 1 | Umbruch am Dokumentanfang | Kein Sonderfall: `insertPageBreak` splittet auch an Position 0 (Abschnitt 3.2), Ergebnis ist eine leere führende Seite gefolgt vom Original-Inhalt — entspricht exakt echtem Word-Verhalten (Ctrl+Enter am Dokumentanfang erzeugt ebenfalls eine leere erste Seite), **kein** No-Op. Import einer Fremddatei mit `breakBefore` auf dem allerersten Knoten: verlustfrei übernommen, aber von der Live-Vorschau nicht als „erzwungen" behandelt (Index 0 wird von `computePageBreakIndices`/`forcedBreakIndicesFrom` bewusst ausgenommen, Abschnitt 7.1/7.2 — es gibt nichts, was „beendet" werden müsste) |
-| 2 | Umbruch am Dokumentende | `insertPageBreak` erzeugt eine neue leere Folgeseite (Split erzeugt immer einen zweiten Knoten, auch am Dokumentende). Import: DOCX-Reader synthetisiert bei Bedarf einen leeren Absatz (Abschnitt 9.5), ODT-Writer braucht dafür keinen Fallback (Abschnitt 1.1/11.2) |
-| 3 | Zwei aufeinanderfolgende Umbrüche | Kein Zusammenfassen: jeder Top-Level-Knoten mit `breakBefore: true` erzeugt unabhängig einen eigenen erzwungenen Bruch-Index (Abschnitt 7.1); zwei benachbarte leere Absätze mit je `breakBefore: true` ergeben zwei Brüche, eine vollständig leere Seite dazwischen |
-| 4 | Umbruch in Tabellenzelle | Bewusste Abweichung, gestützt durch reale Evidenz (`no_pagebreak.odt`, Zusatzbefund D): `insertPageBreak` fällt in Tabellenzellen auf `hard_break` zurück (Abschnitt 3.2); ein aus einer Fremddatei importierter, dennoch vorhandener `breakBefore` in einer Zelle wird verlustfrei gelesen, aber von der Live-Vorschau nicht visuell umgesetzt (Abschnitt 7.4) — keine Tabellenstruktur-Beschädigung, kein Absturz |
-| 5 | Umbruch in Listenpunkt | Split bis `list_item` (Abschnitt 3.2), Nummerierung bleibt lückenlos, weil es **dieselbe** Liste bleibt (keine Top-Level-Aufspaltung, Abschnitt 3.3 begründet die verworfene Alternative). Live-Vorschau zeigt keinen zusätzlichen Seiten-Spacer (Abschnitt 7.4, vorbestehender Architektur-Constraint) — Datenebene/Rundreise vollständig korrekt |
-| 6 | Umbruch mitten in Überschrift | Split-Regel repliziert `splitBlock`s eigene „atEnd && deflt"-Logik (Abschnitt 3.2): am Ende der Überschrift wird der zweite Teil `paragraph`, mittendrin bleibt er `heading` desselben Levels — konsistent mit generischem Enter-Verhalten (`baseKeymap`) |
-| 7 | Einfügen + weitertippen (Selection-Sync-Regression) | Strukturell unauffällig (Abschnitt 4): normale Transaktion über `dispatchTransaction`, kein DOM-Mutation-ohne-Transaktion-Pfad. Pflicht-Regressionstest in `selection-regression.spec.ts` (Abschnitt 14.4) |
-| 8 | Kurzes Dokument mit einem Umbruch | Erzwungener Bruch erzeugt zwei Seiten unabhängig von Höhen (Abschnitt 7.1, `forced`-Zweig ignoriert `pageContentHeight`) — bewusst zu unterscheiden vom in `FEATURE-SPEC-DOCX-ODT.md` Abschnitt 8 als offen markierten *ungewollten* Leerraum-Verdacht: hier ist der Zusatzraum eindeutig auf ein vom Nutzer gesetztes `breakBefore`-Attribut zurückzuführen (per DOM-Attribut/Klasse aus Abschnitt 6.1/7.2 nachweisbar), nicht auf denselben ungeklärten Rendering-Fehler |
-| 9 | Import mehrerer Umbrüche | Jeder `<w:br w:type="page"/>`/`fo:break-before`/`fo:break-after` wird unabhängig verarbeitet (Schleifen in 9.5/12.4 über alle Kinder), keine Beschränkung auf „nur ersten/letzten" |
-| 10 | Cross-Format-Rundreise DOCX→ODT→DOCX, Umbruch am Dokumentende | Kein zusätzlicher Leerabsatz-Rest zu erwarten: DOCX-Reader synthetisiert höchstens **einen** trailing-Absatz (9.5), ODT-Export/-Reimport verändert dessen Anzahl nicht weiter (kein eigener Fallback-Mechanismus dort, Abschnitt 1.1) — zu verifizieren per Test 14.3 |
-| 11 | Löschen des Absatzes nach einem (ODT-seitig als Attribut realisierten) Umbruch | Festgelegtes Verhalten: normales Backspace/Entf **auf den Absatz selbst** (nicht `removePageBreakBackward`/`-Forward`, die nur an der exakten Grenze greifen) löscht ihn wie jeden anderen Absatz inkl. seines `breakBefore`-Attributs — der Umbruch verschwindet **mit** dem Absatz, wandert **nicht** automatisch zum neuen Nachbarn. Bewusst einfache, vorhersagbare Regel (kein implizites „Attribut wandert" - Verhalten), dokumentiert als Antwort auf die von der Anforderung offen gelassene Frage |
-| 12 | Umbruch direkt vor/nach Bild/Tabelle | GapCursor-Fall über den `insertStandaloneFallback`-Zweig abgedeckt (Abschnitt 3.2): erzeugt einen eigenen leeren Absatz mit `breakBefore: true` neben dem Bild/der Tabelle, keine Verschiebung/Duplizierung des Bild-/Tabellen-Knotens selbst |
-| 13 | Strg+Z direkt nach Einfügen | Ein einziger Undo-Schritt (Abschnitt 3.2: eine Transaktion für Delete-Selection+Split+Attribut) — Standard-`prosemirror-history`-Verhalten, kein Zusatzcode nötig |
+| 1 | Umbruch am Dokumentanfang | Kein Sonderfall: Split auch an Position 0 (3.2) → leere führende Seite + Original — echtes Word-Verhalten, **kein** No-Op. Import mit `breakBefore` auf dem allerersten Knoten: verlustfrei, aber von der Live-Vorschau nicht als „erzwungen" behandelt (Index 0 ausgenommen, 7.1/7.2 — nichts davor zu „beenden"). |
+| 2 | Umbruch am Dokumentende | `insertPageBreak` erzeugt immer einen zweiten Knoten (leere Folgeseite). Import: DOCX-Reader synthetisiert bei Bedarf einen leeren Absatz (9.5, `content` weggelassen); ODT-Writer braucht keinen Fallback (1.1/11.2). |
+| 3 | Zwei aufeinanderfolgende Umbrüche | Kein Zusammenfassen: jeder Top-Level-Knoten mit `breakBefore` erzeugt unabhängig einen Bruch-Index (7.1); zwei leere Absätze mit je `breakBefore` = zwei Brüche, eine leere Seite dazwischen. |
+| 4 | Umbruch in Tabellenzelle | Bewusste Abweichung (reale Evidenz `no_pagebreak.odt`/LO-Bug 35585): `insertPageBreak` → `hard_break`-Fallback (3.2); ein importierter `breakBefore` in einer Zelle wird verlustfrei gelesen, aber nicht als Spacer visualisiert (7.4). Keine Struktur-Beschädigung, kein Absturz. |
+| 5 | Umbruch in Listenpunkt | Split bis `list_item` (3.2), Nummerierung lückenlos (dieselbe Liste, keine Top-Level-Aufspaltung, 3.3). Live-Vorschau ohne zusätzlichen Spacer (7.4). Datenebene/Rundreise korrekt. |
+| 6 | Umbruch mitten in Überschrift | Split-Regel repliziert `splitBlock` („atEnd → Standardabsatz, sonst gleicher Typ/Level", 3.2) — konsistent mit `Enter`. |
+| 7 | Einfügen + weitertippen (Selection-Sync) | Strukturell unauffällig (Abschnitt 4): reguläre Transaktion, kein DOM-ohne-Transaktion-Pfad. Pflicht-Regressionstest 14.4. |
+| 8 | Kurzes Dokument mit einem Umbruch | Erzwungener Bruch erzeugt zwei Seiten unabhängig von Höhen (7.1) — der Zusatzraum ist per DOM-Attribut/Klasse (6/7.2) eindeutig auf ein Nutzer-`breakBefore` zurückführbar, klar unterscheidbar vom offenen Rendering-Verdacht in `FEATURE-SPEC-DOCX-ODT.md` §8. |
+| 9 | Import mehrerer Umbrüche | Jeder `w:br[type=page]`/`fo:break-before`/`-after` unabhängig verarbeitet (Schleifen 9.5/12.4), keine „nur erster/letzter"-Beschränkung. Evidenz: `saut_page.docx` (2×), `pagebreaks.odt` (2×before+1×after). |
+| 10 | Cross-Format DOCX→ODT→DOCX, Umbruch am Ende | DOCX-Reader synthetisiert höchstens **einen** trailing-Absatz (9.5), ODT verändert dessen Anzahl nicht (kein Fallback dort, 1.1) — per Test 14.1/14.2 zu verifizieren; ein evtl. zusätzlicher Leerabsatz ist dokumentationspflichtig, aber kein Textverlust. |
+| 11 | Löschen des Absatzes nach einem (ODT-Attribut-)Umbruch | Festgelegt: normales Backspace/Entf **auf den Absatz** (nicht `removePageBreak*`, die nur an der exakten Grenze greifen) löscht ihn inkl. seines `breakBefore` — der Umbruch verschwindet **mit** dem Absatz, wandert nicht automatisch. Bewusst einfache, vorhersagbare Regel. |
+| 12 | Umbruch direkt vor/nach Bild/Tabelle | GapCursor → `insertStandaloneFallback` (3.2): eigener leerer Absatz mit `breakBefore` neben dem Bild/der Tabelle, keine Verschiebung/Duplizierung. |
+| 13 | Strg+Z direkt nach Einfügen | Ein Undo-Schritt (3.2: eine Transaktion) — Standard-`prosemirror-history`. |
+| 14 | Datei mit vielen einfachen `<w:br/>` | **Keiner** wird befördert (9.2, allowlist-`runsToInline`). Evidenz: `60329.docx` (85× `<w:br/>`). |
+| 15 | Datei mit `soft-page-break`, ohne `break-before/-after` | **Kein** manueller Umbruch (12.5). Evidenz: `text-extract.odt` (2× soft). |
 
 ---
 
 ## 14. Tests
 
-### 14.1 Neue/erweiterte Unit-Tests
+### 14.1 Unit-Tests (Reader/Writer/Commands/Pagination)
 
-| Datei | Neue Fälle |
+| Datei | Fälle |
 |---|---|
-| `src/formats/shared/editor/__tests__/commands.test.ts` (**neu**) | `insertPageBreak`: teilt Absatz an Cursor-Position, zweiter Teil trägt `breakBefore: true`, ein Undo-Schritt; über Selektion (ersetzt sie); am Dokumentanfang/-ende; in einer Liste (bleibt dieselbe Liste, `list_item`-Split); in einer Überschrift (mittendrin bleibt `heading`, am Ende wird `paragraph`); in einer Tabellenzelle (`hard_break`-Fallback, `isInTable`); GapCursor neben Bild (Standalone-Fallback). `removePageBreakBackward`/`-Forward`: löscht Attribut + merged Nachbarblock; kein Effekt, wenn Cursor nicht exakt an der Grenze steht; kein Crash am Dokumentanfang ohne Vorgänger |
-| `src/formats/shared/editor/__tests__/pagination.test.ts` | Abschnitt 7.5 (5 neue `it`s für `forcedBreakIndices`) |
-| `src/formats/docx/__tests__/roundtrip.test.ts` | `breakBefore: true` auf Absatz/Überschrift → Writer erzeugt exakt `<w:br w:type="page"/>` als erster Run, **nicht** `<w:br/>` ohne Attribut, **nicht** `<w:lastRenderedPageBreak/>`; Rundreise (write→read) erhält `breakBefore` exakt; zwei Absätze mit Umbruch dazwischen → Umbruch bleibt an der richtigen Stelle |
-| `src/formats/docx/__tests__/external-fixtures.test.ts` **oder neue Datei** `src/formats/docx/__tests__/pagebreak.test.ts` | Gegen `saut_page.docx` (Zusatzbefund 0.3): importierte Struktur enthält an den erwarteten Stellen `breakBefore: true`, der eingebettete einfache `<w:br/>` bleibt `hard_break`; gegen `60329.docx`: **kein** Knoten im Ergebnis hat `breakBefore: true` (die 3 `lastRenderedPageBreak` werden vollständig ignoriert) |
-| `src/formats/odt/__tests__/roundtrip.test.ts` | `breakBefore: true` → Writer erzeugt `fo:break-before="page"` im Style des Absatzes selbst; Rundreise erhält es; `fo:break-after`-Import (synthetisches XML) → Attribut landet korrekt auf dem **nächsten** Absatz |
-| `src/formats/odt/__tests__/external-fixtures.test.ts` **oder neue Datei** `src/formats/odt/__tests__/pagebreak.test.ts` | Gegen `pagebreaks.odt`: `P1`/`P2` (`break-before`) UND `P3` (`break-after`) ergeben zusammen die erwartete Abfolge inkl. korrekt verschobenem Umbruch für den `P3`-Fall; gegen `AB_pageBreakBefore.odt`/`pageBreakProblem.odt`: einfacher Fall; gegen `no_pagebreak.odt`: `breakBefore: true` wird zwar auf dem verschachtelten Tabellenzellen-Absatz gelesen (kein Datenverlust), aber `forcedBreakIndicesFrom`-Äquivalent auf Editor-Ebene ignoriert es (kein zusätzlicher Top-Level-Bruch); gegen `text-extract.odt`: **kein** `breakBefore: true` irgendwo im Ergebnis (das enthaltene `text:soft-page-break` wird nicht fehlinterpretiert) |
+| `src/formats/shared/editor/__tests__/commands.test.ts` (**existiert**, erweitern) | `insertPageBreak`: teilt Absatz, zweiter Teil `breakBefore:true`, ein Undo; über Selektion (ersetzt); Anfang/Ende; Liste (dieselbe Liste, `list_item`-Split); Überschrift (mittendrin `heading`, am Ende `paragraph`); Tabellenzelle (`hard_break`-Fallback via `isInTable`); GapCursor neben Bild (Standalone-Fallback). `removePageBreakBackward`/`-Forward`: löscht Attribut, sonst `false`; kein Crash am Dokumentanfang. |
+| `src/formats/shared/editor/__tests__/pagination.test.ts` (**existiert**, erweitern) | Abschnitt 7.5 (5 neue `it`s). |
+| `src/formats/docx/__tests__/roundtrip.test.ts` (neuer `describe`-Block „page break", vgl. Struktur Z. 32/54/62/141) | `breakBefore:true` → exakt `<w:br w:type="page"/>` als erster Run, **nicht** `<w:br/>`/`lastRenderedPageBreak`/`sectPr`; Rundreise write→read erhält `breakBefore`; zwei Absätze mit Umbruch dazwischen. |
+| `src/formats/docx/__tests__/pagebreak.test.ts` (**neu**) | Gegen `saut_page.docx`: an den erwarteten Stellen `breakBefore:true`, der eingebettete einfache `<w:br/>` bleibt `hard_break`. Gegen `60329.docx`: **kein** Knoten hat `breakBefore` (3× `lastRendered` ignoriert **und** 85× `<w:br/>` bleiben `hard_break`). (Nicht in `external-fixtures.test.ts` — das ist ein generischer „importiert ohne Absturz"-Sweep via `readdirSync`.) |
+| `src/formats/odt/__tests__/roundtrip.test.ts` (neuer `describe`-Block, vgl. Z. 34/56/64/143/197) | `breakBefore:true` → `fo:break-before="page"` im Style des Absatzes; Rundreise erhält es; `fo:break-after`-Import (synthetisches XML) → Attribut landet auf dem **nächsten** Absatz. |
+| `src/formats/odt/__tests__/pagebreak.test.ts` (**neu**) | Gegen `pagebreaks.odt`: 2× `break-before` **und** 1× `break-after` ergeben zusammen die erwartete Abfolge (break-after verschiebt korrekt auf den Folgeabsatz). Gegen `AB_pageBreakBefore.odt`/`pageBreakProblem.odt`: einfacher Fall. Gegen `no_pagebreak.odt`: `breakBefore` auf dem Tabellenzellen-Absatz gelesen (kein Datenverlust), aber `forcedBreakIndicesFrom`-Ebene ignoriert es. Gegen `text-extract.odt`: **kein** `breakBefore` irgendwo (2× `soft-page-break` nicht fehlinterpretiert). |
+| `src/formats/shared/__tests__/pageBreakBlocks.test.ts` (**neu**) | `attachPendingBreakBefore`: erster Block ist paragraph/heading → Attribut gesetzt; erster Block ist image/table → leerer Vorab-Absatz (ohne `content`) davor; leeres Array → ein Absatz; `pending=false` → No-Op. |
 
-### 14.2 E2E-Tests (Playwright)
+### 14.2 E2E-Tests (Playwright) — neue Datei `tests/e2e/seitenumbruch.spec.ts`
 
-Neue Datei `tests/e2e/seitenumbruch.spec.ts`, Aufbau wie `tests/e2e/selection-regression.spec.ts`
-(`docxCard`/`odtCard`-Helper, `page.locator('.ProseMirror')`):
+Aufbau wie `selection-regression.spec.ts` (111 Z.; `odtCard`-Helfer Z. 3, `describe` Z. 7, erster
+Test Z. 14) und `docx.spec.ts` (344 Z.; `JSZip.loadAsync(exportedBuffer)` Z. 87,
+`documentXml.toContain(...)` Z. 90–91, `input.setInputFiles(...)` Z. 97):
 
-1. Toolbar-Klick auf „Seitenumbruch einfügen" **und** separat `ControlOrMeta+Enter` → in
-   beiden Fällen erscheint ein `.page-break-spacer--manual`-Element im DOM, der Absatz
-   danach trägt die Klasse `pm-page-break-before`.
-2. Nach dem Einfügen: `page.keyboard.type(...)` landet sichtbar **nach** dem
-   Spacer/Label (Testplan Punkt 3 der Anforderung).
-3. **Pflicht-Regressionssequenz** (direkt im Anschluss an Testfall 1, Testplan Punkt 4 der
-   Anforderung, Grenzfall 7): Text tippen → Seitenumbruch einfügen → `ControlOrMeta+a` →
-   Fett → Klick zur Neupositionierung → `Enter` → weitertippen → beide Textteile bleiben
-   erhalten (identische Technik wie `selection-regression.spec.ts:14–32`).
-4. Backspace unmittelbar nach einem eingefügten Umbruch → Umbruch verschwindet, Text davor
-   und danach bleibt unverändert, in einem Undo-Schritt rückgängig machbar
-   (`ControlOrMeta+z`).
-5. Visuelle Unterscheidbarkeit (Testplan Punkt 6): ein Dokument mit reichlich Freiraum
-   (kein automatischer Umbruch zu erwarten) + einem manuellen Umbruch zeigt **genau ein**
-   `.page-break-spacer--manual`-Element und **kein** einfaches `.page-break-spacer` ohne
-   diesen Modifikator.
-6. Feature-Rundreise (Anforderung 5.2, Testfall 1/2): Neues Dokument, zwei Absätze,
-   Umbruch dazwischen → Export → `JSZip`-Prüfung auf `<w:br w:type="page"/>` bzw.
-   `fo:break-before="page"` (Muster wie `docx.spec.ts:70–83`) → Re-Upload → Umbruch und
-   beide Absätze weiterhin vorhanden. Einmal für die DOCX-Karte, einmal für die ODT-Karte.
-7. Cross-Format (Anforderung 5.2, Testfall 3/4): Umbruch in einem DOCX-Dokument einfügen,
-   als ODT exportieren (falls die App Cross-Format-Export unterstützt — sonst: DOCX
-   exportieren → in der ODT-Karte reimportieren, je nach tatsächlichem App-Workflow zu
-   verifizieren) → weiterhin vorhanden; umgekehrte Richtung ebenso.
-8. Import einer echten Fremddatei (`tests/fixtures/external/docx/saut_page.docx` per
-   `input.setInputFiles`, Muster wie `docx.spec.ts:85–97`) → Umbruch sichtbar als
-   `pm-page-break-before` erkennbar → Export → Re-Import → weiterhin vorhanden. Ebenso für
-   `tests/fixtures/external/odt/pagebreaks.odt`.
+1. Toolbar-Klick „Seitenumbruch einfügen" **und** separat `ControlOrMeta+Enter` → je ein
+   `.page-break-spacer--manual` im DOM, der Folgeabsatz trägt `pm-page-break-before`; adressiert
+   über `getByRole('button', { name: 'Seitenumbruch einfügen' })`.
+2. Nach dem Einfügen: `page.keyboard.type(...)` landet sichtbar **nach** dem Spacer/Label.
+3. **Pflicht-Regressionssequenz** (Grenzfall 7, direkt im Anschluss an Fall 1): Text tippen →
+   Umbruch einfügen → `ControlOrMeta+a` → Fett → Klick zum Neupositionieren → `Enter` →
+   weitertippen → beide Textteile bleiben erhalten (Technik wie `selection-regression.spec.ts:14`).
+4. Backspace unmittelbar nach eingefügtem Umbruch → Umbruch verschwindet (Attribut gelöscht), Text
+   davor/danach unverändert, `ControlOrMeta+z` macht es in einem Schritt rückgängig.
+5. Visuelle Unterscheidbarkeit (Testplan Punkt 7): Dokument mit viel Freiraum + einem manuellen
+   Umbruch zeigt **genau ein** `.page-break-spacer--manual` und **kein** einfaches
+   `.page-break-spacer` ohne Modifikator.
+6. Feature-Rundreise (5.2 Fall 1/2): zwei Absätze, Umbruch dazwischen → Export → `JSZip`-Prüfung
+   auf `<w:br w:type="page"/>` bzw. `fo:break-before="page"` → Re-Upload → Umbruch + beide Absätze
+   vorhanden. Je einmal DOCX-Karte und ODT-Karte.
+7. Cross-Format (5.2 Fall 3/4): je nach tatsächlichem App-Workflow (Export in einem Format →
+   Reimport im anderen) — beide Richtungen, Umbruch bleibt erhalten.
+8. Echte Fremddatei (`input.setInputFiles`, Muster `docx.spec.ts:97`):
+   `tests/fixtures/external/docx/saut_page.docx` → 2 Umbrüche als `pm-page-break-before` erkennbar
+   → Export → Re-Import → weiterhin vorhanden; ebenso `tests/fixtures/external/odt/pagebreaks.odt`.
 
-### 14.3 Rundreise-Tests (Anforderung Abschnitt 5)
+### 14.3 Rundreise (Anforderung Abschnitt 5)
 
 - **5.1 Baseline:** bestehende `docx.spec.ts`/`odt.spec.ts`/beide `roundtrip.test.ts`/beide
-  `external-fixtures.test.ts` müssen vor **und** nach allen Änderungen weiterhin grün
-  bleiben — insbesondere `60329.docx` (nur `lastRenderedPageBreak`, darf nach der
-  Erweiterung **weiterhin** keinen `breakBefore` erzeugen) und `text-extract.odt` (nur
-  `soft-page-break`, ebenso).
-- **5.2 Feature-Rundreise:** siehe 14.1 (Unit, Reader/Writer-Ebene) **und** 14.2 Punkte 6–8
-  (E2E, echte Bedienung + echter Download/Re-Upload) — beide Ebenen sind laut Testplan
-  Punkt 7 der Anforderung verpflichtend, nicht nur eine.
+  `external-fixtures.test.ts`/beide `reader.test.ts` müssen **vor und nach** allen Änderungen grün
+  bleiben — insbesondere `60329.docx` (nach der Erweiterung **weiterhin** kein `breakBefore` aus
+  85× `<w:br/>` oder 3× `lastRendered`) und `text-extract.odt` (kein `breakBefore` aus 2× soft).
+- **5.2 Feature-Rundreise:** 14.1 (Unit) **und** 14.2 Punkte 6–8 (E2E, echte Bedienung + echter
+  Download/Re-Upload) — beide Ebenen verpflichtend (Anforderung Testplan Punkt 8).
 
-### 14.4 Regressionstest-Pflicht (`FEATURE-SPEC-DOCX-ODT.md` Abschnitt 2)
+### 14.4 Selection-Sync-Regression (`FEATURE-SPEC-DOCX-ODT.md` Abschnitt 2)
 
-14.2 Punkt 3 wird zusätzlich als eigener `test()` in den bestehenden
-`describe`-Block von `tests/e2e/selection-regression.spec.ts` (Zeilen 7–72) aufgenommen —
-nicht nur in der neuen `seitenumbruch.spec.ts` —, damit er dauerhaft Teil der
-Selection-Sync-Regressions-Suite bleibt und nicht versehentlich isoliert vergessen wird.
+14.2 Punkt 3 zusätzlich als eigener `test()` in den `describe`-Block von
+`tests/e2e/selection-regression.spec.ts` (Z. 7 ff.) aufnehmen — nicht nur in `seitenumbruch.spec.ts`
+—, damit er dauerhaft Teil der Selection-Sync-Suite bleibt.
 
 ---
 
 ## 15. Reihenfolge der Umsetzung
 
-1. Schema (Abschnitt 2) + `commands.ts` (Abschnitt 3) + Unit-Tests dafür
-   (`commands.test.ts`) — Datenmodell und Kernverhalten zuerst, unabhängig von
-   Import/Export.
-2. `WordEditor.tsx` (Abschnitt 4) + `Toolbar.tsx` (Abschnitt 5) — Bedienung sichtbar/
-   erreichbar machen.
-3. `pagination.ts` (Abschnitt 7) + `index.css` (Abschnitt 6.1) + Unit-Tests
-   (Abschnitt 7.5) — visuelle Kennzeichnung.
-4. `docx/writer.ts` (Abschnitt 8) + Unit-Tests — DOCX-Export.
-5. `shared/pageBreakBlocks.ts` (Abschnitt 10) + `docx/reader.ts` (Abschnitt 9) +
-   Unit-/Fixture-Tests gegen `saut_page.docx`/`60329.docx` — DOCX-Import, der
-   aufwendigste Einzelschritt.
-6. `styleRegistry.ts` + `odt/writer.ts` (Abschnitt 11) + Unit-Tests — ODT-Export.
-7. `odt/reader.ts` (Abschnitt 12) + Unit-/Fixture-Tests gegen `pagebreaks.odt`,
-   `AB_pageBreakBefore.odt`, `no_pagebreak.odt`, `text-extract.odt` — ODT-Import.
-8. Baseline-Rundreise (14.3) gegen alle bestehenden Tests laufen lassen — muss grün
-   bleiben, bevor E2E-Tests ergänzt werden.
-9. `tests/e2e/seitenumbruch.spec.ts` (Abschnitt 14.2) + Ergänzung in
-   `selection-regression.spec.ts` (Abschnitt 14.4).
-10. Grenzfälle-Liste (Abschnitt 13) einzeln gegenprüfen und Ergebnis dokumentieren.
-11. `npm run build` (`tsc -b`, `noUnusedLocals`/`noUnusedParameters: true` laut
-    `tsconfig.app.json:20`) tatsächlich ausführen — insbesondere nach Abschnitt 9/12, da
-    dort mehrere Funktionssignaturen geändert werden und alle Aufrufstellen (`parseTable`,
-    Header-/Footer-Pfade) synchron mitgezogen werden müssen.
+1. Schema (2) + `commands.ts` (3) + `commands.test.ts` erweitern (14.1) — Datenmodell/Kernverhalten
+   zuerst, unabhängig von Import/Export.
+2. `WordEditor.tsx` (4, **additiv**) + `Toolbar.tsx` (5) — Bedienung erreichbar.
+3. `pagination.ts` (7) + `index.css` (6) + `pagination.test.ts` erweitern (7.5) — visuelle
+   Kennzeichnung.
+4. `docx/writer.ts` (8) + `docx/roundtrip.test.ts`-Block (14.1) — DOCX-Export.
+5. `shared/pageBreakBlocks.ts` (10) + `docx/reader.ts` (9) + `pageBreakBlocks.test.ts`/
+   `docx/pagebreak.test.ts` gegen `saut_page.docx`/`60329.docx` — DOCX-Import, aufwendigster
+   Schritt. **Alle drei `paragraphToBlocks`-Aufrufstellen** (9.3) mitziehen.
+6. `styleRegistry.ts` + `odt/writer.ts` (11) — ODT-Export (`headingStyleName`-Signaturänderung an
+   ihrer einzigen weiteren Aufrufstelle mitziehen).
+7. `odt/reader.ts` (12) + `odt/pagebreak.test.ts` gegen `pagebreaks.odt`/`AB_pageBreakBefore.odt`/
+   `no_pagebreak.odt`/`text-extract.odt` — ODT-Import.
+8. Baseline-Rundreise (14.3) grün bestätigen, bevor E2E ergänzt wird.
+9. `tests/e2e/seitenumbruch.spec.ts` (14.2) + Ergänzung in `selection-regression.spec.ts` (14.4).
+10. Grenzfälle (13) einzeln gegenprüfen und Ergebnis dokumentieren.
+11. `npm run build` (`tsc -b`; `tsconfig.app.json` `noUnusedLocals`/`noUnusedParameters`) **real**
+    ausführen — insbesondere nach 9/11/12, da mehrere Signaturen geändert werden
+    (`paragraphToBlocks` 3 Stellen, `headingStyleName` 2 Stellen) und alle Aufrufstellen synchron
+    mitmüssen.
 
 ---
 
 ## 16. Abnahme-Checkliste (Bezug: `seitenumbruch-req.md` Abschnitt 7)
 
-- [ ] Toolbar-Button, `Mod-Enter`, sichtbare Kennzeichnung, Löschen via Entf/Backspace —
-      alle vier tatsächlich vorhanden und funktionsfähig (Abschnitte 3–6).
-- [ ] Alle Testfälle aus Abschnitt 14 automatisiert vorhanden und grün.
-- [ ] Grenzfälle aus Abschnitt 13 einzeln befundet (funktioniert wie spezifiziert /
-      bewusst abweichend + dokumentiert / repariert) — insbesondere Grenzfall 4/5 als
-      „funktioniert auf Datenebene vollständig, Live-Vorschau mit dokumentierter,
-      vorbestehender Einschränkung" festgehalten, nicht stillschweigend übergangen.
-- [ ] Baseline-Rundreise (5.1) bleibt für **alle** bestehenden Tests grün, insbesondere
-      `60329.docx` und `text-extract.odt` (Abschnitt 14.3).
-- [ ] Feature-Rundreise (5.2) für DOCX, ODT, beide Cross-Format-Richtungen, inklusive der
-      bereits im Repo vorhandenen realen Fixtures aus Abschnitt 0.3 (kein Beschaffen neuer
-      Dateien nötig, entgegen der ursprünglichen Annahme in der Anforderungsdatei).
-- [ ] Selection-Sync-Regressionstest mit Seitenumbruch-Sequenz (Abschnitt 14.4) grün und
-      dauerhaft Teil von `selection-regression.spec.ts`.
-- [ ] Zusammenspiel mit automatischer Paginierung (Abschnitt 7) geprüft und die bewusste
-      Einschränkung aus Abschnitt 7.4 (keine Live-Vorschau-Aufteilung bei
-      Listen-/Tabellen-Verschachtelung) explizit dokumentiert, nicht nur implizit belassen.
-- [ ] `npm run build` läuft nach allen Änderungen fehlerfrei durch (Abschnitt 15 Punkt 11).
+- [ ] Toolbar-Button (SVG, zugänglicher Name), `Mod-Enter`, sichtbare Kennzeichnung, Löschen via
+      Entf/Backspace — alle vier vorhanden und funktionsfähig (Abschnitte 3–6).
+- [ ] `Shift-Enter` (Zeilenumbruch) und `Shift-Delete` (Ausschneiden) **weiterhin** funktionsfähig
+      (Keymap nur additiv erweitert, Abschnitt 4 / 0.0 Punkt 1).
+- [ ] Alle Testfälle aus Abschnitt 14 automatisiert und grün — inkl. der DOCX-Reader-Fälle
+      (`saut_page.docx`, `60329.docx`) und ODT-Reader-Fälle (`pagebreaks.odt` mit `break-before`
+      **und** `break-after`, `text-extract.odt`).
+- [ ] Die verifizierten stillen Datenverluste (DOCX-Reader-Degradierung 0.2, ODT-Reader-Ignoranz
+      von `break-before`/`-after`) nachweislich behoben.
+- [ ] Grenzfälle (13) einzeln befundet — insbesondere 4/5 als „Datenebene vollständig,
+      Live-Vorschau mit dokumentierter, vorbestehender Einschränkung (7.4)".
+- [ ] Baseline-Rundreise (5.1) bleibt für **alle** Bestandstests grün, insbesondere `60329.docx`
+      und `text-extract.odt`.
+- [ ] Feature-Rundreise (5.2) für DOCX, ODT und **beide** Cross-Format-Richtungen, inkl. der
+      realen Fixtures aus 0.3.
+- [ ] Selection-Sync-Regressionstest mit Seitenumbruch-Sequenz (14.4) grün und dauerhaft Teil von
+      `selection-regression.spec.ts`.
+- [ ] Zusammenspiel mit der automatischen Paginierung (7) geprüft, Einschränkung 7.4 dokumentiert.
+- [ ] `npm run build` läuft nach allen Änderungen fehlerfrei (Abschnitt 15 Punkt 11).
 
-Erst wenn alle Punkte erfüllt sind, darf der Backlog-Status von `seitenumbruch` von
-„fehlt" auf „vorhanden" wechseln — andernfalls „teilweise" mit Verweis auf die konkret
-offenen Punkte, analog zur in `seitenumbruch-req.md` Abschnitt 7 festgelegten Vorgehensweise.
+Erst wenn alle Punkte erfüllt sind, darf der Backlog-Status von `seitenumbruch` von „fehlt" auf
+„vorhanden" wechseln — sonst „teilweise" mit Verweis auf die konkret offenen Punkte.

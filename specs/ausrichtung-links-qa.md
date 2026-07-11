@@ -16,6 +16,10 @@ Ebenen, die sich ergänzen, aber **keine ersetzen darf**:
    `setInputFiles()`-Upload, echter `page.waitForEvent('download')`-Export,
    Prüfung der **tatsächlich heruntergeladenen Datei** (nicht nur ein
    interner Aufruf von `readDocx`/`readOdt`/`writeDocx`/`writeOdt`/`setAlign`).
+   Diese Ebene ist von Natur aus race-anfällig (maschinelle Eingabe-
+   geschwindigkeit); die **verbindlichen Determinismus-Regeln in Abschnitt
+   2.0.0** (Selektions-Sync abwarten, keine zu schnellen Tastenfolgen) gelten
+   für **jeden** Testfall dieser Ebene und sind Teil der Abnahme (Abschnitt 4).
 
 Besonderheit dieser Anforderung gegenüber Fett/Kursiv/Unterstrichen: Ausrichtung
 ist ein **Knoten-Attribut mit reiner Setzen-Semantik** (kein Toggle, siehe
@@ -25,19 +29,29 @@ einem betroffenen Block eine Exception). Ein großer Teil dieses Testplans
 existiert deshalb explizit als **Regressionstest für die in `ausrichtung-links-code.md`
 Abschnitt 3 beschriebenen Fixes**, nicht nur als Neuabdeckung der Anforderung.
 
-Referenzierte Fixtures:
-`tests/fixtures/external/docx/bug-paragraph-alignment.docx`,
-`tests/fixtures/external/docx/rtl.docx`,
-`tests/fixtures/external/docx/table-indent.docx`,
-`tests/fixtures/external/docx/unicode-path.docx`,
-`tests/fixtures/external/odt/EasyList.odt`,
-`tests/fixtures/external/odt/feature_bullets_numbering.odt`,
-`tests/fixtures/external/odt/tableRowDeletionTest.odt`,
-`tests/fixtures/external/odt/FruitDepot-SeasonalFruits4.odt`,
-`tests/fixtures/external/odt/fields.odt`,
-`tests/fixtures/external/odt/feature_attributes_paragraph_MSO2013.odt`,
-`tests/fixtures/external/odt/HelloWorld.odt` — alle Dateien bereits im
-Repo vorhanden (`ls`-geprüft), keine neuen Fixtures zu beschaffen.
+Referenzierte Fixtures (alle bereits im Repo, Existenz **und** tatsächlicher
+`w:jc`-/`fo:text-align`-Inhalt gegen die entpackten XML-Container direkt geprüft
+— siehe die verbindliche **Fixture-Verifikation** in Abschnitt 1.3; **nicht** nur
+`ls`-, sondern inhaltsgeprüft, weil ein bloßer Dateiname bzw. ein rohes
+`grep fo:text-align` hier in die Irre führt):
+
+- DOCX, `w:pPr/w:jc` (Absatzebene, verifiziert): `bug-paragraph-alignment.docx`
+  (Absatz 1 zentriert **nur** über Formatvorlage `Title`, Absatz 2 direktes
+  `w:jc="left"`), `rtl.docx` / `table-indent.docx` / `unicode-path.docx` (je
+  `w:jc="start"` im `w:pPr`).
+- ODT **mit echter Absatz-Ausrichtung** (verifiziert body-/absatzwirksam):
+  `feature_attributes_paragraph_MSO2013.odt` (`center`/`end`/`justify` auf
+  Body-Absätzen — die Leit-Fixture für Fehler 5), `FruitDepot-SeasonalFruits4.odt`
+  (`start` auf einem Body-Absatz), `tableRowDeletionTest.odt` (`end`, aber auf
+  Absätzen **in Tabellenzellen**), `HelloWorld.odt` (kein `fo:text-align` →
+  Default).
+- ODT als **Negativtest** (`fo:text-align="end"` liegt hier ausschließlich in der
+  Listen-**Nummerierung** `style:list-level-properties`, **nicht** auf Absätzen —
+  darf die Absatzausrichtung folglich **nicht** verändern): `EasyList.odt`,
+  `feature_bullets_numbering.odt`.
+- **Nicht verwendet:** `fields.odt` (`fo:text-align="start"` steht auf einem nie
+  von einem Absatz referenzierten, verwaisten Automatikstil → ohne Wirkung; als
+  Ausrichtungs-Beleg untauglich).
 
 ---
 
@@ -118,18 +132,48 @@ Handgebaute `.docx`-Dateien im JSZip-Muster von `buildSampleDocx()`
 
 Analog für ODT — Fokus auf Fehler 5 (fehlende Normalisierung von
 `fo:text-align`) und die Grenzfälle 4.10/5.2 Testfall 7, ausschließlich mit
-**echten** Fremddateien aus dem vorhandenen Korpus (kein synthetisches Fixture
-nötig, da bereits ausreichend reale Belege vorliegen laut
-`ausrichtung-links-code.md` Abschnitt 3.5).
+**echten** Fremddateien aus dem vorhandenen Korpus.
+
+> **Fixture-Verifikation (verbindlich, 2026-07-05 gegen die entpackten
+> `content.xml` direkt geprüft).** `ausrichtung-links-code.md` Abschnitt 3.5/6.3
+> nennt als Fehler-5-Beleg u. a. „`EasyList.odt` → `end`". Diese Abkürzung ist —
+> exakt im Sinne des Korrekturhinweises der Anforderung — **ungeprüft und für den
+> Absatz-Ausrichtungs-Test falsch**: Der ODT-Reader (`parseAutomaticStyles`)
+> übernimmt `fo:text-align` **nur** aus `style:paragraph-properties` eines
+> `style:style` mit `style:family="paragraph"`, der auch tatsächlich von einem
+> `text:p`/Heading **referenziert** wird. `fo:text-align` in
+> `style:list-level-properties` (Listen-**Nummerierungs**-Ausrichtung) oder auf
+> einem nie referenzierten Automatikstil beeinflusst die Absatzausrichtung
+> **nicht**. Ein bloßes `grep fo:text-align` genügt daher **nicht**. Die
+> tatsächlichen, kontextgeprüften Werte:
+>
+> | Datei | `fo:text-align` (Anzahl) | Kontext | Reader-Ergebnis für Absätze |
+> |---|---|---|---|
+> | `feature_attributes_paragraph_MSO2013.odt` | `center`×2, `end`×2, `justify`×2 | **paragraph-properties**, alle referenzierten **Body-Absätze** | `center` / `right` / `justify` — **Leit-Fixture** für `end`→`right` |
+> | `FruitDepot-SeasonalFruits4.odt` | `start`×2 | paragraph-properties; **P4 = Body-Absatz** referenziert (P5 in Tabelle) | `left` |
+> | `tableRowDeletionTest.odt` | `end`×4 | paragraph-properties, aber **alle in Tabellenzellen** | `right` (auf den Zell-Absätzen) |
+> | `HelloWorld.odt` | keins | Absatz referenziert nur „Standard" | `left` (Fallback) |
+> | `EasyList.odt` | `end`×3 | **`list-level-properties`** (Nummerierung), **kein** Absatz-`end` | **`left`** — kein Absatz ist rechtsbündig |
+> | `feature_bullets_numbering.odt` | `end`×28 | **`list-level-properties`**, kein Absatz-`end` | **`left`** |
+> | `fields.odt` | `start`×1 | paragraph-properties, Stil **nie referenziert** | ohne Wirkung (verworfen) |
+>
+> Konsequenz: `end`→`right` wird an `feature_attributes_paragraph_MSO2013.odt`
+> (Body) **und** `tableRowDeletionTest.odt` (Zellen) belegt; `start`→`left` an
+> `FruitDepot-SeasonalFruits4.odt`. `EasyList.odt`/`feature_bullets_numbering.odt`
+> sind **Negativtests** (Absätze müssen `left` bleiben). Der Beleg „EasyList → end"
+> in `ausrichtung-links-code.md` ist auf die Listen-Nummerierung zu präzisieren.
+
+Handbau nicht nötig — die realen Fixtures decken alle relevanten Fälle ab. Muster
+für den Fixture-Import wie `odt/__tests__/external-fixtures.test.ts`.
 
 | # | Testfall | Eingabe | Erwartung | Deckt |
 |---|---|---|---|---|
-| 1 | `EasyList.odt` (`fo:text-align="end"`) | `readOdt` | betroffene Absätze `align: 'right'` (nicht wörtlich `'end'`) | **Fehler 5** |
-| 2 | `feature_bullets_numbering.odt`, `tableRowDeletionTest.odt` (`end`) | je Datei | `align: 'right'` | Fehler 5, zusätzliche Belege |
-| 3 | `FruitDepot-SeasonalFruits4.odt`, `fields.odt` (`start`) | je Datei | `align: 'left'` | Fehler 5/Grenzfall 4.10 |
-| 4 | `feature_attributes_paragraph_MSO2013.odt` (gemischt `center`/`end`/`justify` im selben Dokument) | `readOdt` | je Absatz korrekt unterschiedene Werte (`'center'`/`'right'`/`'justify'`), keine Vermischung zwischen Absätzen | Fehler 5, gemischter Fall |
-| 5 | `HelloWorld.odt` (Absatz referenziert nur Formatvorlage „Standard", kein `fo:text-align`) | `readOdt` | `align: 'left'` (Fallback über `paragraphAligns.get(...) === undefined`) | Grenzfall 4.10, Anforderung 5.2 Testfall 7 |
-| 6 | Nach Fix: interner Wert ist **niemals** wörtlich `'start'`/`'end'` | alle Fixtures aus #1–4 durchlaufen, Assertion prüft zusätzlich negativ (`align !== 'start' && align !== 'end'`) | keine rohen ODF-Werte im Dokumentmodell | Fehler 5, Abschluss-Check |
+| 1 | **Leit-Beleg Fehler 5:** `feature_attributes_paragraph_MSO2013.odt` (gemischt `center`/`end`/`justify` auf Body-Absätzen) | `readOdt` | je Absatz korrekt unterschieden: die `end`-Absätze → `align: 'right'` (nicht wörtlich `'end'`), die `center`-Absätze → `'center'`, die `justify`-Absätze → `'justify'`; keine Vermischung zwischen Absätzen | **Fehler 5** (`end`→`right`), gemischter Fall |
+| 2 | `tableRowDeletionTest.odt` (`end` auf Absätzen in Tabellenzellen) | `readOdt` | die betroffenen Zell-Absätze `align: 'right'` — bestätigt, dass die Normalisierung auch für Absätze **in Tabellenzellen** greift | Fehler 5, Tabellenzell-Absätze |
+| 3 | `FruitDepot-SeasonalFruits4.odt` (`start` auf Body-Absatz P4) | `readOdt` | dieser Absatz `align: 'left'` (bewusste LTR-Vereinfachung `start`→`left`, `ausrichtung-links-code.md` Abschnitt 4) | Fehler 5 / Grenzfall 4.10 |
+| 4 | `HelloWorld.odt` (Absatz referenziert nur „Standard", kein `fo:text-align`) | `readOdt` | `align: 'left'` (Fallback über `paragraphAligns.get(...) === undefined`) | Grenzfall 4.10, Anforderung 5.2 Testfall 7 |
+| 5 | **Negativtest (Reader-Scope):** `EasyList.odt` und `feature_bullets_numbering.odt` (`fo:text-align="end"` **ausschließlich** in `style:list-level-properties`) | `readOdt` je Datei | **alle** Absätze `align: 'left'` — die Listen-Nummerierungs-Ausrichtung darf **nicht** in die Absatzausrichtung durchschlagen (weder heute noch nach dem Fehler-5-Fix darf `parseAutomaticStyles` `list-level-properties`-`text-align` einlesen) | verhindert einen falschen „Fix" |
+| 6 | Nach Fix: interner Wert ist **niemals** wörtlich `'start'`/`'end'` | alle Fixtures aus #1–3 durchlaufen, Assertion prüft zusätzlich negativ (`align !== 'start' && align !== 'end'`) | keine rohen ODF-Werte im Dokumentmodell | Fehler 5, Abschluss-Check |
 
 ### 1.4 Erweiterung: `src/formats/docx/__tests__/roundtrip.test.ts` und `src/formats/odt/__tests__/roundtrip.test.ts`
 
@@ -160,6 +204,61 @@ per JSZip von Hand gebaut (Muster `buildSampleDocx()`/`buildSampleOdt()` aus
 **echten** Fixture-Dateien direkt hochgeladen — das stellt sicher, dass ein
 Rundreise-Test nicht zufällig nur beweist, dass Writer und Reader sich
 gegenseitig kompensieren.
+
+### 2.0.0 Determinismus: Race-Conditions vermeiden (verbindlich für JEDEN Test unten)
+
+Diese Suite bedient den Editor mit maschineller, menschlich unerreichbarer
+Geschwindigkeit. Genau dadurch entstehen im Repo wiederkehrend **flaky** Tests —
+zuletzt in `selection-regression.spec.ts` und `cut.spec.ts` (Mobile-Projekt),
+siehe Commits `db61c89`, `0797d13`, `29cbc80`. Ursache ist immer dieselbe: eine
+Tastatureingabe läuft der **asynchronen** Selektions-Synchronisierung von
+ProseMirror voraus. Die folgenden Regeln sind für alle E2E-Testfälle unten
+**verbindlich**; ein Testfall, der sie verletzt, gilt als fehlerhaft, auch wenn
+er zufällig grün läuft.
+
+1. **Nach einer nativen, tastatur- oder klickgetriebenen Cursor-Bewegung**
+   (`End`, `Home`, Pfeiltasten, `editor.click()` zur Neupositionierung) **und
+   vor der nächsten davon abhängigen Taste** (`Enter`, Tippen, `Shift+…`):
+   `await page.waitForTimeout(50)` einfügen. ProseMirror erfährt native
+   Cursor-Bewegungen **nur** über das asynchrone `selectionchange`-Event; ein
+   sofort folgendes `press()` kann der Synchronisierung vorauslaufen und auf der
+   Position **vor** der Bewegung wirken. Verbindlicher Beleg und Wortlaut:
+   `tests/e2e/selection-regression.spec.ts` Z. 27–34. Der Wert **50 ms** ist der
+   im Repo etablierte — kein anderes „magisches" Warten erfinden, keinen
+   niedrigeren Wert wählen.
+2. **Nach einem Toolbar-Klick** (der über `run` → `view.focus()` +
+   `reconcileSelectionOnClick` läuft) den DOM-Effekt per **web-first-Assertion**
+   abwarten, **bevor** die nächste selektionsabhängige Aktion folgt — z. B.
+   `await expect(page.getByTitle('Linksbündig ausrichten')).toHaveAttribute('aria-pressed', 'true')`
+   bzw. `await expect(editor.locator('p[style*="text-align: left"]')).toHaveCount(n)`.
+   Die Assertion **ist** der Synchronisationspunkt. Insbesondere **kein**
+   `Strg+A` → Formatklick → sofort erneut `Strg+A`, ohne dazwischen den
+   Formatzustand per Assertion abzuwarten.
+3. **Ausschließlich web-first, auto-retriende Assertions** (`await expect(locator).toHave…`)
+   verwenden, nie `expect(await locator.getAttribute(...))` unmittelbar nach
+   einer asynchronen Selektions-/Formatänderung — Einmal-Auslesen des DOM ist
+   die zweithäufigste Flaky-Quelle nach Regel 1.
+4. **`page.on('pageerror', …)` (und für Fehler 1 zusätzlich
+   `page.on('console', m => m.type() === 'error' && …)`) vor der auslösenden
+   Aktion registrieren** (Muster: `docx.spec.ts` Z. 256–257), am Testende
+   `expect(errors, errors.join('\n')).toEqual([])`. Ein nachträglich
+   registrierter Listener verpasst die Exception aus Fehler 1.
+5. **Tastenkürzel** (`Strg+L/E/R/J`, `Strg+Z/Y`) erst drücken, wenn der Editor
+   nachweislich fokussiert ist (vorher `await editor.click()`), sonst wirkt das
+   Kürzel auf den Browser (Regel-Testfall §2.5 #5 nutzt genau das umgekehrt).
+6. **Touch-Projekte (`Mobile`/Pixel 7, `Tablet`/iPad Mini) beachten:**
+   mausbasierte Drag-Selektionen — insbesondere die `CellSelection` per
+   Zell-Drag in §2.3 #2 und §2.10 — verhalten sich auf Touch-Geräten anders als
+   auf Desktop (kein Hover, kein 1:1-Maus-Drag). Solche Tests entweder auf eine
+   tastatur-/`Shift`-basierte Selektion umstellen **oder** per Projektfilter auf
+   `Desktop Chrome` beschränken (Muster: `playwright.config.ts` `testMatch`;
+   dokumentiertes Skip-Muster: Commit `29cbc80`) und die Einschränkung
+   **explizit** im Test vermerken — nicht still auf allen Projekten flaky lassen.
+
+Diese Regeln ersetzen **nicht** den eigentlichen Selection-Sync-Fix im
+Produktivcode (`reconcileSelectionOnClick`); sie stellen nur sicher, dass die
+Tests eine echte Regression sehen statt an ihrer eigenen Geschwindigkeit zu
+scheitern.
 
 ### 2.0 Neue Datei: `tests/e2e/align-left.spec.ts`
 
@@ -200,7 +299,7 @@ stillschweigend zu akzeptieren.
 
 | # | Testfall | Schritte | Assertion |
 |---|---|---|---|
-| 1 | **Kernregressionstest**: zwei Absätze zentrieren, dann per echtem Klick auf zwei Absätze linksbündig setzen | `editor.click()` → `type('Erster Absatz.')` → `Enter` → `type('Zweiter Absatz.')` → `ControlOrMeta+a` → `getByTitle('Zentriert ausrichten').click()` → `ControlOrMeta+a` erneut → `getByTitle('Linksbündig ausrichten').click()` | **keine** Konsolenfehler (`page.on('console', ...)`/`pageerror`-Listener registriert vor der Aktion, muss leer bleiben); **beide** `<p>` haben `style*="text-align: left"`; Button „Links" `aria-pressed="true"` | **Fehler 1** — vor dem Fix: Exception, nur der erste Absatz wird geändert |
+| 1 | **Kernregressionstest**: zwei Absätze zentrieren, dann per echtem Klick auf zwei Absätze linksbündig setzen | `editor.click()` → `type('Erster Absatz.')` → `Enter` → `type('Zweiter Absatz.')` → `ControlOrMeta+a` → `getByTitle('Zentriert ausrichten').click()` → **Sync-Punkt (Determinismus-Regel 2): `await expect(editor.locator('p[style*="text-align: center"]')).toHaveCount(2)` abwarten** → `ControlOrMeta+a` erneut → `getByTitle('Linksbündig ausrichten').click()` | **keine** Konsolenfehler (`pageerror`- **und** `console`-error-Listener **vor** der Aktion registriert, Regel 4, müssen leer bleiben); **beide** `<p>` haben `style*="text-align: left"` (per `await expect(...).toHaveCount(2)`, nicht per Einmal-`getAttribute`, Regel 3); Button „Links" `aria-pressed="true"` | **Fehler 1** — vor dem Fix: Exception, nur der erste Absatz wird geändert |
 | 2 | Gemischte Ausgangsausrichtung über zwei Absätze | Absatz 1 zentrieren, Absatz 2 unverändert (bereits links) lassen, beide selektieren, „Links" klicken | beide Absätze danach `text-align: left` im DOM | Testfall 4/Grenzfall 4.4 |
 | 3 | Strg+A über ein Dokument mit vielen Absätzen (Grenzfall 4.13) | zehn Absätze per Schleife eintippen (`for`-Schleife über `page.keyboard.type`+`Enter`), `Strg+A`, „Links" klicken | Stichprobe: erster, mittlerer, letzter `<p>` jeweils `text-align: left`; Aktion bleibt innerhalb angemessener Zeit (`await expect(...).toHaveCount(10, { timeout: 5000 })` o. ä.), kein Hänger |
 | 4 | Cursor an Absatzgrenze zwischen unterschiedlich ausgerichteten Absätzen | Absatz 1 zentrieren, Absatz 2 links, Cursor exakt ans Ende von Absatz 1 setzen (`End`-Taste am Ende von Absatz 1) | Button-Zustand für „Links"/„Zentriert" wird dokumentiert (welcher der beiden gilt) — Ergebnis hier **festhalten**, Test schlägt fehl, falls sich das Verhalten später unbemerkt ändert | Grenzfall 4.5 |
@@ -250,6 +349,16 @@ Jedes Szenario prüft die **heruntergeladene Datei**
 für DOCX `word/document.xml`, für ODT `content.xml`), nicht nur, dass der
 Editor nach Re-Import „irgendwie richtig aussieht".
 
+**Load-bearing Ablaufdetail für jeden Re-Import** (sonst schlägt der Test
+zuverlässig fehl, nicht flaky): Der Datei-`input[type="file"]` existiert **nur
+auf dem Startbildschirm (Format-Auswahl)**, nicht im geöffneten Editor. Vor dem
+zweiten `setInputFiles(...)` daher zurück zur Auswahl navigieren —
+`await page.getByRole('button', { name: /formate/i }).click()` — dann erneut
+`docxCard/odtCard(...).locator('input[type="file"]')` holen (Muster:
+`docx.spec.ts` Z. 241–247). Hochgeladen werden die **exakt heruntergeladenen
+Bytes** (`buffer: exportedBuffer`), nicht das In-Memory-Objekt aus dem ersten
+Schritt.
+
 **5.1 DOCX**
 
 | # | Szenario | Ablauf | Assertion an heruntergeladener Datei |
@@ -271,8 +380,9 @@ Editor nach Re-Import „irgendwie richtig aussieht".
 | 3 | Zwei linksbündige Textläufe teilen sich einen Stil | zwei Absätze, beide links, exportieren | `content.xml`: beide referenzieren **denselben** `Ppara-left`-Stil (keine Duplizierung) |
 | 4 | Listenpunkt, linksbündig | analog DOCX #4 | Ausrichtung und Listenzugehörigkeit erhalten |
 | 5 | Cross-Format DOCX → ODT | DOCX mit linksbündigem Text hochladen, als ODT exportieren | `content.xml`: `fo:text-align="left"` |
-| 6 | Reale Fremddatei `EasyList.odt` (`fo:text-align="end"`) importieren | Datei hochladen | betroffene Absätze im Editor `text-align: right` (**nicht** `start`/`end` wörtlich im DOM), Fix für Fehler 5 |
-| 7 | Reale Fremddatei `HelloWorld.odt` (kein `fo:text-align`) importieren | Datei hochladen | Absatz `text-align: left`, Button „Links" aktiv |
+| 6 | Reale Fremddatei `feature_attributes_paragraph_MSO2013.odt` (Body-Absätze `center`/`end`/`justify`) importieren | Datei hochladen | die `end`-Absätze im Editor mit `text-align: right` (**nicht** `end` wörtlich im DOM); Cursor in einen `end`-Absatz → Button „Rechtsbündig" `aria-pressed="true"`, „Links" `false`; Fix für Fehler 5 (siehe Fixture-Verifikation in 1.3 — **nicht** `EasyList.odt`, dessen `end` reine Listen-Nummerierung ist) |
+| 7 | **Negativtest im Browser:** `EasyList.odt` (`fo:text-align="end"` nur in `list-level-properties`) importieren | Datei hochladen | **alle** Absätze im Editor `text-align: left`; Button „Links" aktiv — die Listen-Nummerierungs-Ausrichtung schlägt nicht auf die Absatzausrichtung durch |
+| 8 | Reale Fremddatei `HelloWorld.odt` (kein `fo:text-align`) importieren | Datei hochladen | Absatz `text-align: left`, Button „Links" aktiv |
 
 **5.3 Doppelte Rundreise / Cross-Format**
 
@@ -312,8 +422,19 @@ test('same regression with a multi-paragraph "Links"-alignment as the triggering
   await page.getByTitle('Zentriert ausrichten').click()
   await page.keyboard.press('ControlOrMeta+a')
   await page.getByTitle('Linksbündig ausrichten').click() // vor Fehler-1-Fix: Exception, zweiter Absatz bleibt zentriert
+  // Sync-Punkt: den DOM-Effekt des Klicks abwarten, bevor die nächste
+  // selektionsabhängige Aktion folgt (siehe Determinismus-Regel 2, Abschnitt 2 Kopf).
+  await expect(editor.locator('p[style*="text-align: left"]')).toHaveCount(2)
   await editor.click()
   await page.keyboard.press('End')
+  // PFLICHT-Sync (Determinismus-Regel 1): ProseMirror erfährt die native, per
+  // Taste ausgelöste Cursor-Bewegung ("End") nur über das asynchrone
+  // selectionchange-Event; ein sofortiges "Enter" kann dieser Synchronisierung
+  // vorauslaufen und auf der Position VOR "End" wirken. Exakt dieselbe Race,
+  // die im Repo bereits selection-regression.spec.ts (Z. 27–34) und cut.spec.ts
+  // im Mobile-Projekt flaky gemacht hat. Ohne diese Zeile ist der Test nicht
+  // deterministisch — sie fehlte in einer früheren Fassung dieses Plans.
+  await page.waitForTimeout(50)
   await page.keyboard.press('Enter')
   await page.keyboard.type('Dritter Absatz.')
   await expect(page.locator('.ProseMirror p')).toHaveCount(3)
@@ -347,7 +468,7 @@ zwei Zellen einer Zeile.
 | **Fehler 6**/Grenzfall 4.9 (Formatvorlagen-Wechsel) | Unit + E2E | `commands.test.ts` #13/#14, `align-left.spec.ts` §2.4 |
 | **Fehler 3** (DOCX-Formatvorlagen-Ausrichtung ignoriert) | Unit + E2E | `docx/__tests__/alignment.test.ts` #7/#8, `align-left.spec.ts` §2.8 DOCX #6 |
 | **Fehler 4** (`w:jc="end"` → fälschlich links) | Unit | `docx/__tests__/alignment.test.ts` #4 |
-| **Fehler 5** (ODT `fo:text-align` nicht normalisiert) | Unit + E2E | `odt/__tests__/alignment.test.ts` #1–6, `align-left.spec.ts` §2.8 ODT #6 |
+| **Fehler 5** (ODT `fo:text-align` nicht normalisiert) | Unit + E2E | `odt/__tests__/alignment.test.ts` #1–3/#6 (Beleg), #5 (Negativtest Reader-Scope), `align-left.spec.ts` §2.8 ODT #6/#7 |
 | Grenzfall 4.10/4.11/4.12 (ODF/OOXML-Wertevarianten) | Unit + E2E | `alignment.test.ts` (beide Formate), `align-left.spec.ts` §2.8 DOCX #7 |
 | **Fehler 7** (Tastenkombination, `aria-label`, lokalisierter Titel) | E2E | `align-left.spec.ts` §2.5 #1/#2/#4 |
 | **Fehler 8** (Button nur per Maus auslösbar) | E2E | `align-left.spec.ts` §2.5 #3 |
@@ -395,5 +516,16 @@ zwei Zellen einer Zeile.
       `selection-regression.spec.ts` ruft `readDocx`/`writeDocx`/`readOdt`/
       `writeOdt`/`setAlign`/`isAlignActive`/`setHeading` direkt auf —
       stichprobenartig per Review bestätigt.
+- [ ] **Determinismus** (Abschnitt 2.0.0): jede native Cursor-Bewegung, der
+      eine selektionsabhängige Taste folgt, hat den `waitForTimeout(50)`-Sync
+      (Regel 1); jeder Formatklick, dem eine selektionsabhängige Aktion folgt,
+      hat den web-first-Sync-Punkt (Regel 2); keine `getAttribute`-Einmalprüfung
+      direkt nach asynchroner Selektions-/Formatänderung (Regel 3). Nachweis:
+      Suite läuft **auf allen aktiven Projekten** (`Desktop Chrome`, `Mobile`,
+      `Tablet`) **10×** grün hintereinander (`--repeat-each=10`), keine Flakes.
+- [ ] Maus-Drag-abhängige Tabellen-/Zell-Selektionstests (§2.3 #2, §2.10) laufen
+      auf den Touch-Projekten (`Mobile`/`Tablet`) entweder tastaturbasiert
+      deterministisch oder sind dort per Projektfilter bewusst und dokumentiert
+      übersprungen (Regel 6) — nicht still flaky.
 - [ ] Kein während der Verifikation gefundener Fehler bleibt ohne Ticket/
       Vermerk zurück (Abnahmekriterium 8 der Anforderung).

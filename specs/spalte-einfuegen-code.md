@@ -3,310 +3,302 @@
 Rolle: Entwickler-Antwort auf `specs/spalte-einfuegen-req.md`. Stil/Aufbau orientiert an
 `specs/ausrichtung-links-code.md` und `specs/fett-code.md`. Dieses Dokument prüft den
 **tatsächlichen** Code-Stand (nicht nur die in der Anforderung zitierten Fundstellen),
-führt zusätzlich **ausführbare Reproduktionen** einzelner Kernbehauptungen der
-Anforderung durch (gegen die echte `wordSchema` und das echte, im Projekt bereits
-installierte `prosemirror-tables@1.8.5`, mit `vitest`/`jsdom` — Details Abschnitt 1) und
-legt fest, welche Dateien wie geändert bzw. neu angelegt werden. **Kein Punkt hier ist
-bereits umgesetzt — dies ist der Plan, nicht der Vollzug.**
+führt zusätzlich **ausführbare Reproduktionen** der Kernbehauptungen der Anforderung durch
+(gegen die echte, im Projekt installierte `prosemirror-tables@1.8.5` mit einem Schema, das
+`table_cell`/`table_row`/`table` **identisch** wie `src/formats/shared/schema.ts` über
+`tableNodes({ tableGroup: 'block', cellContent: 'block+', cellAttributes: {} })` erzeugt —
+Details Abschnitt 1/3) und legt fest, welche Dateien wie geändert bzw. neu angelegt werden.
+**Kein Punkt hier ist bereits umgesetzt — dies ist der Plan, nicht der Vollzug.**
 
 ---
 
 ## 0. Kurzfassung
 
 Die Codeprüfung aus `spalte-einfuegen-req.md` Abschnitt 0 ist **vollständig zutreffend**:
-Es existiert tatsächlich keine einzige Zeile, die eine Tabellenspalte gezielt einfügt.
-Alle dort zitierten Fundstellen/Zeilennummern sind exakt (Abschnitt 2 unten). Zusätzlich
-zur reinen Codelektüre wurden vier Kernbehauptungen der Anforderung **tatsächlich
-ausgeführt** (echte `EditorView` + echte `wordSchema` + echtes `prosemirror-tables` aus
-`node_modules`, nicht nur an deren Quelltext abgelesen) und dabei **bestätigt und
-präzisiert**:
+Es existiert keine einzige Zeile, die eine Tabellenspalte gezielt einfügt
+(`grep -rn "addColumn\|insertColumn" src/` → null Treffer). Die eigentliche Arbeit ist
+UI-Anbindung (zwei Toolbar-Buttons + Aktivierungszustand) plus Tests — **kein**
+Datenmodell-, Schema-, Reader- oder Writer-Umbau.
 
-1. **Undo-Gruppierung (Abschnitt 3.8 der Anforderung) ist bereits korrekt, ohne
-   Zusatzcode:** `addColumnBefore`/`addColumnAfter` bauen genau **eine** Transaktion
-   und dispatchen sie genau **einmal** — ein einzelnes `Strg+Z` stellt beide Zeilen
-   einer 2×2-Tabelle nach einem Spalten-Insert exakt wieder her. Verifiziert per
-   Ausführung, nicht nur Quelltext-Lektüre.
-2. **Grenzfall 4.2 (gemischte Merges) tatsächlich nachgestellt:** 3-Spalten-Tabelle,
-   Zeile 1 mit `colspan:2`-Zelle über Spalte 2–3, Zeile 2 normal. Cursor in Zeile 2,
-   Spalte 2 (`B2`), `addColumnAfter` ausgeführt → Zeile 1 wächst auf **genau eine**
-   Zelle mit `colspan:3` (`[1, 3]`), Zeile 2 bekommt eine **echte neue leere Zelle**
-   zwischen `B2` und `C2` (`['A2','B2','','C2']`) — exakt wie in Abschnitt 3.4/
-   Grenzfall 4.2 der Anforderung beschrieben, hier aber mit echtem Zellinhalt und
-   echten Positionswerten nachgewiesen statt nur aus dem Bibliotheks-Quelltext
-   abgeleitet.
-3. **Grenzfall 4.4 (Mehrfachauswahl) tatsächlich nachgestellt:** Echte `CellSelection`
-   (via `cellAround`, dieselbe Konstruktion, die `prosemirror-tables` selbst intern
-   verwendet) über die mittlere und rechte Spalte einer 3×3-Tabelle, `addColumnAfter`
-   ausgeführt → Spaltenzahl wächst von 3 auf **4**, nicht auf 5 — bestätigt: **eine**
-   Spalte pro Klick, unabhängig von der Selektionsbreite.
-4. **Grenzfall 4.5 (verschachtelte Tabelle) tatsächlich nachgestellt:** Äußere Tabelle
-   mit innerer 1×2-Tabelle in einer Zelle, Cursor in der inneren Tabelle,
-   `addColumnAfter` ausgeführt → äußere Zeile bleibt bei **2** Zellen (unverändert),
-   innere Zeile wächst von 2 auf **3** Zellen. Bestätigt.
+Vier Kernbehauptungen der Anforderung wurden **tatsächlich ausgeführt** (Node-Repro gegen
+`prosemirror-model`/`-state`/`-history`/`-tables` aus `node_modules`, Schema wie oben) und
+dabei **bestätigt und mit echten Werten belegt**:
 
-Zusätzlich wurde **ein bislang nicht durch Ausführung, sondern nur durch
-Quelltext-Analyse verifizierter Mechanismus präzisiert** (Abschnitt 3.4 unten): Die
-Behauptung in Abschnitt 3.6 der Anforderung, eine neue Spalte bekomme „dieselbe
-(Default-)Breite wie alle übrigen Spalten", ist **technisch ungenau** — der tatsächliche
-Mechanismus (`updateColumnsOnResize` in `prosemirror-tables`, Quelltext-Inspektion)
-setzt bei durchgehend `colwidth: null` **keine** feste Pixelbreite auf einer der
-Spalten, sondern überlässt die Breitenverteilung dem Browser-Standard-Tabellenlayout
-(`table-layout: auto`, inhaltsbasiert) — eine neue, leere Spalte wird dadurch
-in der Praxis **schmaler** dargestellt als bereits befüllte Nachbarspalten, bis Text
-hineingetippt wird. Das ist **keine Regression** dieses Features (identisches
-Verhalten bei jeder bereits heute bestehenden Mehrspalten-Tabelle), aber eine
-Korrektur der in der Anforderung geäußerten Erwartung — siehe Abschnitt 3.4/4.1.
+1. **Undo-Gruppierung (Anforderung 3.8) ist bereits korrekt, ohne Zusatzcode:** 2×2-Tabelle,
+   Cursor in `B1`, `addColumnAfter` → `[3,3]` Zellen; **ein einziges** `undo()` → `[2,2]`.
+   Genau eine Transaktion, ein Dispatch.
+2. **Grenzfall 4.2 (gemischte Merges) mit echten Werten:** 3-Spalten-Tabelle, Zeile 1
+   `[A1, Merged(colspan 2)]`, Zeile 2 `[A2,B2,C2]`. Cursor in `B2`, `addColumnAfter` →
+   Zeile 1 colspans **`[1, 3]`** (Merge wächst 2→3), Zeile 2 Texte **`['A2','B2','','C2']`**
+   (echte neue leere Zelle). Beide Effekte in **einer** Aktion, pro Zeile unabhängig.
+3. **Grenzfall 4.4 (Mehrfachauswahl):** echte `CellSelection` (via `cellAround`) über
+   Spalte 2–3 einer 3×3-Tabelle, `addColumnAfter` → Zeile wächst von 3 auf **4** Zellen
+   (nicht 5). **Eine** Spalte pro Klick, unabhängig von der Auswahlbreite.
+4. **Grenzfall 4.5 (verschachtelte Tabelle):** äußere 1×2-Tabelle mit innerer 1×2-Tabelle
+   in Zelle 1, Cursor in der inneren Tabelle, `addColumnAfter` → äußere Zeile bleibt bei
+   **2** Zellen, innere Zeile wächst auf **3**.
 
-Der in Abschnitt 6 der Anforderung geforderte ODT-`colCount`-Fix ist **bestätigt nötig**
-und wird als Teil dieses Plans umgesetzt (Abschnitt 5.5).
+Zusätzlich bestätigt: außerhalb einer Tabelle liefert `addColumnBefore(state, dispatch)`
+`false` und dispatcht nichts (`isInTable` = `false`) — Grundlage für den `disabled`-Zustand.
 
-Die drei von der Anforderung explizit als „zu entscheiden" markierten offenen Punkte
-werden in Abschnitt 4 getroffen: (a) Mehrfachauswahl-Semantik (Abschnitt 3.3) → **wird
-für v1 auf Bibliotheksverhalten belassen**, dokumentiert und mit Testfall belegt,
-Word/LibreOffice-Parität wird zurückgestellt; (b) sehr breite Tabellen (Grenzfall 4.7)
-→ bereits vorhandenes CSS-Verhalten reicht aus (horizontales Scrollen des
-Editor-Bereichs, siehe präzise Schwellenwert-Berechnung in Abschnitt 3.5), keine
-Codeänderung nötig, nur ein Performance-/Crash-Test; (c) Kontextmenü → **bestätigt
-nicht Teil dieses Umfangs**, siehe Abschnitt 4.3.
+Die drei von der Anforderung als „zu entscheiden" markierten Punkte werden in Abschnitt 4
+getroffen: (a) Mehrfachauswahl-Semantik → **Bibliotheksverhalten für v1 akzeptiert**,
+dokumentiert, mit Testfall belegt; (b) sehr breite Tabellen → **horizontales Scrollen**
+(bereits vorhandenes Verhalten) bewusst akzeptiert; (c) Kontextmenü → **nicht Teil** des
+Umfangs.
+
+### 0.1 Korrektur gegenüber dem vorherigen Entwurf dieses Plans (wichtig)
+
+Ein früherer Stand dieser Datei (vom selben Tag, vor der Neufassung der Anforderung)
+führte einen **ODT-`colCount`-„Pflicht-Fix"** (angeblich `const colCount =
+rows[0]?.content?.length ?? 1` in `odt/writer.ts`), dessen Umsetzung in Abschnitt 5.5 und
+dessen Tests in Abschnitt 6.2 als bugaufdeckend beschrieben waren. **Dieser Fehler
+existiert im tatsächlichen Code nicht (mehr).** `src/formats/odt/writer.ts:115-116` lautet
+bereits:
+
+```ts
+const colCount =
+  (rows[0]?.content ?? []).reduce((sum, cell) => sum + Number(cell.attrs?.colspan ?? 1), 0) || 1
+```
+
+— d. h. **Colspan-Summe**, identisch zum DOCX-Writer, und ist durch bestehende Unit-Tests
+abgesichert (`odt/roundtrip.test.ts:298`, `.toBe(2)`). Die Anforderung warnt in ihrer
+Präambel und in Abschnitt 6 **ausdrücklich** vor genau dieser stehengebliebenen
+Fehlbehauptung. Dieser Plan **entfernt** den vermeintlichen Fix vollständig: `odt/writer.ts`
+wird **nicht** geändert (Abschnitt 5.5), die zugehörigen Tests sind reiner
+**Regressionsschutz** (Abschnitt 6.2), und die Dateiliste (Abschnitt 8) führt `odt/writer.ts`
+unter „bewusst unverändert". Zusätzlich wurden **alle** Zeilennummern gegen den aktuellen
+Quellstand neu verifiziert (der alte Entwurf zitierte durchgängig veraltete Zeilen, siehe
+Abschnitt 2).
+
+### 0.2 Erneute kritische Prüfung (aktueller Durchlauf, unabhängig von 0/0.1)
+
+Für diese Überarbeitung wurden **alle** unten zitierten Fundstellen ein weiteres Mal direkt
+gegen den aktuellen Quellstand gelesen (nicht nur aus einer vorherigen Fassung übernommen)
+und **alle vier** Kernbehauptungen aus Abschnitt 0/3 erneut ausführbar reproduziert (frisches,
+eigenständiges Node-Skript gegen die echte, installierte `prosemirror-tables@1.8.5` mit
+identischem Schema) — Ergebnis in jedem Fall **byte-identisch** zu den bereits dokumentierten
+Werten (Undo `[2,2]→[3,3]→[2,2]`; Merge-Mischfall `[1,3]`/`['A2','B2','','C2']`;
+Mehrfachauswahl `[4,4,4]`; verschachtelt `[2,3]`; außerhalb Tabelle `isInTable=false`,
+`addColumnBefore` gibt `false` zurück, kein Dispatch). Zusätzlich neu geprüft und **bestätigt**:
+`package.json:29` (`"^1.8.5"`), alle Zeilenanker in `commands.ts`, `Toolbar.tsx`, `WordEditor.tsx`,
+`schema.ts`, beiden Writern, beiden Readern, `src/index.css:44-54`, `pageGeometry.ts`
+(`PAGE_WIDTH_MM=210`/`PAGE_MARGIN_MM=25` → exakt `794`/`94`/`606` px wie in Abschnitt 3.5
+gerechnet), der Merge-Status aller in Abschnitt 5–6 genannten ODT-Fremddateien (`BigTable.odt`,
+`OOStyledTable.odt`, `coloredTable_MSO15.odt`, `TableWidth.odt`, `crazyTable.odt`,
+`subTables3-nested.odt`: 0 `number-columns-spanned`/`number-rows-spanned`, also **merge-frei**;
+`tableComplex_DOC_LO41.odt`: 12 `number-columns-spanned`, 0 `number-rows-spanned`, also
+**horizontale Merges**; `table-column-delete-with-merge.odt`: 2 `number-columns-spanned` —
+ebenfalls horizontal) sowie die Existenz von `zeile-einfuegen-req.md`/`spalte-loeschen-req.md`
+und der unveränderte Backlog-Status „fehlt" (`FEATURE-BACKLOG.md:185`). Keine der geprüften
+Aussagen musste korrigiert werden — zwei **Präzisierungen** wurden trotzdem ergänzt (siehe
+Fußnoten in 6.5 und 6.6), da beide Stellen für die spätere Testimplementierung sonst zu
+Verwirrung führen könnten:
+
+- **`tests/e2e/selection-regression.spec.ts` hat inzwischen vier statt drei Tests** (ein
+  vierter, Kopieren-bezogener Regressionstest wurde von `kopieren-code.md` bei `:88-110`
+  ergänzt, `test.describe`-Block endet jetzt bei `:111`). Ändert nichts an Abschnitt 6.5 selbst
+  (dort war ohnehin nur „ans Ende anfügen" gefordert, keine Zeilenzahl-Annahme), ist aber der
+  Vollständigkeit halber hier festgehalten, damit „ans Ende" beim Implementieren korrekt als
+  „nach Zeile 111" verstanden wird.
+- **`playwright.config.ts` hat inzwischen fünf statt drei Projekte** (`:34-36` weiterhin
+  Desktop Chrome/Mobile/Tablet wie zitiert, **plus** zwei neue, jeweils per `testMatch:
+  /clipboard.*\.spec\.ts/` auf Clipboard-Tests beschränkte Projekte „Desktop Safari
+  (Clipboard)"/„Desktop Firefox (Clipboard)", `:43-53`). Das neue `tables.spec.ts` (6.4)
+  matcht dieses `testMatch`-Muster nicht und läuft daher weiterhin nur auf den drei in
+  Abschnitt 2 Punkt 6 / Grenzfall 4.15 geforderten Projekten (Desktop Chrome, Mobile, Tablet)
+  — die zwei neuen Projekte sind **nicht** zusätzlich abzudecken.
 
 ---
 
 ## 1. Methodik
 
-Neben Codelektüre aller in der Anforderung genannten Dateien (`schema.ts`,
+Zusätzlich zur Codelektüre aller in der Anforderung genannten Dateien (`schema.ts`,
 `Toolbar.tsx`, `commands.ts`, `WordEditor.tsx`, `docx/writer.ts`, `odt/writer.ts`,
-`docx/reader.ts`, `odt/reader.ts`, beide `__tests__/roundtrip.test.ts`) wurden folgende
-zusätzliche Prüfungen durchgeführt:
+`docx/reader.ts`, `odt/reader.ts`, beide `__tests__/roundtrip.test.ts`,
+`editor/__tests__/commands.test.ts`, `tests/e2e/selection-regression.spec.ts`,
+`tests/e2e/{odt,docx}.spec.ts`):
 
-- **Bibliotheks-Quelltext-Inspektion** direkt in `node_modules/prosemirror-tables/dist/index.cjs`
-  (Node-Skripte, `require('prosemirror-tables')`) für `addColumn`, `addColumnBefore`,
-  `addColumnAfter`, `selectedRect`, `selectionCell`, `cellAround`, `isInTable`,
-  `TableMap.rectBetween`, `addColSpan`, `tableNodes`, `columnResizing`, `TableView`,
-  `updateColumnsOnResize` — bestätigt alle in der Anforderung Abschnitt 0 zitierten
-  Verhaltensbehauptungen und deckt die in Abschnitt 0 dieses Plans genannte
-  Breiten-Präzisierung auf.
-- **Ausführbare Reproduktion** (temporäre, nicht ins Repo übernommene Testdatei, gegen
-  die echte `wordSchema` aus `src/formats/shared/schema.ts` sowie `prosemirror-state`/
-  `-view`/`-history`/`-tables` aus `node_modules`, mit `vitest run` im Projekt
-  ausgeführt — Ergebnisse siehe Abschnitt 0, Details Abschnitt 3.1–3.3): Undo-Gruppierung,
-  Grenzfall 4.2, Grenzfall 4.4, Grenzfall 4.5. Alle vier bestanden ohne Anpassung an der
-  Bibliothek — reine Verifikation, keine Implementierung.
-- **Testkonventionen des Projekts** gesichtet: `src/formats/shared/editor/__tests__/pagination.test.ts`
-  (einziger bestehender Unit-Test unter `editor/__tests__/`, keine Vorlage für
-  ProseMirror-Command-Tests vorhanden — neues Muster nötig, siehe Abschnitt 6.1),
-  `tests/e2e/selection-regression.spec.ts` (Muster für Tabellen-Selection-Sync-Tests,
-  Zeile 34–50 bereits mit einer einfachen 2×2-Tabelle), `tests/e2e/odt.spec.ts`/
-  `docx.spec.ts` (Muster für Download+`JSZip`-Inspektion des Exports).
-- **Icon-Recherche:** Da im Projekt **kein** SVG-Icon existiert (`grep -rl "<svg" src/`
-  liefert keinen Treffer) und `package.json` keine Icon-Bibliothek als Abhängigkeit
-  führt, wurde — analog zur bereits in `fett-code.md`/`ausrichtung-links-code.md`
-  getroffenen Entscheidung für `BoldIcon`/`AlignLeftIcon` — nach einem passenden,
-  frei lizenzierten SVG für „Spalte links/rechts einfügen" gesucht. Gefunden: Googles
-  **Material Symbols** (Apache License 2.0, Nachfolgeserie der klassischen Material
-  Icons) führt exakt zwei zum Anwendungsfall passende, benannte Glyphen —
-  `add_column_left` und `add_column_right`. Beide wurden über das offizielle
-  npm-Paket `@material-symbols/svg-400` (outlined-Variante) bezogen und deren
-  `viewBox`/`path`-Daten verifiziert (Abschnitt 5.2). Das ist eine **präzisere**
-  Wahl als die in `fett-code.md` verwendete generische „format_bold"-Glyphe, weil
-  hier tatsächlich passgenau benannte Icons für exakt diesen Anwendungsfall
-  existieren, statt eine thematisch naheliegende Glyphe wiederzuverwenden.
+- **Bibliotheks-Export-Prüfung:** `node -e "Object.keys(require('prosemirror-tables'))"`
+  bestätigt, dass `addColumnBefore`, `addColumnAfter`, `addColumn`, `isInTable`,
+  `CellSelection`, `cellAround`, `selectedRect`, `columnResizing`, `updateColumnsOnResize`,
+  `columnIsHeader` in der installierten Version vorhanden und exportiert sind.
+- **Ausführbare Reproduktion** (temporäres, nicht ins Repo übernommenes Node-Skript,
+  `NODE_PATH` auf `E:/docs/node_modules`): die vier Behauptungen aus Abschnitt 0 (Undo,
+  4.2, 4.4, 4.5) plus der „außerhalb einer Tabelle"-Fall — **alle bestanden ohne jede
+  Anpassung an der Bibliothek**. Reine Verifikation, keine Implementierung. Ergebnisse
+  wörtlich in Abschnitt 0/3.
+- **Breiten-/Layout-Mechanismus** durch Quelltext-Inspektion in
+  `node_modules/prosemirror-tables/dist/index.cjs` (`updateColumnsOnResize`,
+  `columnResizing`-Defaults) präzisiert — siehe Abschnitt 3.4/3.5.
+- **Testkonventionen des Projekts** gesichtet: `editor/__tests__/commands.test.ts`
+  (existiert bereits — leichtgewichtiges Muster ohne gemountete `EditorView`, capture-
+  dispatch), `odt/__tests__/roundtrip.test.ts` (nutzt `import JSZip` + `writeOdt` +
+  `doc()`/`paragraph()`-Helfer, hat bereits `<table:table-column>`-Zähltests bei
+  Zeile 298/337), `docx/__tests__/roundtrip.test.ts` (assertet bei Tabellen auf das
+  **re-importierte JSON** via `roundTrip()`, nutzt `zipInspect` statt JSZip),
+  `tests/e2e/selection-regression.spec.ts` (Muster für Selection-Sync-Tests, hat bereits
+  einen Tabellen-Fall), `tests/e2e/{odt,docx}.spec.ts` (Muster `waitForEvent('download')`
+  → `download.path()` → `fs.readFile` → `JSZip.loadAsync`, plus `setInputFiles` für
+  Re-Upload).
+- **Icon-Recherche:** Im gesamten `src/` existiert genau **ein** SVG-Icon (`ScissorsIcon`,
+  `Toolbar.tsx:33-53`, `viewBox="0 0 24 24"`, `stroke="currentColor"`, `fill="none"`);
+  `package.json` führt **keine** Icon-Bibliothek als Abhängigkeit. Die neuen Icons werden
+  daher **im selben Idiom selbst gezeichnet** (Inline-SVG, `currentColor`), nicht aus einer
+  externen Quelle bezogen — siehe Entscheidung 4.4/Abschnitt 5.2.
 
 ---
 
 ## 2. Verifikation der Ist-Stand-Tabelle aus `spalte-einfuegen-req.md` Abschnitt 0
 
-| Fundstelle laut Anforderung | Ergebnis der Prüfung |
-|---|---|
-| `schema.ts:106` `tableNodes({ tableGroup: 'block', cellContent: 'block+', cellAttributes: {} })` | Bestätigt, Zeile exakt. **Zusätzlich gefunden:** `tableNodes()` erzeugt neben `table_cell` auch einen `table_header`-Knotentyp (`tableRole: 'header_cell'`) — dieser wird von **keinem** Reader/Writer/`insertTable` je erzeugt oder gelesen. `addColumn`s interne `columnIsHeader`-Prüfung (bestimmt, ob eine neue Zelle als `table_header` statt `table_cell` angelegt wird) kann daher in dieser Anwendung **nie** zutreffen — jede neu eingefügte Zelle ist garantiert eine `table_cell`. Kein Fund, der einen Fix erfordert, aber eine Absicherung, die im Testplan (Abschnitt 6.1) explizit mitbelegt wird, damit sie nicht unbemerkt durch einen künftigen Header-Support bricht. |
-| `Toolbar.tsx:228-239` genau ein „⊞ Tabelle"-Button, `insertTable(2,2)` | Bestätigt, Zeilen exakt. **Zusätzlich gefunden:** Der bestehende Button trägt `aria-pressed={isInTable(view.state)}` (Zeile 231) — semantisch fragwürdig (Einfügen ist kein Umschalter), aber **außerhalb des Scopes** dieser Anforderung (betrifft nur den bestehenden „Tabelle einfügen"-Button, nicht die neuen Spalten-Buttons) und wird nicht angefasst. |
-| `commands.ts:76-86` `insertTable`, keine Spalten-Funktion | Bestätigt, Zeilen exakt. `commands.ts` hat 108 Zeilen insgesamt, keine Tabellen-Spalten-Funktion irgendwo enthalten. |
-| `WordEditor.tsx:8`/`:81-82` `columnResizing()`/`tableEditing()` aktiv, keine Spalten-Keymap | Bestätigt, Zeilen exakt. **Zusätzlich per Quelltext-Inspektion bestätigt:** `columnResizing()` registriert seinen eigenen `TableView`-NodeView **selbstständig** über `plugin.spec.props.nodeViews` (kein `nodeViews`-Prop nötig in `WordEditor.tsx`s `new EditorView(...)`-Aufruf) — Spalten-Resizing ist also bereits vollständig verdrahtet, unabhängig von diesem Feature. |
-| `node_modules/prosemirror-tables` v1.8.5, `addColumnBefore`/`addColumnAfter` ungenutzt | Bestätigt — `grep -rn "addColumn" src/` liefert keinen Treffer. Beide Funktionen sind in der installierten Version vorhanden und exportiert (per `Object.keys(require('prosemirror-tables'))` verifiziert). |
-| `docx/writer.ts:128-171`, `colCount` korrekt via Colspan-Summe | Bestätigt, Zeile 130 exakt: `(rows[0]?.content ?? []).reduce((sum, cell) => sum + Number(cell.attrs?.colspan ?? 1), 0) \|\| 1`. |
-| `odt/writer.ts:86-110`, `colCount`-Fehler | **Bestätigt, Fehler ist real:** Zeile 88, `const colCount = rows[0]?.content?.length ?? 1` — zählt Zellen statt Colspan-Summe. Siehe Fix Abschnitt 5.5. |
-| `docx/reader.ts:244`/`odt/reader.ts:197`, `colwidth: null` fest, keine Writer-seitige Nutzung | Bestätigt, beide Zeilen exakt. Zusätzlich bestätigt (Abschnitt 3.4 unten): Writer-seitig liest auch **kein** anderer Code-Pfad `colwidth` — vollständig entkoppelt, wie behauptet. |
-| Kein Kontextmenü im Repo | Bestätigt, `grep -rn "contextmenu\|onContextMenu" src/` liefert keinen Treffer. |
-| Bestehende Tests konstruieren Tabellen nur als JSON, keine E2E-Tabellentests | Bestätigt. `tests/e2e/*.spec.ts` enthält genau eine Tabellen-Interaktion, `selection-regression.spec.ts:34-50` (`Tabelle einfügen`-Button-Klick + Zellinhalt), aber keinen Spalten-Test. |
+Alle Zeilennummern gegen den aktuellen Quellstand neu geprüft. Die Anforderung ist inhaltlich
+korrekt; die hier genannten Zeilen sind der Stand **jetzt** (der frühere Entwurf dieses Plans
+zitierte durchweg veraltete Zeilen — Spalte „alter Planentwurf" zeigt den Unterschied).
 
-Keine der in der Anforderung zitierten Fundstellen ist falsch. Alle in Abschnitt 0
-dieses Plans genannten Zusatzerkenntnisse (Undo-Gruppierung, Grenzfall 4.2/4.4/4.5,
-`table_header`-Irrelevanz, Breiten-Mechanismus) liegen **zusätzlich** dazu.
+| Aussage | Aktuelle Fundstelle (verifiziert) | Alter Planentwurf (falsch/veraltet) |
+|---|---|---|
+| Schema: `tableNodes(...)` liefert `colspan`/`rowspan`/`colwidth` auf `table_cell` | `schema.ts:154` | „`:106`" |
+| Toolbar: genau ein „⊞ Tabelle"-Button, `insertTable(2,2)` | `Toolbar.tsx:277-289` (Button), `:284` (`insertTable(2, 2)`) | „`:228-239` / `:284`… teils `:231`" |
+| Commands: nur `insertTable`, keine Spalten-Funktion; Re-Export `isInTable` | `commands.ts:92-102` (`insertTable`), `:3`/`:6` (`isInTable`); Datei hat **168** Zeilen | „`:76-86`, 108 Zeilen" |
+| Editor: `columnResizing()`/`tableEditing()` aktiv, keine Spalten-Keymap | `WordEditor.tsx:8`, `:109` (`columnResizing()`), `:110` (`tableEditing()`), Keymap `:85-107` | „`:81-82`, Keymap `:71-79`" |
+| `prosemirror-tables` v1.8.5, `addColumnBefore`/`addColumnAfter` ungenutzt | `package.json` `"^1.8.5"`; per `Object.keys(require(...))` als Export bestätigt; `grep` in `src/` → 0 Treffer | korrekt |
+| DOCX-Writer `colCount` = Colspan-Summe (bereits korrekt) | `docx/writer.ts:158` (`tableToDocx`), `:160` (`colCount`), `:161` (`<w:tblGrid>`/`<w:gridCol w:w="2000"/>`) | „`:128-171`, colCount `:130`" |
+| **ODT-Writer `colCount` = Colspan-Summe (bereits korrekt, KEIN Fehler)** | `odt/writer.ts:115-116` (`reduce(... colspan ...)`), `:117` (`<table:table-column/>`) | **„`:88` `rows[0]?.content?.length` — Fehler real, Fix nötig" → FALSCH, siehe 0.1** |
+| Beide Reader: `colwidth: null` fest, keine Writer-Nutzung von `colwidth` | `odt/reader.ts:315`, `docx/reader.ts:350` | „`:197` / `:244`" |
+| ODT-Reader liest `colspan`/`rowspan` aus echten `table-cell`, überspringt `covered-table-cell` | `odt/reader.ts:304` (`childElements(..., 'table-cell')`), `:305-306` | (nicht zitiert) |
+| Kein Kontextmenü im Repo | `grep -rn "contextmenu\|onContextMenu" src/` → 0 Treffer; `WordEditor.tsx:117-121` (Kommentar) | korrekt |
+| Bestehende Tabellentests nur JSON-konstruiert, kein E2E-Spalten-Test | `odt/roundtrip.test.ts:219+` (`describe('ODT round trip: tables')`), `docx/roundtrip.test.ts:229+`; `tests/e2e/*` → nur `selection-regression.spec.ts:43` (Tabellen-Fall), kein „Spalte"/„column" | korrekt |
+
+**Zusatzfund (unabhängig von der Anforderung):** `tableNodes()` erzeugt neben `table_cell`
+auch einen `table_header`-Typ (`tableRole: 'header_cell'`). **Kein** Reader/Writer/
+`insertTable` erzeugt ihn je, daher greift `addColumn`s interne `columnIsHeader`-Prüfung in
+dieser App nie — jede neu eingefügte Zelle ist garantiert eine `table_cell`. Kein Fix nötig,
+aber im Testplan (6.1) als Regressionsschutz mitbelegt.
+
+**Zusatzfund:** Der bestehende „⊞ Tabelle"-Button trägt `aria-pressed={isInTable(view.state)}`
+(`Toolbar.tsx:281`) — semantisch fragwürdig (Einfügen ist kein Umschalter), aber
+**außerhalb des Scopes** dieser Anforderung; wird nicht angefasst.
 
 ---
 
 ## 3. Durch Ausführung verifizierte Detailergebnisse
 
-### 3.1 Undo/Redo (Abschnitt 3.8 der Anforderung) — bereits korrekt, kein Zusatzcode nötig
+### 3.1 Undo/Redo (Anforderung 3.8) — bereits korrekt, kein Zusatzcode
 
-Bibliotheks-Quelltext (`addColumnBefore`):
-
-```js
-function addColumnBefore(state, dispatch) {
-  if (!isInTable(state)) return false;
-  if (dispatch) {
-    const rect = selectedRect(state);
-    dispatch(addColumn(state.tr, rect, rect.left)); // genau EIN dispatch
-  }
-  return true;
-}
-```
-
-`addColumn` selbst iteriert intern über `map.height` Zeilen und akkumuliert alle
-Änderungen (Zellen-Insert **und** Colspan-Erweiterung) auf **derselben** `tr`-Instanz,
-bevor sie einmalig dispatcht wird. Reproduktion (2×2-Tabelle, Cursor in Zelle „B1",
-`addColumnAfter`, dann `undo()` aus `prosemirror-history`):
+`addColumnBefore`/`addColumnAfter` prüfen `isInTable`, ermitteln über `selectedRect` das
+Auswahlrechteck und rufen `addColumn(state.tr, rect, rect.left|right)` — **genau ein**
+`dispatch`. `addColumn` iteriert intern über `map.height` Zeilen und akkumuliert alle
+Änderungen (Zellen-Insert **und** Colspan-Erweiterung) auf **derselben** `tr`. Repro:
 
 ```
-Vorher:  Zeile 1: 2 Zellen, Zeile 2: 2 Zellen
-addColumnAfter ausgeführt
-Danach:  Zeile 1: 3 Zellen, Zeile 2: 3 Zellen
-undo() ausgeführt
-Danach:  Zeile 1: 2 Zellen, Zeile 2: 2 Zellen   ✓ ein einziges Undo genügt
+[undo] before rowCounts: [2,2]   isInTable: true
+[undo] after insert:     [3,3]   ok: true
+[undo] after single undo:[2,2]   ✓ ein einziges Undo genügt
 ```
 
-**Konsequenz für den Plan:** Kein Wrapper-Code nötig, um Undo-Gruppierung
-sicherzustellen — ein direkter Re-Export der Bibliotheksfunktionen genügt (Abschnitt 5.1).
+**Konsequenz:** Kein Wrapper-Code für Undo-Gruppierung nötig — ein dünner Re-Export genügt
+(Abschnitt 5.1).
 
 ### 3.2 Grenzfall 4.2 (gemischte Merges) — exakt nachgestellt
 
-Tabelle: 3 Spalten, Zeile 1 = `[A1(colspan 1), Merged(colspan 2, Spalte 2–3)]`, Zeile 2 =
-`[A2, B2, C2]` (alle `colspan 1`). Cursor in „B2" (Zeile 2, Spaltenindex 1),
-`addColumnAfter` (fügt an Spaltengrenze Index 2 ein — das liegt **strikt innerhalb**
-der Zeile-1-Merge, die Spalten 1–2 überdeckt):
+Tabelle: Zeile 1 = `[A1(colspan 1), Merged(colspan 2)]`, Zeile 2 = `[A2, B2, C2]`. Cursor in
+`B2`, `addColumnAfter` (Einfügegrenze Grid-Index 2, liegt innerhalb der Zeile-1-Merge):
 
 ```
-Ergebnis Zeile 1: 2 Zellen, colspan-Werte [1, 3]   // Merge von 2 auf 3 gewachsen
-Ergebnis Zeile 2: 4 Zellen, Texte ['A2','B2','','C2']  // echte neue leere Zelle
+Ergebnis Zeile 1 colspans: [1, 3]                       // Merge 2 → 3 gewachsen
+Ergebnis Zeile 2 texte:    ["A2","B2","","C2"]          // echte neue leere Zelle
 ```
 
-Exakt das in Abschnitt 3.4/Grenzfall 4.2 der Anforderung beschriebene Verhalten:
-**beide** Effekte („Zelle verbreitert" und „neue leere Zelle eingefügt") treten in
-**derselben** Aktion auf, je nachdem, ob die jeweilige Zeile an der Einfügegrenze
-bereits eine sie überspannende Merge-Zelle hat. Kein Zusatzcode nötig — reines
-Bibliotheksverhalten, hier mit echtem Zellinhalt nachgewiesen statt nur aus dem
-`addColumn`-Quelltext abgeleitet.
+Exakt das in Anforderung 3.4/4.2 beschriebene Verhalten: „Zelle verbreitert" **und** „neue
+leere Zelle" in **derselben** Aktion, pro Zeile unabhängig. Kein Zusatzcode.
 
-### 3.3 Grenzfall 4.4 (Mehrfachauswahl) und Grenzfall 4.5 (verschachtelte Tabelle) — exakt nachgestellt
+### 3.3 Grenzfall 4.4 (Mehrfachauswahl) und 4.5 (verschachtelte Tabelle) — exakt nachgestellt
 
-- **4.4:** 3×3-Tabelle, `CellSelection` (per `cellAround`, derselben internen
-  Konstruktion wie `prosemirror-tables` selbst) über die mittlere und rechte Spalte
-  (Zellen „B1"–„C1"), `addColumnAfter` → Spaltenzahl wächst von 3 auf **4** (nicht 5).
-  Bestätigt: **eine** Spalte pro Klick, unabhängig von der Selektionsbreite — siehe
-  Entscheidung Abschnitt 4.1.
-- **4.5:** Äußere Tabelle mit 1 Zeile/2 Zellen, in Zelle 1 eine innere 1×2-Tabelle
-  verschachtelt. Cursor im Text der inneren Tabelle, `addColumnAfter` → äußere Zeile
-  bleibt bei **2** Zellen (unverändert), innere Zeile wächst von 2 auf **3** Zellen.
-  Bestätigt: Die Bibliothek löst die relevante Tabelle bereits korrekt über
-  `$pos.node(-1)` (in `selectedRect`/`selectionCell`) auf die **innerste** Tabelle
-  auf, ohne dass die Anwendung selbst etwas dafür tun muss.
+- **4.4:** 3×3-Tabelle, echte `CellSelection` (via `cellAround`, dieselbe interne
+  Konstruktion wie `prosemirror-tables` selbst) über Spalte 2–3 (`B1`–`C1`),
+  `addColumnAfter` → Zeile wächst von 3 auf **4** (nicht 5). **Eine** Spalte pro Klick.
+- **4.5:** äußere 1×2-Tabelle, in Zelle 1 innere 1×2-Tabelle. Cursor in der inneren
+  Tabelle, `addColumnAfter` → äußere Zeile **2** Zellen (unverändert), innere Zeile **3**.
+  Die Bibliothek löst die relevante Tabelle bereits über `$pos.node(-1)` (in
+  `selectionCell`/`selectedRect`) auf die **innerste** Tabelle auf.
 
-### 3.4 Präzisierung zu Abschnitt 3.6 der Anforderung (Spaltenbreite der neuen Spalte)
+### 3.4 Präzisierung zu Anforderung 3.6 (Breite der neuen Spalte)
 
-`updateColumnsOnResize` (von `columnResizing()`s selbstregistriertem `TableView`
-aufgerufen, siehe Zusatzfund in Abschnitt 2) berechnet pro Spalte:
+`columnResizing()` (Aufruf ohne Argumente, `WordEditor.tsx:109`) registriert seinen eigenen
+`TableView` selbstständig über `plugin.spec.props.nodeViews` — Spalten-Resizing ist bereits
+vollständig verdrahtet, **kein** `nodeViews`-Prop in `new EditorView(...)` nötig. Sein
+`updateColumnsOnResize` berechnet pro Spalte `hasWidth = colwidth && colwidth[j]`. Da
+`colwidth` in dieser App **immer** `null` ist (`odt/reader.ts:315`, `docx/reader.ts:350`),
+ist `hasWidth` für **jede** Spalte falsy → keine feste Pixelbreite pro `<col>`, und das
+`<table>` bekommt `style.minWidth = <Spaltenzahl> × defaultCellMinWidth` (Default **100px**,
+`prosemirror-tables` `columnResizing({ defaultCellMinWidth = 100 })`), aber **kein**
+explizites `width`. Die Stylesheet-Regel `.ProseMirror table { width: 100% }`
+(`src/index.css:46`) bleibt wirksam; da **kein** `table-layout: fixed` gesetzt ist
+(`grep "table-layout" src/index.css` → 0 Treffer), verteilt der Browser die Breite
+**inhaltsbasiert** (`table-layout: auto`). Eine frisch eingefügte leere Spalte bekommt in
+der Praxis zunächst nur ihre CSS-`min-width: 2em` (`src/index.css:54`), bis Text hineinkommt.
 
-```js
-const hasWidth = overrideCol == col ? overrideValue : colwidth && colwidth[j];
-const cssWidth = hasWidth ? hasWidth + "px" : "";       // "" wenn colwidth null
-...
-if (!hasWidth) fixedWidth = false;
-...
-if (fixedWidth) { table.style.width = totalWidth + "px"; table.style.minWidth = ""; }
-else { table.style.width = ""; table.style.minWidth = totalWidth + "px"; }
-```
-
-Da `colwidth` in dieser Anwendung **immer** `null` ist (Abschnitt 2), ist `hasWidth`
-für **jede** Spalte falsy → jede `<col>` bekommt `style.width = ""` (keine feste
-Pixelbreite), `fixedWidth` bleibt `false` → das `<table>`-Element bekommt
-`style.minWidth = <Spaltenzahl> × 100px` (Default `defaultCellMinWidth`), aber
-**keine** explizite `width`. Die bestehende Stylesheet-Regel `.ProseMirror table {
-width: 100% }` (`src/index.css:44-48`) bleibt dadurch wirksam (ein leerer
-Inline-`style.width`-String überschreibt keine Stylesheet-Regel). Da zusätzlich
-**kein** `table-layout: fixed` irgendwo gesetzt ist (bestätigt, `grep -n
-"table-layout" src/index.css` liefert keinen Treffer), verteilt der Browser die
-Spaltenbreite nach Standard-Verhalten (`table-layout: auto`) **inhaltsbasiert**, nicht
-gleichmäßig. Eine frisch eingefügte, leere Spalte bekommt dadurch in der Praxis nur
-ihre CSS-`min-width: 2em`-Mindestbreite (`src/index.css:50-56`), während
-bereits befüllte Nachbarspalten breiter bleiben — bis Text in die neue Spalte
-eingegeben wird.
-
-**Bewertung:** Das ist **keine Regression** durch dieses Feature (jede bereits
-heute bestehende Mehrspalten-Tabelle mit `colwidth: null` verhält sich beim
-Neuladen/Rendern identisch), sondern dieselbe vorbestehende, in Abschnitt 3.6/
-Abschnitt 7 der Anforderung bereits als „kein Bestandteil dieser Anforderung"
-eingestufte Einschränkung — hier nur mit dem exakten technischen Mechanismus
-belegt statt der etwas zu optimistischen Formulierung „dieselbe Default-Breite wie
-alle übrigen Spalten". **Kein Fix in diesem Plan**, aber die Formulierung im
-Abnahme-Testfall wird entsprechend geschärft (Abschnitt 6.2: „neue Spalte ist
-mindestens `min-width` breit und editierbar", nicht „exakt gleich breit wie alle
-anderen").
+**Bewertung:** **keine Regression** durch dieses Feature (jede bestehende Mehrspalten-Tabelle
+mit `colwidth: null` verhält sich identisch), sondern dieselbe vorbestehende, in
+Anforderung 3.6/Abschnitt 7 als „nicht Teil dieses Umfangs" eingestufte Einschränkung — nur
+mit dem exakten Mechanismus belegt statt der etwas zu optimistischen Formulierung „dieselbe
+Default-Breite wie alle übrigen Spalten". **Kein Fix.** Der Abnahme-Testfall wird geschärft
+(6.2/6.4: „neue Spalte ist mindestens `min-width` breit und sofort editierbar", nicht „exakt
+gleich breit").
 
 ### 3.5 Präzisierung zu Grenzfall 4.7 (sehr breite Tabelle)
 
-Mit dem in Abschnitt 3.4 belegten `table.style.minWidth = <Spaltenzahl> × 100px`
-lässt sich der tatsächliche Schwellenwert exakt berechnen: `PAGE_CONTENT_WIDTH_PX`
-(`pageLayout.ts:13`, `PAGE_WIDTH_PX - 2*PAGE_MARGIN_PX` ≈ 793 − 2·94 ≈ **605px**) wird
-von `minWidth` bereits ab **7 Spalten** (7×100 = 700px > 605px) überschritten, nicht
-erst „> 10 Spalten" wie Grenzfall 4.7 als Beispiel nennt. Ab diesem Punkt kann der
-`.word-editor-surface`-Container (`WordEditor.tsx:128`, kein eigenes
-`overflow-x`) die Tabelle nicht mehr innerhalb der Seite darstellen; die **äußere**
-scrollende Hülle (`WordEditor.tsx:119`, `className="flex-1 overflow-auto ..."`)
-fängt den Überlauf ab und erzeugt einen horizontalen Scrollbalken für den gesamten
-Editor-Bereich. **Das ist bereits heute (unabhängig von diesem Feature) das
-bestehende Verhalten jeder breiten Tabelle** — Grenzfall 4.7 verlangt lediglich, dass
-eine der beiden in der Anforderung genannten Varianten („horizontales Scrollen" vs.
-„automatische Schrumpfung aller Spaltenbreiten") **bewusst gewählt** statt
-stillschweigend offengelassen wird. **Entscheidung (Abschnitt 4.2): horizontales
-Scrollen wird als bereits ausreichende, bestehende Antwort akzeptiert** — kein
-Code-/CSS-Fix in diesem Plan, aber ein Test, der 10× „Spalte rechts" klickt und
-Absturzfreiheit/Bedienbarkeit nachweist (Abschnitt 6.3).
+Mit `minWidth = <Spaltenzahl> × 100px` und `PAGE_CONTENT_WIDTH_PX = PAGE_WIDTH_PX −
+2·PAGE_MARGIN_PX = 794 − 2·94 = **606px**` (`pageLayout.ts:14`) wird die Seiteninhaltsbreite
+bereits ab **7 Spalten** überschritten (7×100 = 700 > 606; 6×100 = 600 ≤ 606), nicht erst
+„> 10 Spalten" wie das Beispiel in Grenzfall 4.7 nennt. Ab diesem Punkt fängt die **äußere**
+scrollende Hülle (`WordEditor.tsx:171`, `className="flex-1 overflow-auto ..."`) den Überlauf
+mit horizontalem Scrollbalken ab. **Das ist bereits heute das Verhalten jeder breiten
+Tabelle** — Grenzfall 4.7 verlangt nur eine **bewusste** Wahl zwischen „horizontales
+Scrollen" und „automatische Schrumpfung". **Entscheidung (4.2): horizontales Scrollen** wird
+akzeptiert; kein Code/CSS-Fix, aber ein Crash-/Bedienbarkeitstest (6.4).
 
 ---
 
-## 4. Zu treffende Entscheidungen (verbindlich für diesen Plan)
+## 4. Zu treffende Entscheidungen (verbindlich)
 
-### 4.1 Mehrfachauswahl-Semantik (Abschnitt 3.3/Grenzfall 4.4 der Anforderung)
+### 4.1 Mehrfachauswahl-Semantik (Anforderung 3.3 / Grenzfall 4.4)
 
-**Entscheidung: Bibliotheksverhalten wird für v1 als ausreichend akzeptiert** — ein
-Klick auf „Spalte links/rechts einfügen" fügt bei einer `CellSelection` über mehrere
-Spalten **genau eine** neue Spalte an der Grenze der Selektion ein, **nicht** eine pro
-markierter Spalte (abweichend von Word/LibreOffice).
-
-**Begründung:** (a) Word-Parität nachzubilden erfordert zusätzliche, potenziell
-fehleranfällige Logik (N-fache Wiederholung von `addColumnBefore`/`-After`, wobei nach
-jeder Wiederholung die Selektionsgrenzen neu gemappt werden müssten, da sich die
-`TableMap` nach jedem Einzelinsert ändert); (b) die Anforderung selbst verlangt an
-dieser Stelle nur eine **bewusste Entscheidung mit Testfall**, keine bestimmte
-Semantik; (c) das abweichende Verhalten ist nicht stillschweigend, sondern über einen
-dedizierten Testfall (Abschnitt 6.1, Grenzfall-4.4-Test) sowie diesen
-Abnahme-Vermerk dokumentiert. **Nachbesserungs-Ticket:** Falls Word-Parität später
-gefordert wird, eigener Backlog-Eintrag (Vorschlag: `spalte-einfuegen-mehrfachauswahl`),
-nicht Teil dieses Umfangs.
+**Entscheidung: Bibliotheksverhalten wird für v1 akzeptiert** — eine `CellSelection` über
+mehrere Spalten fügt **genau eine** Spalte an der Auswahlgrenze ein, **nicht** eine pro
+markierter Spalte (abweichend von Word/LibreOffice). **Begründung:** (a) Word-Parität
+erfordert N-faches Wiederholen mit Neuberechnung der Selektionsgrenzen nach jedem Insert
+(die `TableMap` ändert sich jeweils) — fehleranfällig; (b) die Anforderung verlangt hier nur
+eine **bewusste Entscheidung mit Testfall**, keine bestimmte Semantik; (c) das Verhalten ist
+über Testfall 6.1-4 und 6.4 dokumentiert. **Nachbesserungs-Ticket** (falls Word-Parität
+später gefordert): eigener Backlog-Eintrag `spalte-einfuegen-mehrfachauswahl`, nicht Teil
+dieses Umfangs.
 
 ### 4.2 Sehr breite Tabellen (Grenzfall 4.7)
 
-**Entscheidung: horizontales Scrollen (bereits vorhandenes Verhalten, siehe
-Abschnitt 3.5) wird bewusst als ausreichende Antwort bestätigt.** Keine
-automatische Spalten-Schrumpfung wird implementiert. Begründung: automatische
-Schrumpfung aller Spalten würde zusätzliche Logik (z. B. `table-layout: fixed` +
-prozentuale `colwidth`-Zuweisung) erfordern, obwohl `colwidth` in dieser Anwendung
-laut Abschnitt 7 der Anforderung explizit **nicht** Teil dieses Scopes ist — eine
-Schrumpfungslösung ohne echte `colwidth`-Rundreise wäre zudem inkonsistent (Breiten
-gingen beim nächsten Reader/Writer-Zyklus ohnehin verloren, Abschnitt 0 der
-Anforderung). Nachweis über Performance-/Crash-Test (Abschnitt 6.3).
+**Entscheidung: horizontales Scrollen** (bereits vorhandenes Verhalten, Abschnitt 3.5) wird
+bewusst akzeptiert. Keine automatische Spalten-Schrumpfung. **Begründung:** Schrumpfung
+erforderte `table-layout: fixed` + prozentuale `colwidth`-Zuweisung, obwohl `colwidth` laut
+Anforderung Abschnitt 7 explizit **außerhalb** des Scopes ist — eine Schrumpfung ohne echte
+`colwidth`-Rundreise wäre inkonsistent (Breiten gingen beim nächsten Reader/Writer-Zyklus
+ohnehin verloren). Nachweis über Test 6.4.
 
 ### 4.3 Kontextmenü
 
-**Bestätigt: bewusst nicht Teil dieses Umfangs**, wie in Abschnitt 2 Punkt 4 und
-Abschnitt 7 der Anforderung bereits festgelegt. Kein Code hierfür in diesem Plan.
+**Bestätigt: nicht Teil dieses Umfangs** (Anforderung Abschnitt 2 Punkt 4 / Abschnitt 7;
+`WordEditor.tsx:117-121`). Kein Code hierfür.
 
 ### 4.4 Icon-Wahl
 
-**Entscheidung: Material Symbols `add_column_left`/`add_column_right`** (Apache
-License 2.0), siehe Abschnitt 5.2 für exakte Pfaddaten und Bezugsquelle. Begründung:
-passgenau benannte, für exakt diesen Anwendungsfall bestimmte Glyphen verfügbar,
-konsistent mit der bereits für „Fett"/Ausrichtung getroffenen Icon-Strategie
-(kleine, lizenzkonforme, inline-SVGs statt Unicode/Emoji).
+**Entscheidung: zwei selbstgezeichnete Inline-SVG-Icons im Idiom des bestehenden
+`ScissorsIcon`** (`viewBox="0 0 24 24"`, `stroke="currentColor"`, `fill="none"`), klar
+unterscheidbar durch **gespiegelte** Anordnung (hervorgehobene neue Spalte + „+" links bzw.
+rechts eines Zwei-Spalten-Rasters), **nicht** nur durch Farbe. **Begründung:** erfüllt
+Anforderung Abschnitt 2 Punkt 1/2 (eigenes SVG statt Unicode/Emoji, links/rechts strukturell
+verschieden), bleibt konsistent mit dem einzigen bereits vorhandenen Icon und vermeidet eine
+neue npm-Abhängigkeit. Die exakte Pfadgeometrie ist illustrativ und beim Implementieren
+visuell gegenzuprüfen (Icons sind billig zu justieren) — kein externer Bezug, dessen
+Pfaddaten nicht verifizierbar wären.
 
 ---
 
@@ -314,50 +306,51 @@ konsistent mit der bereits für „Fett"/Ausrichtung getroffenen Icon-Strategie
 
 ### 5.1 `src/formats/shared/editor/commands.ts` (geändert)
 
-Neuer Import und zwei neue, dünne Re-Exports direkt neben dem bestehenden
-`export { isInTable }` (Zeile 6) — bewusst **keine** Neuimplementierung, siehe
-Abschnitt 0/3.1 (Bibliotheksfunktionen bereits vollständig korrekt für alle
-geforderten Verhaltensweisen):
+Import erweitern und zwei dünne Re-Exports direkt neben dem bestehenden
+`export { isInTable }` (Zeile 6) — bewusst **keine** Neuimplementierung (Abschnitt 3.1: die
+Bibliotheksfunktionen erfüllen bereits Undo-Gruppierung, Merge-Verhalten, innerste-Tabelle-
+Auflösung):
 
 ```ts
-import type { Command, EditorState } from 'prosemirror-state'
-import { wrapInList, liftListItem } from 'prosemirror-schema-list'
+// Zeile 3 erweitern:
 import { isInTable, addColumnBefore, addColumnAfter } from 'prosemirror-tables'
-import { wordSchema } from '../schema'
+// … (Rest der bestehenden Imports unverändert)
 
+// direkt bei Zeile 6:
 export { isInTable }
 
 /**
- * Insert a new, empty column immediately to the left of the column containing
- * the current selection (or, for a `CellSelection` spanning several columns,
- * immediately to the left of the selection's bounding rectangle — exactly one
- * column regardless of selection width, a deliberate v1 scope decision, see
- * spalte-einfuegen-code.md Abschnitt 4.1).
- *
- * Thin, intentionally un-wrapped re-export of prosemirror-tables' own
- * `addColumnBefore`: already handles colspan/rowspan at the insertion boundary
- * correctly (grows an existing merge instead of splitting it, per row,
- * independently), already resolves to the innermost enclosing table for
- * nested tables, and already dispatches exactly one transaction (single undo
- * step) — verified by execution, not just source reading, see Abschnitt 3.
+ * Fügt eine neue, leere Spalte unmittelbar links der Spalte der aktuellen
+ * Selektion ein (bei einer CellSelection über mehrere Spalten: genau eine
+ * Spalte links des Auswahlrechtecks — bewusste v1-Entscheidung, siehe
+ * spalte-einfuegen-code.md Abschnitt 4.1). Dünner Re-Export von
+ * prosemirror-tables' addColumnBefore: behandelt colspan/rowspan an der
+ * Einfügegrenze bereits korrekt (verbreitert einen bestehenden Merge statt ihn
+ * zu spalten, pro Zeile unabhängig), löst verschachtelte Tabellen auf die
+ * innerste auf und dispatcht genau eine Transaktion (ein Undo-Schritt) — durch
+ * Ausführung verifiziert, siehe Abschnitt 3.
  */
 export const insertColumnBefore: Command = addColumnBefore
 
-/** Symmetric counterpart of {@link insertColumnBefore}; inserts to the right. */
+/** Symmetrisches Gegenstück zu {@link insertColumnBefore}; fügt rechts ein. */
 export const insertColumnAfter: Command = addColumnAfter
 ```
 
-Keine Änderung an `insertTable`, `setAlign`, `setHeading` oder sonstigen bestehenden
-Exporten dieser Datei.
+`Command` ist in dieser Datei bereits importiert (`import type { Command, EditorState } from
+'prosemirror-state'`, Zeile 1) — kein zusätzlicher Import nötig. Keine Änderung an
+`insertTable` oder sonstigen Exporten.
 
 ### 5.2 `src/formats/shared/editor/Toolbar.tsx` (geändert)
 
-**Import-Zeile (1–17) erweitern:**
+**(a) Import aus `./commands` (Zeile 6-20) um die zwei neuen Namen erweitern** —
+alphabetisch neben `insertImage`/`insertTable`:
 
 ```tsx
 import {
   applyMarkColor,
+  canCut,
   clearMarkColor,
+  cutSelection,
   insertColumnAfter,
   insertColumnBefore,
   insertImage,
@@ -370,17 +363,21 @@ import {
   toggleList,
   type Align,
 } from './commands'
-import type { Command } from 'prosemirror-state'
 ```
 
-**Neue Komponente** (direkt nach `AlignButton`, Zeile 84, einfügen) — folgt bewusst
-**nicht** dem `onMouseDown`-only-Muster des bestehenden `AlignButton`/`MarkButton`
-(dort in `fett-code.md` Abschnitt 2.1 bzw. `ausrichtung-links-code.md` Abschnitt 3.9
-als Tastatur-Zugänglichkeitsfehler identifiziert und dort nachträglich auf
-`onClick` für die Aktion umgestellt) — die neuen Buttons werden **von Anfang an**
-korrekt gebaut, mit `onClick` für die Aktion und `onMouseDown` ausschließlich für
-`preventDefault()` (verhindert Fokus-/Selektionsverlust vor dem Klick), damit Tab +
-Enter/Leertaste sie zuverlässig auslöst (Abschnitt 2 Punkt 5 der Anforderung):
+`Command` (`prosemirror-state`, Zeile 3) ist bereits importiert — **nicht** erneut
+importieren. Für den Icon-Typ die bestehende React-Typimport-Zeile 1 nutzen:
+`import type { ChangeEvent, ReactNode } from 'react'`.
+
+**(b) Neue Komponente `ColumnButton`** (direkt nach `AlignButton`, Zeile 111, einfügen).
+Bewusst **nicht** das `onMouseDown`-only-Muster des bestehenden `MarkButton`/`AlignButton`
+(`:76-79`/`:98-101`): dort läuft die Aktion in `onMouseDown` — das feuert bei
+**Tastatur**-Aktivierung (Tab-Fokus + Enter/Leertaste) **nicht** (kein `mousedown`-Event),
+d. h. jene Buttons sind aktuell nicht per Tastatur auslösbar (vorbestehende, hier **nicht**
+zu behebende Lücke außerhalb des Scopes). Die neuen Buttons erfüllen Anforderung Abschnitt 2
+Punkt 5 (Tastatur) **und** Punkt 1 (Selektionserhalt), indem `onMouseDown` **nur**
+`preventDefault()` macht (verhindert Fokus-/Selektionsverlust vor dem Mausklick) und die
+Aktion in `onClick` läuft (feuert bei echtem Mausklick **und** bei Enter/Leertaste):
 
 ```tsx
 function ColumnButton({
@@ -392,7 +389,7 @@ function ColumnButton({
   view: EditorView
   command: Command
   title: string
-  icon: React.ReactNode
+  icon: ReactNode
 }) {
   const disabled = !isInTable(view.state)
   return (
@@ -409,474 +406,308 @@ function ColumnButton({
     </button>
   )
 }
+```
 
+Der `disabled`-Zustand wird bei **jedem** Render neu aus `isInTable(view.state)` bestimmt;
+`WordEditor.tsx` erzwingt via `forceRender` bei jeder Transaktion einen Toolbar-Re-Render
+(`WordEditor.tsx:131`, im `dispatchTransaction`), sodass sich der Zustand live aktualisiert, wenn der Cursor in eine
+Tabelle hinein-/herauswandert — dasselbe Muster wie die aktive Markierung von `MarkButton`.
+Da `run()` (`Toolbar.tsx:28-31`) den Rückgabewert des Commands nicht auswertet, ist der
+`disabled`-Zustand der einzige (und ausreichende) Schutz gegen einen stillen Fehlschlag
+außerhalb einer Tabelle (Anforderung Abschnitt 2 Punkt 3).
+
+**(c) Zwei Icons** (im `ScissorsIcon`-Idiom, ebenfalls nach `AlignButton` bzw. neben
+`ScissorsIcon`). Geometrie illustrativ, beim Implementieren visuell prüfen (4.4):
+
+```tsx
 function AddColumnLeftIcon() {
   return (
-    <svg viewBox="0 -960 960 960" width="16" height="16" aria-hidden="true" focusable="false" fill="currentColor">
-      <path d="M820-180v-600H551v600h269Zm-660 60v-150h60v90h271v-600H220v90h-60v-150h720v720H160Zm331-360Zm60 0h-60 60Zm0 0ZM160-370v-80H80v-60h80v-80h60v80h80v60h-80v80h-60Z" />
+    <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor"
+      strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" focusable="false">
+      {/* bestehender Zwei-Spalten-Block rechts */}
+      <rect x="12" y="4" width="8" height="16" rx="1" />
+      <line x1="16" y1="4" x2="16" y2="20" />
+      {/* neue Spalte links markiert durch ein „+" */}
+      <line x1="5" y1="8.5" x2="5" y2="15.5" />
+      <line x1="1.5" y1="12" x2="8.5" y2="12" />
     </svg>
   )
 }
 
 function AddColumnRightIcon() {
   return (
-    <svg viewBox="0 -960 960 960" width="16" height="16" aria-hidden="true" focusable="false" fill="currentColor">
-      <path d="M140-780v600h269v-600H140ZM80-120v-720h720v150h-60v-90H469v600h271v-90h60v150H80Zm389-360Zm-60 0h60-60Zm0 0Zm331 110v-80h-80v-60h80v-80h60v80h80v60h-80v80h-60Z" />
+    <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor"
+      strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" focusable="false">
+      {/* bestehender Zwei-Spalten-Block links */}
+      <rect x="4" y="4" width="8" height="16" rx="1" />
+      <line x1="8" y1="4" x2="8" y2="20" />
+      {/* neue Spalte rechts markiert durch ein „+" */}
+      <line x1="19" y1="8.5" x2="19" y2="15.5" />
+      <line x1="15.5" y1="12" x2="22.5" y2="12" />
     </svg>
   )
 }
 ```
 
-(Pfaddaten aus Googles **Material Symbols** [outlined-Variante,
-`@material-symbols/svg-400`], Icons `add_column_left`/`add_column_right`,
-Apache License 2.0 — bezogen über
-`unpkg.com/@material-symbols/svg-400/outlined/add_column_left.svg` bzw.
-`.../add_column_right.svg`. Beide unterscheiden sich strukturell voneinander
-[gespiegelte Anordnung des hervorgehobenen Spaltenblocks], nicht nur durch
-CSS-Farbe — erfüllt Abschnitt 2 Punkt 2 der Anforderung.)
-
-**Aufrufstelle:** direkt nach dem bestehenden „Tabelle einfügen"-Button einfügen
-(nach Zeile 239, vor dem `<label>` für den Bild-Upload, Zeile 241):
+**(d) Aufrufstelle:** direkt **nach** dem bestehenden „⊞ Tabelle"-Button (endet
+`Toolbar.tsx:289`), **vor** dem `<label>` für den Bild-Upload (`:291`):
 
 ```tsx
-      <button
-        type="button"
-        title="Tabelle einfügen"
-        aria-pressed={isInTable(view.state)}
-        onMouseDown={(e) => {
-          e.preventDefault()
-          run(view, insertTable(2, 2))
-        }}
-        className="px-2 py-1 rounded text-sm hover:bg-neutral-100 dark:hover:bg-neutral-800 text-neutral-700 dark:text-neutral-300"
-      >
-        ⊞ Tabelle
-      </button>
+      {/* … bestehender „⊞ Tabelle"-Button (277-289) unverändert … */}
 
-      <ColumnButton
-        view={view}
-        command={insertColumnBefore}
-        title="Spalte links einfügen"
-        icon={<AddColumnLeftIcon />}
-      />
-      <ColumnButton
-        view={view}
-        command={insertColumnAfter}
-        title="Spalte rechts einfügen"
-        icon={<AddColumnRightIcon />}
-      />
+      <ColumnButton view={view} command={insertColumnBefore} title="Spalte links einfügen" icon={<AddColumnLeftIcon />} />
+      <ColumnButton view={view} command={insertColumnAfter} title="Spalte rechts einfügen" icon={<AddColumnRightIcon />} />
 
       <label className="px-2 py-1 rounded text-sm hover:bg-neutral-100 dark:hover:bg-neutral-800 text-neutral-700 dark:text-neutral-300 cursor-pointer">
         🖼 Bild
-        ...
+        {/* … */}
 ```
 
-Bestehender „⊞ Tabelle"-Button (Zeile 228–239) bleibt unverändert (inkl. des in
-Abschnitt 2 dieses Plans vermerkten, aber nicht zu diesem Umfang gehörenden
-`aria-pressed`-Sonderfalls).
+Der bestehende „⊞ Tabelle"-Button (277-289, inkl. des in Abschnitt 2 vermerkten
+`aria-pressed`-Sonderfalls) bleibt unverändert.
 
 ### 5.3 `src/formats/shared/editor/WordEditor.tsx` (keine Änderung)
 
-Keymap (Zeile 71–79), Plugin-Liste (Zeile 69–86) bleiben unverändert. Die
-Anforderung selbst sieht (Abschnitt 2 Punkt 5) **keine** Tastenkombination für dieses
-Feature vor — bestätigt, kein Fix nötig. `columnResizing()`/`tableEditing()`
-(Zeile 81–82) bleiben aktiv und ausreichend (Abschnitt 2 dieses Plans).
+Keymap (`:85-107`) und Plugin-Liste (`:83-114`) bleiben unverändert. Die Anforderung sieht
+(Abschnitt 2 Punkt 5) **keine** Tastenkombination für dieses Feature vor.
+`columnResizing()` (`:109`) und `tableEditing()` (`:110`) sind aktiv und ausreichend
+(Abschnitt 3.4).
 
 ### 5.4 `src/formats/shared/schema.ts` (keine Änderung)
 
-`tableNodes({ tableGroup: 'block', cellContent: 'block+', cellAttributes: {} })`
-(Zeile 106) liefert bereits `colspan`/`rowspan`/`colwidth` auf `table_cell` — keine
-Schema-Änderung für dieses Feature nötig, bestätigt durch Abschnitt 2/Abschnitt 0.
+`tableNodes({ tableGroup: 'block', cellContent: 'block+', cellAttributes: {} })` (`:154`)
+liefert bereits `colspan`/`rowspan`/`colwidth` auf `table_cell` — keine Schema-Änderung
+nötig.
 
-### 5.5 `src/formats/odt/writer.ts` (geändert — Pflicht-Fix laut Abschnitt 6 der Anforderung)
+### 5.5 `src/formats/odt/writer.ts` (KEINE Änderung — Korrektur gegenüber altem Entwurf)
 
-`colCount`-Berechnung im `case 'table'`-Zweig (Zeile 88) von reiner Zellenzahl auf
-Colspan-Summe umstellen, exakt analog zum bereits korrekten DOCX-Writer
-(`docx/writer.ts:130`):
-
-```ts
-case 'table': {
-  const rows = node.content ?? []
-  const colCount =
-    (rows[0]?.content ?? []).reduce((sum, c) => sum + Number(c.attrs?.colspan ?? 1), 0) || 1
-  const columns = Array.from({ length: colCount }, () => '<table:table-column/>').join('')
-  // ... Rest der Funktion (Zeile 90–110) unverändert ...
-```
-
-Keine weitere Änderung an dieser Datei nötig — `table:number-columns-spanned`/
-`-rows-spanned` (Zeile 96–98) sind bereits korrekt.
+**Kein Fix.** `odt/writer.ts:115-116` berechnet `colCount` bereits als Colspan-Summe
+(`reduce(... colspan ...)`), identisch zum DOCX-Writer, und erzeugt ODF-konforme
+`<table:covered-table-cell/>`-Platzhalter (`:119-167`). Der im **früheren Entwurf dieses
+Plans** hier verlangte „`colCount`-Bugfix" beruhte auf veraltetem Code und wird **gestrichen**
+(siehe 0.1). Diese Datei wird nicht angefasst; die zugehörigen Tests (6.2) sind reiner
+Regressionsschutz.
 
 ### 5.6 `src/formats/docx/writer.ts` (keine Änderung)
 
-`tableToDocx` (Zeile 128–171) ist bereits korrekt (Abschnitt 2). Kein Fix nötig.
+`tableToDocx` (`:158-195`), `colCount` (`:160`), `<w:tblGrid>`/`<w:gridCol>` (`:161`),
+`pending`/`<w:vMerge/>` (`:163-193`) sind bereits korrekt. Kein Fix.
 
 ### 5.7 `src/formats/docx/reader.ts` / `src/formats/odt/reader.ts` (keine Änderung)
 
-`colwidth: null` (Zeile 244 bzw. 197) bleibt bestehen — Spaltenbreiten-Rundreise ist
-laut Abschnitt 7 der Anforderung explizit **außerhalb** dieses Scopes. Beide Reader
-lesen `colspan`/`rowspan` bereits korrekt (bestätigt, Abschnitt 2); eine neu
-eingefügte Spalte fügt sich beim nächsten Export nahtlos in die bestehende
-`colCount`-Berechnung ein (nach Fix 5.5 für ODT, bereits korrekt für DOCX) — kein
-Sonderfall für „importierte, dann um eine Spalte erweiterte" Tabellen nötig.
+`colwidth: null` (`docx/reader.ts:350`, `odt/reader.ts:315`) bleibt — Spaltenbreiten-Rundreise
+ist laut Anforderung Abschnitt 7 explizit **außerhalb** des Scopes. Beide Reader lesen
+`colspan`/`rowspan` bereits korrekt; eine im Editor neu eingefügte Spalte fügt sich beim
+nächsten Export nahtlos in die (unveränderte) `colCount`-Berechnung beider Writer ein — kein
+Sonderpfad für „importiert, dann erweitert" nötig. Der in Anforderung Abschnitt 6.2
+benannte **Verifikationspunkt** (ODT-Reader überspringt `covered-table-cell` bei realen
+LibreOffice-Fremddateien mit `rowspan`) ist **kein Fix-Auftrag dieses Features**, sondern
+eine mit einer echten Fixture zu prüfende Annahme (Test 6.4/6.6); trägt sie nicht, wird sie
+als **eigenständige Reader-Abhängigkeit** ticketiert, nicht als „Spalte einfügen"-Fehler.
 
 ### 5.8 `src/index.css` (keine Änderung)
 
-Bestehende `table`/`td`/`th`-Regeln (Zeile 44–61) reichen aus (Abschnitt 3.4/3.5/
-Entscheidung 4.2). Keine `table-layout: fixed`- oder `overflow-x`-Ergänzung in
-diesem Plan.
+Bestehende `table`/`td`/`th`-Regeln (`:44-61`) reichen aus (Abschnitt 3.4/3.5, Entscheidung
+4.2). Keine `table-layout: fixed`- oder `overflow-x`-Ergänzung.
 
 ---
 
 ## 6. Testplan
 
-### 6.1 Neu: `src/formats/shared/editor/__tests__/commands.test.ts`
+### 6.1 Geändert (erweitert): `src/formats/shared/editor/__tests__/commands.test.ts`
 
-Einzige Ebene, die Grenzfall 4.2/4.4/4.5 sowie die Undo-Gruppierung tatsächlich gegen
-den Befehl selbst (nicht nur gegen Reader/Writer) prüfen kann — kein bestehendes
-Muster für ProseMirror-Command-Tests im Projekt vorhanden (Abschnitt 1), neu
-etabliert nach dem Muster aus `ausrichtung-links-code.md` Abschnitt 6.1 (echte
-`EditorView` + `jsdom`, `dispatchTransaction` ruft `view.updateState(view.state.apply(tr))`):
+**Die Datei existiert bereits** (testet `canCut`/`cutSelection`, nutzt `wordSchema.node(...)`
++ `EditorState.create` + capture-dispatch, **ohne** gemountete `EditorView`). Neuer
+`describe('Spalte einfügen (insertColumnBefore/insertColumnAfter)', …)`-Block im **selben,
+leichtgewichtigen Stil**. Für die Command-Ausführung genügt eine capture-dispatch-Funktion
+(kein `EditorView` nötig); für den Undo-Test wird `EditorState.create({ …, plugins:
+[history()] })` verwendet; für 4.4 eine echte `CellSelection` via `cellAround` (wie im
+Repro, Abschnitt 3.3). Kein neues Testframework, kein jsdom-`EditorView`-Mount nötig.
+
+Hilfsfunktionen (Kopf des Blocks) und Testfälle:
 
 ```ts
-import { EditorState, TextSelection } from 'prosemirror-state'
-import { EditorView } from 'prosemirror-view'
 import { history, undo } from 'prosemirror-history'
 import { CellSelection, cellAround } from 'prosemirror-tables'
-import { wordSchema } from '../../schema'
 import { insertColumnBefore, insertColumnAfter, isInTable } from '../commands'
 
-function cell(text = '', attrs: Record<string, unknown> = {}) {
-  return {
-    type: 'table_cell',
-    attrs: { colspan: 1, rowspan: 1, colwidth: null, ...attrs },
-    content: [{ type: 'paragraph', attrs: { align: 'left' }, content: text ? [{ type: 'text', text }] : [] }],
-  }
-}
-
-function makeView(json: unknown) {
-  const doc = wordSchema.nodeFromJSON(json)
-  const state = EditorState.create({ doc, schema: wordSchema, plugins: [history()] })
-  const view = new EditorView(document.createElement('div'), {
-    state,
-    dispatchTransaction(tr) {
-      view.updateState(view.state.apply(tr))
-    },
-  })
-  return view
-}
-
-function selectText(view: EditorView, text: string) {
-  let pos = -1
-  view.state.doc.descendants((node, p) => {
-    if (node.isText && node.text === text) pos = p
-  })
-  view.dispatch(view.state.tr.setSelection(TextSelection.near(view.state.doc.resolve(pos))))
-}
+const P = (t?: string) => wordSchema.node('paragraph', { align: 'left' }, t ? [wordSchema.text(t)] : [])
+const CELL = (t?: string, attrs = {}) =>
+  wordSchema.node('table_cell', { colspan: 1, rowspan: 1, colwidth: null, ...attrs }, [P(t)])
+const ROW = (cells: unknown[]) => wordSchema.node('table_row', null, cells as never)
+const TABLE = (rows: unknown[]) => wordSchema.node('table', null, rows as never)
+// capture-dispatch: liefert den Folgezustand ohne EditorView
+function apply(state, cmd) { let out = state; const ok = cmd(state, (tr) => (out = state.apply(tr))); return { ok, state: out } }
 ```
 
-Testfälle:
+1. **Grundverhalten 3.1/3.2:** 2×2-Tabelle, Cursor in Zelle 2 Zeile 1, `insertColumnAfter`
+   → 3 Spalten, neue Zelle leer an Position 3, Originalinhalt an Position 1/2 unverändert.
+   Analog `insertColumnBefore` von Zelle 1 → neue erste Spalte.
+2. **Grenzfall 4.1 (1-spaltige Tabelle):** 1×2 → `insertColumnBefore`/`-After` → 2×2,
+   Originalinhalt vollständig in der jeweils anderen Spalte.
+3. **Grenzfall 4.2 (gemischte Merges):** Aufbau aus Abschnitt 3.2, Assertions
+   `rowColspans(row0) == [1,3]` und `rowTexts(row1) == ['A2','B2','','C2']`.
+4. **Grenzfall 4.4 (Mehrfachauswahl):** `CellSelection` via `cellAround` über 2 von 3
+   Spalten, `insertColumnAfter` → Spaltenzahl **+1** (nicht +2) — Regressionstest für
+   Entscheidung 4.1.
+5. **Grenzfall 4.5 (verschachtelte Tabelle):** äußere 1×2 mit innerer 1×2 in Zelle 1,
+   Cursor in der inneren Tabelle, `insertColumnAfter` → äußere Zeile bleibt 2, innere → 3.
+6. **Undo (3.8):** ein `insertColumnAfter` + ein `undo` → Struktur (inkl. `colspan`) exakt
+   wie vor dem Insert.
+7. **Deaktiviert außerhalb einer Tabelle (Abschnitt 2 Punkt 3):** Dokument ohne Tabelle →
+   `isInTable(state) === false`; `insertColumnBefore(state, dispatch)` → gibt `false`
+   zurück, **kein** Dispatch (Assertion: der capture callback wird nie aufgerufen).
+8. **`table_header`-Absicherung (Zusatzfund Abschnitt 2):** verifiziert, dass eine per
+   `insertTable`-analogem Aufbau erzeugte Tabelle ausschließlich `table_cell` enthält und
+   ein Insert nie einen `table_header` erzeugt (Regressionsschutz für künftigen
+   Kopfzeilen-Support).
+9. **Grenzfall 4.11 (mehrabsätzige Zelle):** Zelle mit zwei `paragraph`-Kindern an der
+   Einfügeposition → Inhalt nach Insert vollständig/unverändert (beide Absätze, Reihenfolge).
 
-1. **Grundverhalten 3.1/3.2:** 2×2-Tabelle, Cursor in Zelle 2 von Zeile 1,
-   `insertColumnAfter` → 3 Spalten, neue Zelle leer und an Position 3, Original-Inhalt
-   beider Zeilen unverändert an Position 1/2. Analog `insertColumnBefore` von
-   Zelle 1 aus → neue erste Spalte, Originalinhalt bleibt in Spalte 2/3.
-2. **Grenzfall 4.1 (1-spaltige Tabelle):** 1×2-Tabelle, `insertColumnBefore`/`-After`
-   → 2×2-Tabelle, ursprünglicher Inhalt vollständig in der jeweils anderen Spalte.
-3. **Grenzfall 4.2 (gemischte Merges):** exakt der in Abschnitt 3.2 dieses Plans
-   gezeigte Aufbau/Ablauf, Assertions auf `colspan`-Array `[1,3]` für Zeile 1 und
-   Zellinhalt-Array `['A2','B2','','C2']` für Zeile 2.
-4. **Grenzfall 4.4 (Mehrfachauswahl):** `CellSelection` via `cellAround` über 2 von
-   3 Spalten, `insertColumnAfter` → Spaltenzahl wächst um **genau 1** (nicht 2) —
-   dokumentiert die Entscheidung aus Abschnitt 4.1 als Regressionstest.
-5. **Grenzfall 4.5 (verschachtelte Tabelle):** äußere 1×2-Tabelle mit innerer
-   1×2-Tabelle in Zelle 1, Cursor in der inneren Tabelle, `insertColumnAfter` →
-   äußere Zeile bleibt bei 2 Zellen, innere Zeile wächst auf 3.
-6. **Undo (Abschnitt 3.8):** ein `insertColumnAfter`-Aufruf, ein `undo()` →
-   Zeilen-/Zellstruktur (inkl. `colspan`) exakt wie vor dem Insert.
-7. **Deaktiviert außerhalb einer Tabelle (Abschnitt 2 Punkt 3):** Dokument ohne
-   Tabelle, Cursor im Absatz, `isInTable(view.state)` → `false`; `insertColumnBefore(view.state, view.dispatch)`
-   → gibt `false` zurück, **kein** Dispatch, Dokument unverändert.
-8. **`table_header`-Absicherung (Zusatzfund Abschnitt 2):** Testfall, der
-   verifiziert, dass eine über `insertTable`/Reader erzeugte Tabelle ausschließlich
-   `table_cell`-Knoten enthält und ein Insert daher niemals einen `table_header`
-   erzeugt (Regressionsschutz, falls künftig Kopfzeilen-Support ergänzt wird).
-9. **Grenzfall 4.11 (mehrabsätzige Zelle):** Zelle mit zwei `paragraph`-Kindern an
-   der Einfügeposition → Inhalt bleibt nach Insert vollständig und unverändert
-   (beide Absätze, unveränderte Reihenfolge).
+### 6.2 Geändert: `src/formats/odt/__tests__/roundtrip.test.ts` (Regressionsschutz, KEIN Bugfix)
 
-### 6.2 Geändert: `src/formats/odt/__tests__/roundtrip.test.ts`
-
-Neue Testfälle im bestehenden `describe('ODT round trip: tables', ...)`-Block
-(nach Zeile 208), gemäß Abschnitt 6 Testfall 1/2 der Anforderung — prüft die raw
-`content.xml` (nicht nur das re-importierte JSON), analog zum bereits vorhandenen
-Muster in `docx/__tests__/roundtrip.test.ts` (dort wird `writeDocx` bereits separat
-von `readDocx` aufgerufen, hier wird das für `writeOdt` ergänzt):
+Die Datei hat **bereits** die relevanten Merge-Export-Tests: `:275` („emits ODF-compliant
+covered-table-cell placeholders for a horizontal (colspan) merge", mit
+`expect((contentXml.match(/<table:table-column\/>/g) ?? []).length).toBe(2)` bei `:298`) und
+`:310` (rowspan-Pendant). Diese sichern das **bereits korrekte** `colCount`-Verhalten ab
+(Anforderung Abschnitt 6.1). Ergänzt wird **ein** additiver Fall im bestehenden
+`describe('ODT round trip: tables', …)`-Block (nach `:339`), der die Situation „Merge **plus**
+zusätzliche echte Spalte" abdeckt (simuliert das Ergebnis eines Spalten-Inserts neben einem
+Merge) — reiner Regressionsschutz, dass „Spalte einfügen" die Spaltenzahl nicht bricht:
 
 ```ts
-it('exports exactly as many <table:table-column> as the colspan-weighted column count (Abschnitt 6 Testfall 1)', async () => {
-  const original = doc([
-    {
-      type: 'table',
-      content: [
-        {
-          type: 'table_row',
-          content: [
-            { type: 'table_cell', attrs: { colspan: 2, rowspan: 1 }, content: [paragraph('Merged')] },
-            { type: 'table_cell', attrs: { colspan: 1, rowspan: 1 }, content: [paragraph('C')] },
-          ],
-        },
-      ],
-    },
-  ])
+it('declares one table-column per grid column when a colspan-2 cell is followed by a normal cell (regression, spalte-einfuegen 6.1)', async () => {
+  const original = doc([{ type: 'table', content: [{ type: 'table_row', content: [
+    { type: 'table_cell', attrs: { colspan: 2, rowspan: 1 }, content: [paragraph('Merged')] },
+    { type: 'table_cell', attrs: { colspan: 1, rowspan: 1 }, content: [paragraph('C')] },
+  ] }] }])
   const blob = await writeOdt(original)
-  const zip = await JSZip.loadAsync(blob)
-  const contentXml = await zip.file('content.xml')!.async('text')
-  const columnCount = (contentXml.match(/<table:table-column\/>/g) ?? []).length
-  expect(columnCount).toBe(3) // 2 (Merge) + 1, NICHT 2 (rohe Zellenzahl) — deckt den Fehler aus Abschnitt 0/6 unmittelbar auf
-})
-
-it('column count grows correctly after an additional column is present (Abschnitt 6 Testfall 2)', async () => {
-  const original = doc([
-    {
-      type: 'table',
-      content: [
-        {
-          type: 'table_row',
-          content: [
-            { type: 'table_cell', attrs: { colspan: 2, rowspan: 1 }, content: [paragraph('Merged')] },
-            { type: 'table_cell', attrs: { colspan: 1, rowspan: 1 }, content: [paragraph('C')] },
-            { type: 'table_cell', attrs: { colspan: 1, rowspan: 1 }, content: [] }, // simuliert die neu eingefügte Spalte
-          ],
-        },
-      ],
-    },
-  ])
-  const blob = await writeOdt(original)
-  const zip = await JSZip.loadAsync(blob)
-  const contentXml = await zip.file('content.xml')!.async('text')
-  const columnCount = (contentXml.match(/<table:table-column\/>/g) ?? []).length
-  expect(columnCount).toBe(4)
+  const contentXml = await (await JSZip.loadAsync(blob)).file('content.xml')!.async('text')
+  expect((contentXml.match(/<table:table-column\/>/g) ?? []).length).toBe(3) // 2 + 1
 })
 ```
 
-(Benötigt `import JSZip from 'jszip'` und `import { writeOdt } from '../writer'` am
-Dateikopf, falls dort noch nicht vorhanden — zu prüfen und ggf. zu ergänzen.)
+`import JSZip from 'jszip'` und `import { writeOdt } from '../writer'` sind am Dateikopf
+bereits vorhanden (`:1`/`:2`). **Keine** Umstellung des Writers, **kein** bugaufdeckender
+Test — der frühere `.toBe(3)`-Test des alten Entwurfs war als „deckt den Fehler unmittelbar
+auf" beschrieben; da kein Fehler existiert, ist die Formulierung auf „Regression" korrigiert.
 
-### 6.3 Geändert: `src/formats/docx/__tests__/roundtrip.test.ts`
+### 6.3 Geändert: `src/formats/docx/__tests__/roundtrip.test.ts` (Regressionsschutz)
 
-Ein neuer, rein regressionssichernder Test (DOCX-Writer ist bereits korrekt, siehe
-Abschnitt 2) im bestehenden `describe('DOCX round trip: tables', ...)`-Block, analog
-zu 6.2, damit beide Formate symmetrisch gegen genau dieselbe Fehlerklasse abgesichert
-sind (Abschnitt 5.1.1 der Anforderung, „mit einem unabhängigen Parser verifizieren"):
+Der DOCX-Writer ist bereits korrekt (Abschnitt 2/5.6). Die bestehenden Tabellentests
+(`:229-306`) assertieren auf das **re-importierte JSON** via `roundTrip()` (die Datei nutzt
+`zipInspect`, **nicht** JSZip). Passend dazu wird ein additiver JSON-basierter Regressionstest
+in `describe('DOCX round trip: tables', …)` ergänzt: Tabelle mit `colspan:2` + normaler Zelle
+in Zeile 1 → nach `roundTrip()` bleibt die effektive Spaltenzahl (Merge-Zelle `colspan:2` +
+1) erhalten. Falls stattdessen die von Anforderung 5.1.1 gewünschte **rohe**
+`<w:gridCol>`-Zählung geprüft werden soll, ist `import JSZip from 'jszip'` am Dateikopf zu
+ergänzen (konsistent mit `odt/roundtrip.test.ts:1`) und `word/document.xml` per
+`JSZip.loadAsync` als Text zu lesen:
 
 ```ts
 it('exports exactly as many <w:gridCol> as the colspan-weighted column count', async () => {
-  const original = doc([
-    {
-      type: 'table',
-      content: [
-        {
-          type: 'table_row',
-          content: [
-            { type: 'table_cell', attrs: { colspan: 2, rowspan: 1 }, content: [paragraph('Merged')] },
-            { type: 'table_cell', attrs: { colspan: 1, rowspan: 1 }, content: [paragraph('C')] },
-          ],
-        },
-      ],
-    },
-  ])
-  const blob = await writeDocx(original)
-  const zip = await JSZip.loadAsync(blob)
-  const documentXml = await zip.file('word/document.xml')!.async('text')
-  const columnCount = (documentXml.match(/<w:gridCol /g) ?? []).length
-  expect(columnCount).toBe(3)
+  const original = doc([{ type: 'table', content: [{ type: 'table_row', content: [
+    { type: 'table_cell', attrs: { colspan: 2, rowspan: 1 }, content: [paragraph('Merged')] },
+    { type: 'table_cell', attrs: { colspan: 1, rowspan: 1 }, content: [paragraph('C')] },
+  ] }] }])
+  const documentXml = await (await JSZip.loadAsync(await writeDocx(original))).file('word/document.xml')!.async('text')
+  expect((documentXml.match(/<w:gridCol /g) ?? []).length).toBe(3)
 })
 ```
-
-(Benötigt `import JSZip from 'jszip'` am Dateikopf.)
 
 ### 6.4 Neu: `tests/e2e/tables.spec.ts`
 
-Playwright-E2E gemäß Abschnitt 8 der Anforderung — Verifikationsauftrag verlangt
-echte Browser-Bedienung, nicht nur Unit-Tests. Struktur/Konventionen aus
-`tests/e2e/selection-regression.spec.ts` (`odtCard`-Helper, `getByRole('button', ...)`)
-übernommen:
+Playwright-E2E gemäß Anforderung Abschnitt 8 (echte Browser-Bedienung, nicht nur Unit).
+Struktur/Konventionen aus `tests/e2e/selection-regression.spec.ts` (`odtCard`-Helper,
+`getByRole('button', …)`, `beforeEach`: `goto('/')` → „verstanden" → ODT-Karte „Neu
+erstellen"). Abgedeckte Fälle:
 
-```ts
-import { test, expect } from '@playwright/test'
+1. **Buttons außerhalb einer Tabelle deaktiviert, in einer Tabelle aktiviert:** beide
+   Buttons sichtbar; `toBeDisabled()` vor „Tabelle einfügen"; nach „Tabelle einfügen" +
+   Klick in eine `td` → `toBeEnabled()` (Abschnitt 2 Punkt 3, Abnahmekriterium 1).
+2. **Grundverhalten 3.1/3.2:** 2×2 füllen (A1/B1/A2/B2), Cursor in B1, „Spalte rechts
+   einfügen" → jede Zeile 3 `td`, Inhalt A1/B1 unverändert, neue Zelle leer und **sofort
+   tippbar** (in neue Zelle klicken, „Neu" tippen, `toContainText('Neu')` — deckt die in
+   3.4 geschärfte „mindestens `min-width` breit und editierbar"-Erwartung ab).
+3. **Grenzfall 4.3 (linker Rand):** „Spalte links" auf die erste Spalte → 3 `td` in Zeile 1.
+4. **Undo/Redo (3.8):** „Spalte rechts" → 3 `td`; `ControlOrMeta+z` → 2 `td`;
+   `ControlOrMeta+y` → 3 `td`.
+5. **Grenzfall 4.4 (Mehrfachauswahl):** Drag über beide Spalten der 2×2 (`mouse.down()` in
+   Zelle 0 → `hover()` Zelle 1 → `mouse.up()`), „Spalte rechts" → 3 `td` (nicht 4) —
+   E2E-Beleg der Entscheidung 4.1.
+6. **Grenzfall 4.5 (verschachtelte Tabelle):** „Tabelle einfügen", Cursor in Zelle 1,
+   erneut „Tabelle einfügen" (verschachtelt), Cursor in innere Zelle, „Spalte rechts" →
+   innere Zeile 3 Zellen, äußere Zeile unverändert 2. **Hinweis:** verschachtelte
+   `<table>`-Selektoren sind fragil; robuster über `page.evaluate` mit direkter
+   DOM-Traversierung (beim Implementieren gegen das echte DOM verifizieren).
+7. **Grenzfall 4.7 (10× einfügen):** 10× „Spalte rechts" → 12 `td`, kein Absturz/Hänger,
+   danach in eine Zelle tippen („noch bedienbar") und verifizieren.
+8. **Touch-Grundfall (Grenzfall 4.15):** derselbe „Cursor per Tipp in Zelle → Button
+   antippen"-Fall läuft in den Playwright-Projekten „Mobile" (Pixel 7) und „Tablet"
+   (iPad Mini) (`playwright.config.ts:34-36`) — keine `CellSelection` per Touch-Drag
+   erforderlich (nur der Cursor-Fall ist Pflicht).
 
-function odtCard(page: import('@playwright/test').Page) {
-  return page.locator('div.rounded-lg', { has: page.getByRole('heading', { name: 'OpenDocument Text (.odt)' }) })
-}
+### 6.5 Geändert: `tests/e2e/selection-regression.spec.ts` — Pflicht-Regressionstest (Grenzfall 4.10)
 
-test.describe('Spalte einfügen (links/rechts)', () => {
-  test.beforeEach(async ({ page }) => {
-    await page.goto('/')
-    await page.getByRole('button', { name: /verstanden/i }).click()
-    await odtCard(page).getByRole('button', { name: 'Neu erstellen' }).click()
-  })
+Neuer Test im bestehenden `test.describe`-Block (`:7`, ans Ende anfügen — die Datei hat
+inzwischen **vier** Tests, der Block endet bei `:111` (siehe 0.2); der bestehende
+Tabellen-Fall liegt bei `:43`, der Stress-Test bei `:61`, ein vierter/Kopieren-Test bei
+`:88-110`), exakt Anforderung 3.7/Grenzfall
+4.10: „Spalte einfügen → Klick in andere Zelle → Enter/weitertippen → **kein** Datenverlust".
+Nutzt dasselbe `waitForTimeout(50)`-Muster vor `Enter` wie die bestehenden Tests (`:34`).
+Der Editor verwendet dieselbe `reconcileSelectionOnClick`-Logik
+(`WordEditor.tsx:43-50`, mouseup-Handler `:146-153`), die dieser Test gegen einen
+Tabellen-Spalten-Auslöser absichert.
 
-  test('buttons are disabled outside a table and enabled once the cursor is inside one', async ({ page }) => {
-    const left = page.getByRole('button', { name: 'Spalte links einfügen' })
-    const right = page.getByRole('button', { name: 'Spalte rechts einfügen' })
-    await expect(left).toBeVisible()
-    await expect(right).toBeVisible()
-    await expect(left).toBeDisabled()
-    await expect(right).toBeDisabled()
+### 6.6 Roundtrip-E2E (Anforderung Abschnitt 5)
 
-    await page.getByRole('button', { name: 'Tabelle einfügen' }).click()
-    await page.locator('.ProseMirror td').first().click()
-    await expect(left).toBeEnabled()
-    await expect(right).toBeEnabled()
-  })
+`tests/e2e/odt.spec.ts` und `docx.spec.ts` je um einen Test erweitern (Muster: bestehender
+`waitForEvent('download')` → `download.path()` → `fs.readFile` → `JSZip.loadAsync`, plus
+`input.setInputFiles(...)` für Re-Upload — `odt.spec.ts` hat bei `:138` bereits einen
+Merge-Rundreisetest als Vorlage): Tabelle im Editor erzeugen → Inhalt tippen → Spalte
+einfügen → „Exportieren" → heruntergeladene Datei mit JSZip öffnen → für ODT
+`<table:table-column>`-Anzahl prüfen, für DOCX `<w:gridCol>`-Anzahl und `<w:tc>` pro `<w:tr>`
+→ Blob erneut hochladen (Re-Import) → Zellinhalte im Editor prüfen (Anforderung 5.1.1/5.2.1,
+„echte Datei-Uploads/Downloads", Abnahmekriterium 5). Für die reale Fremddatei/den
+ODT-Reader-Verifikationspunkt (Grenzfall 4.13/4.14, Anforderung 6.2) zusätzlich eine echte
+Fixture aus `tests/fixtures/external/odt/` (z. B. `BigTable.odt`) importieren → Spalte
+einfügen → exportieren → Absturzfreiheit + Erhalt des Originalinhalts prüfen; Ergebnis der
+`covered-table-cell`-Annahme dokumentieren (bestätigt / als eigene Reader-Abhängigkeit
+ticketiert).
 
-  test('inserts a column to the right of the current cell, preserving existing content (Abschnitt 3.1/3.2)', async ({ page }) => {
-    await page.getByRole('button', { name: 'Tabelle einfügen' }).click()
-    const cells = page.locator('.ProseMirror td')
-    await cells.nth(0).click()
-    await page.keyboard.type('A1')
-    await cells.nth(1).click()
-    await page.keyboard.type('B1')
-    await cells.nth(2).click()
-    await page.keyboard.type('A2')
-    await cells.nth(3).click()
-    await page.keyboard.type('B2')
-
-    await cells.nth(1).click() // B1
-    await page.getByRole('button', { name: 'Spalte rechts einfügen' }).click()
-
-    await expect(page.locator('.ProseMirror tr').first().locator('td')).toHaveCount(3)
-    await expect(page.locator('.ProseMirror tr').nth(1).locator('td')).toHaveCount(3)
-    await expect(page.locator('.ProseMirror td').nth(0)).toContainText('A1')
-    await expect(page.locator('.ProseMirror td').nth(1)).toContainText('B1')
-    await expect(page.locator('.ProseMirror td').nth(2)).toHaveText('')
-    // neue Zelle ist sofort tippbar (Abschnitt 3.5)
-    await page.locator('.ProseMirror td').nth(2).click()
-    await page.keyboard.type('Neu')
-    await expect(page.locator('.ProseMirror td').nth(2)).toContainText('Neu')
-  })
-
-  test('inserts a column to the left of the first column (Grenzfall 4.3)', async ({ page }) => {
-    await page.getByRole('button', { name: 'Tabelle einfügen' }).click()
-    const cells = page.locator('.ProseMirror td')
-    await cells.nth(0).click()
-    await page.getByRole('button', { name: 'Spalte links einfügen' }).click()
-    await expect(page.locator('.ProseMirror tr').first().locator('td')).toHaveCount(3)
-  })
-
-  test('undo restores the table exactly, redo re-applies the new column (Abschnitt 3.8)', async ({ page }) => {
-    await page.getByRole('button', { name: 'Tabelle einfügen' }).click()
-    await page.locator('.ProseMirror td').first().click()
-    await page.getByRole('button', { name: 'Spalte rechts einfügen' }).click()
-    await expect(page.locator('.ProseMirror tr').first().locator('td')).toHaveCount(3)
-
-    await page.locator('.ProseMirror').click()
-    await page.keyboard.press('ControlOrMeta+z')
-    await expect(page.locator('.ProseMirror tr').first().locator('td')).toHaveCount(2)
-
-    await page.keyboard.press('ControlOrMeta+y')
-    await expect(page.locator('.ProseMirror tr').first().locator('td')).toHaveCount(3)
-  })
-
-  test('a multi-column CellSelection inserts exactly one column, not one per selected column (Grenzfall 4.4, Entscheidung Abschnitt 4.1)', async ({ page }) => {
-    await page.getByRole('button', { name: 'Tabelle einfügen' }).click()
-    // 2x2 aus "Tabelle einfügen" reicht für einen 2-Spalten-Auswahltest über beide Spalten
-    const cells = page.locator('.ProseMirror td')
-    await cells.nth(0).hover()
-    await page.mouse.down()
-    await cells.nth(1).hover()
-    await page.mouse.up()
-    await page.getByRole('button', { name: 'Spalte rechts einfügen' }).click()
-    await expect(page.locator('.ProseMirror tr').first().locator('td')).toHaveCount(3) // nicht 4
-  })
-
-  test('nested table: inserting a column in the inner table leaves the outer table untouched (Grenzfall 4.5)', async ({ page }) => {
-    await page.getByRole('button', { name: 'Tabelle einfügen' }).click()
-    await page.locator('.ProseMirror td').first().click()
-    await page.getByRole('button', { name: 'Tabelle einfügen' }).click() // verschachtelt in Zelle 1 der äußeren Tabelle
-    const innerCells = page.locator('.ProseMirror td td')
-    await innerCells.first().click()
-    await page.getByRole('button', { name: 'Spalte rechts einfügen' }).click()
-
-    await expect(page.locator('.ProseMirror > * table').first().locator('> tbody > tr').first().locator('> td')).toHaveCount(2)
-    await expect(innerCells.locator('..')).toHaveCount(3)
-  })
-
-  test('does not crash or hang after repeatedly inserting columns (Grenzfall 4.7)', async ({ page }) => {
-    await page.getByRole('button', { name: 'Tabelle einfügen' }).click()
-    await page.locator('.ProseMirror td').first().click()
-    for (let i = 0; i < 10; i++) {
-      await page.getByRole('button', { name: 'Spalte rechts einfügen' }).click()
-    }
-    await expect(page.locator('.ProseMirror tr').first().locator('td')).toHaveCount(12)
-    await page.locator('.ProseMirror td').first().click()
-    await page.keyboard.type('noch bedienbar')
-    await expect(page.locator('.ProseMirror').first()).toContainText('noch bedienbar')
-  })
-})
-```
-
-(Der Selektor für den „verschachtelte Tabelle"-Test ist bewusst konservativ
-formuliert und muss beim Implementieren gegen das tatsächliche DOM verifiziert
-werden — verschachtelte `<table>`-Selektoren sind erfahrungsgemäß fragil; ggf. über
-`page.evaluate` mit direkter DOM-Traversierung robuster lösen.)
-
-### 6.5 Geändert: `tests/e2e/selection-regression.spec.ts` — Pflicht-Regressionstest (Grenzfall 4.10, Abnahmekriterium 7)
-
-Neuer Test im bestehenden `describe`-Block (nach Zeile 50), exakt das in Abschnitt
-3.7/Grenzfall 4.10 der Anforderung geforderte Szenario „Spalte einfügen → Klick in
-andere Zelle → Enter → weitertippen":
-
-```ts
-test('column insert followed by click-to-reposition + Enter + typing does not corrupt table content (Grenzfall 4.10)', async ({ page }) => {
-  const editor = page.locator('.ProseMirror')
-  await editor.click()
-  await page.getByRole('button', { name: 'Tabelle einfügen' }).click()
-  const cells = page.locator('.ProseMirror td')
-  await cells.nth(0).click()
-  await page.keyboard.type('Zelle A1')
-  await cells.nth(3).click()
-  await page.keyboard.type('Zelle B2')
-
-  await cells.nth(0).click()
-  await page.getByRole('button', { name: 'Spalte rechts einfügen' }).click()
-
-  await page.locator('.ProseMirror td').nth(3).click() // andere Zelle nach dem Insert
-  await page.keyboard.press('End')
-  await page.keyboard.type(' weiter')
-
-  await expect(editor).toContainText('Zelle A1')
-  await expect(editor).toContainText('Zelle B2 weiter')
-})
-```
-
-### 6.6 Roundtrip-E2E-Erweiterungen (Abschnitt 5 der Anforderung)
-
-`tests/e2e/docx.spec.ts`/`odt.spec.ts` je um einen Test erweitert, der: Tabelle im
-Editor erzeugen → Inhalt eintippen → Spalte einfügen → exportieren (echter
-Download, wie im bestehenden Muster Zeile 55–68 in `odt.spec.ts`) →
-heruntergeladene Datei mit `JSZip` öffnen → für DOCX: `<w:gridCol>`-Anzahl und
-`<w:tc>`-Anzahl pro `<w:tr>` prüfen; für ODT: `<table:table-column>`-Anzahl prüfen
-→ Blob erneut über einen zweiten Browser-Kontext hochladen (Re-Import) →
-Zellinhalte im Editor prüfen. Deckt Abschnitt 5.1.1/5.2.1 der Anforderung
-(„echte Datei-Uploads/Downloads, nicht nur intern aufgerufene Reader/Writer-
-Funktionen", Abnahmekriterium 6) vollständig ab.
+**Präzisierung zu `tableCoveredContent.odt` (Grenzfall 4.14, Anforderung 6.2):** Die
+Anforderung zählt „33× `<table:covered-table-cell/>`" — das ist die **rohe
+Teilstring-Trefferzahl** von `covered-table-cell` in `content.xml` (per Zählung nachvollzogen:
+24 tatsächliche Elemente, davon 15 selbstschließend und **9 mit eigenem Kindinhalt**
+`<table:covered-table-cell>…</table:covered-table-cell>` statt `.../>` — macht 24 Öffnungen +
+9 Schließungen = 33 rohe Teilstring-Treffer). Wer beim Implementieren stattdessen
+`document.querySelectorAll('table\\:covered-table-cell')` o. Ä. zählt, bekommt **24**, nicht
+33 — kein Fehler, nur ein anderes Zählverfahren. Zusätzlich bemerkenswert und beim
+Schreiben des Tests zu berücksichtigen: dass reale LibreOffice-Dateien ein
+`<table:covered-table-cell>` **mit** Kindinhalt erzeugen können (9 der 24 Elemente), ist ein
+Datenpunkt für den in Abschnitt 6.2 der Anforderung offen gelassenen Verifikationspunkt —
+der ODT-Reader (`odt/reader.ts:304`) selektiert ohnehin ausschließlich `table-cell` und
+überspringt jedes `covered-table-cell` unabhängig davon, ob es Kindinhalt trägt oder
+selbstschließend ist; diese Beobachtung ändert also nichts an Abschnitt 5.7, ist aber beim
+Verifizieren der Annahme hilfreich zu wissen.
 
 ---
 
-## 7. Abnahmekriterien-Mapping (Bezug zu Abschnitt 10 der Anforderung)
+## 7. Abnahmekriterien-Mapping (Bezug zu Anforderung Abschnitt 10)
 
-| # | Abnahmekriterium laut Anforderung | Abgedeckt durch |
+| # | Abnahmekriterium | Abgedeckt durch |
 |---|---|---|
-| 1 | Beide Buttons existieren, Playwright-bedienbar, außerhalb Tabelle deaktiviert | 5.2 (Buttons + `disabled`), 6.4 Test 1 |
-| 2 | Grundverhalten 3.1/3.2 per E2E nachgewiesen | 6.4 Test 2/3 |
-| 3 | Merge-Verhalten (3.4/4.2) mit konkretem Testfall belegt | 6.1 Test 3 (Unit, exakte Werte), zusätzlich in 6.4 empfehlenswert als E2E-Ergänzung |
-| 4 | Mehrfachauswahl-Abweichung (3.3/4.4) entschieden, nicht offengelassen | Entscheidung 4.1, Test 6.1 Test 4 + 6.4 Test 5 |
-| 5 | ODT-`colCount`-Fix umgesetzt, testabgesichert, regressionssicher | 5.5 (Fix), 6.2 (Tests) |
-| 6 | Rundreise-Tests 5.1/5.2 mit echten Datei-Uploads/Downloads bestanden | 6.6 |
+| 1 | Beide Buttons existieren, Playwright-bedienbar, außerhalb Tabelle deaktiviert, `onMouseDown`+preventDefault ohne Selektionsverlust | 5.2 (Buttons, `disabled`, `onClick`+`onMouseDown`), 6.4 Test 1 |
+| 2 | Grundverhalten 3.1/3.2 per E2E | 6.4 Test 2/3 |
+| 3 | Merge-Verhalten (3.4/4.2) mit konkretem Testfall | 6.1 Test 3 (Unit, exakte Werte `[1,3]`/`['A2','B2','','C2']`) |
+| 4 | Mehrfachauswahl-Abweichung (3.3/4.4) entschieden | Entscheidung 4.1; 6.1 Test 4 + 6.4 Test 5 |
+| 5 | Bestehende Merge-Export-Tests bleiben grün, Rundreise 5.1/5.2 mit echten Uploads/Downloads | 6.2/6.3 (Regression grün), 6.6 |
+| 6 | ODT-Reader-Verifikationspunkt (6.2) mit realer Fremddatei geprüft, Ergebnis nachgetragen | 6.6 (Fremd-Fixture), 5.7 |
 | 7 | Selection-Sync-Regressionstest mit „Spalte einfügen" als Auslöser | 6.5 |
-| 8 | Undo/Redo inkl. Merge-Wiederherstellung bestätigt | 6.1 Test 6 (Unit, inkl. Merge), 6.4 Test 4 (E2E) |
-| 9 | Verschachtelte-Tabelle-Grenzfall (4.5) mit echtem Testfall geprüft | 6.1 Test 5 (Unit), 6.4 Test 6 (E2E) |
-| 10 | Kein während der Verifikation gefundener Fehler bleibt ohne Ticket/Vermerk | Abschnitt 4.1 (Nachbesserungs-Ticket-Vermerk für Mehrfachauswahl-Word-Parität), Abschnitt 3.4 (Breiten-Präzisierung dokumentiert, kein Fix nötig), Abschnitt 2 (`aria-pressed`-Sonderfall am bestehenden Tabelle-Button vermerkt, bewusst nicht angefasst — außerhalb Scope) |
+| 8 | Undo/Redo inkl. Merge-Wiederherstellung als **ein** Schritt | 6.1 Test 6 (Unit), 6.4 Test 4 (E2E) |
+| 9 | Verschachtelte-Tabelle-Grenzfall (4.5) mit echtem Testfall | 6.1 Test 5 (Unit), 6.4 Test 6 (E2E) |
+| 10 | Touch-Grundfall (4.15) auf „Mobile"/„Tablet" | 6.4 Test 8 |
+| 11 | Kein gefundener Fehler bleibt ohne Ticket/Vermerk | 4.1 (Mehrfachauswahl-Ticket), 3.4 (Breiten-Präzisierung, kein Fix), 2 (`aria-pressed`-Sonderfall vermerkt), 0.1 (stehengebliebener ODT-„Fix" korrigiert/entfernt) |
 
 ---
 
@@ -884,20 +715,25 @@ Funktionen", Abnahmekriterium 6) vollständig ab.
 
 **Geändert:**
 - `src/formats/shared/editor/commands.ts` — zwei neue Re-Exports (5.1)
-- `src/formats/shared/editor/Toolbar.tsx` — zwei neue Buttons + Icons + Import (5.2)
-- `src/formats/odt/writer.ts` — `colCount`-Bugfix (5.5)
-- `src/formats/odt/__tests__/roundtrip.test.ts` — 2 neue Tests (6.2)
-- `src/formats/docx/__tests__/roundtrip.test.ts` — 1 neuer Regressionstest (6.3)
-- `tests/e2e/selection-regression.spec.ts` — 1 neuer Pflicht-Regressionstest (6.5)
-- `tests/e2e/docx.spec.ts`, `tests/e2e/odt.spec.ts` — je 1 neuer Rundreise-Test (6.6)
+- `src/formats/shared/editor/Toolbar.tsx` — zwei Buttons + `ColumnButton` + zwei Icons + Import (5.2)
+- `src/formats/shared/editor/__tests__/commands.test.ts` — **existiert bereits**, neuer `describe`-Block (6.1)
+- `src/formats/odt/__tests__/roundtrip.test.ts` — 1 additiver Regressionstest (6.2)
+- `src/formats/docx/__tests__/roundtrip.test.ts` — 1 additiver Regressionstest (6.3)
+- `tests/e2e/selection-regression.spec.ts` — 1 Pflicht-Regressionstest (6.5)
+- `tests/e2e/odt.spec.ts`, `tests/e2e/docx.spec.ts` — je 1 Rundreise-/Fremddatei-Test (6.6)
 
 **Neu angelegt:**
-- `src/formats/shared/editor/__tests__/commands.test.ts` (6.1)
 - `tests/e2e/tables.spec.ts` (6.4)
 
-**Bewusst unverändert (mit Begründung im Plan):**
-- `src/formats/shared/schema.ts` (5.4)
-- `src/formats/shared/editor/WordEditor.tsx` (5.3)
+**Bewusst unverändert (mit Begründung):**
+- `src/formats/odt/writer.ts` — `colCount` bereits korrekt, **kein** Fix (5.5, 0.1)
 - `src/formats/docx/writer.ts` (5.6)
 - `src/formats/docx/reader.ts`, `src/formats/odt/reader.ts` (5.7)
+- `src/formats/shared/schema.ts` (5.4)
+- `src/formats/shared/editor/WordEditor.tsx` (5.3)
 - `src/index.css` (5.8)
+
+**Netto-Produktivcode:** ~2 Zeilen Re-Export (`commands.ts`) + ~1 kleine Komponente und 2
+Icons (`Toolbar.tsx`). Der weit überwiegende Aufwand ist Testabdeckung und Verifikation —
+konsistent mit dem Befund der Anforderung, dass die Datenmodell-/Export-Ebene bereits
+vollständig und korrekt ist und ausschließlich die UI-Anbindung fehlt.

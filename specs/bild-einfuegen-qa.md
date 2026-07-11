@@ -4,643 +4,753 @@ Rolle: QA-Antwort auf `specs/bild-einfuegen-req.md` (Anforderung) und
 `specs/bild-einfuegen-code.md` (Umsetzungsplan). Dieses Dokument nimmt **keinen**
 der beiden Vorgängertexte als bewiesen an — `bild-einfuegen-code.md` ist laut
 eigenem Titel ein *Umsetzungsplan*, keine verifizierte Umsetzung. Abschnitt 0
-bestätigt per eigener Codesichtung, dass zum Zeitpunkt dieses Testplans **kein
-einziger** der dort beschriebenen Fixes (F1–F14) im Code angekommen ist — der
-Ist-Stand entspricht unverändert der in `bild-einfuegen-req.md` Abschnitt 0
-dokumentierten Analyse. Ergebnis ist ein Testplan, kein Testbericht: Die hier
-aufgeführten Tests sind zum Zeitpunkt dieses Dokuments **nicht geschrieben**
-(mit Ausnahme der beiden bereits vorhandenen, in 2.1 aufgeführten
-Basis-Roundtrip-Tests je Format).
+bestätigt per eigener, für **diesen** Durchlauf erneut durchgeführter Codesichtung,
+dass zum Zeitpunkt dieses Testplans **kein einziger** der dort beschriebenen Fixes
+(F1–F17) im Code angekommen ist — der Ist-Stand entspricht unverändert der in
+`bild-einfuegen-req.md` Abschnitt 0 dokumentierten Analyse. Ergebnis ist ein
+Testplan, kein Testbericht: Die hier aufgeführten neuen Tests sind zum Zeitpunkt
+dieses Dokuments **nicht geschrieben** (mit Ausnahme der in 2.1 aufgeführten,
+bereits vorhandenen Basis-Tests).
 
-Stil/Gliederung orientiert an `aufzaehlungsliste-qa.md`/`fett-qa.md`. Gliedert
-sich, wie beauftragt, in zwei getrennte Teile: **Teil A** (Abschnitt 2) deckt die
-Reader/Writer-Rundreise auf Unit-Ebene ab (DOCX **und** ODT); **Teil B**
-(Abschnitt 3) besteht ausschließlich aus **echten** Playwright-Browser-Tests
-(Klicks, Tastatureingabe, echter Datei-Upload/-Export über den
-`filechooser`-Flow, Prüfung der tatsächlich heruntergeladenen Datei mit einem
-vom eigenen Reader unabhängigen Parser) — **kein** Testfall in Teil B ersetzt
-echte Bedienung durch einen direkten internen Funktionsaufruf.
+Der Plan gliedert sich, wie beauftragt, in zwei getrennte Teile:
+
+- **Teil A** (Abschnitt 3) — Unit-Tests der Reader/Writer-Rundreise (DOCX **und**
+  ODT) sowie der neuen Hilfsmodule, auf reiner Datenebene (Vitest/jsdom).
+- **Teil B** (Abschnitt 4) — **echte** Playwright-Browser-Tests: Klicks,
+  Tastatureingabe, echter Datei-Upload über den `filechooser`/Label-Klick-Pfad,
+  echter Export-Download und **strukturelles Parsen der tatsächlich
+  heruntergeladenen Datei** mit einem vom eigenen Reader unabhängigen Parser
+  (`JSZip` + `DOMParser`), **nicht** über einen direkten internen Funktionsaufruf.
+
+> **Querschnittsthema mit eigenem Abschnitt (Abschnitt 2): Determinismus.**
+> Der Auftrag zu diesem Plan verlangt ausdrücklich deterministische Tests „keine
+> Race-Conditions durch zu schnelle Tastatureingaben; Selektions-Sync abwarten".
+> Der Editor teilt dieselbe asynchrone `selectionchange`-Synchronisation, die in
+> `selection-regression.spec.ts` und `cut.spec.ts` bereits mehrfach Flakiness
+> verursacht hat (siehe Git-Historie: „Fix flaky Mobile-project … same
+> async-selection-sync race"). **Bild-Einfügen ist für genau diese Klasse von
+> Races besonders anfällig**, weil es eine asynchrone Kette ist (Tastatur-
+> Cursorbewegung → asynchroner Datei-Read → asynchrones `Image`-Decoding →
+> Einfügen an der *dann* aktuellen Selektion). Abschnitt 2 kodifiziert daher die
+> im Repo bereits bewährten Gegenmaßnahmen **verbindlich** für alle Teil-B-Tests;
+> die betroffenen Einzelfälle verweisen jeweils darauf.
+
+Stil/Gliederung orientiert an `aufzaehlungsliste-qa.md`/`fett-qa.md`/
+`ausschneiden-qa.md`.
 
 ---
 
-## 0. Stichprobenprüfung des Ist-Codes (QA-Gegenkontrolle von `bild-einfuegen-code.md`)
+## 0. Stichprobenprüfung des Ist-Codes (QA-Gegenkontrolle)
 
-Vor Aufstellung des Plans wurden die zentralen Behauptungen aus
-`bild-einfuegen-req.md` Abschnitt 0 und `bild-einfuegen-code.md` Abschnitt 1
-direkt im aktuellen Code nachvollzogen (nicht nur aus den Dokumenten
-übernommen):
+Die zentralen Behauptungen aus `bild-einfuegen-req.md` Abschnitt 0 und
+`bild-einfuegen-code.md` Abschnitt 1 wurden direkt im **aktuellen** Code
+nachvollzogen (nicht aus den Dokumenten übernommen).
 
-| Behauptung | QA-Gegenkontrolle | Ergebnis |
+> **Zitierweise (verbindlich, wie `bild-einfuegen-req.md` Abschnitt 0 und
+> `bild-einfuegen-code.md` sie fordern):** Maßgeblich sind **Symbolnamen** (Datei ›
+> Funktion/Node). Zeilennummern sind eine Momentaufnabme dieses Prüfdurchlaufs und
+> driften. **Korrektur gegenüber der Vorfassung dieses QA-Dokuments:** Deren
+> Section-0-Tabelle nannte durchgängig veraltete Zeilen (u. a.
+> `Toolbar.tsx:241-244`/`:97-108`, `odt/writer.ts:112-119`, `schema.ts:45-72`,
+> `docx/writer.ts:72-92`) aus einem älteren Code-Stand. Die folgende Tabelle nennt
+> die für diesen Durchlauf verifizierten Symbole mit aktuellem „ca."-Zeilenhinweis.
+
+| Behauptung | QA-Gegenkontrolle (Symbol) | Ergebnis |
 |---|---|---|
-| Bild-Kontrolleintrag ist `<label>`, kein `<button>`, ohne `title`/`aria-label` | `src/formats/shared/editor/Toolbar.tsx:241-244` gelesen; `grep -n "title=\|aria-label" Toolbar.tsx` über die ganze Datei ausgeführt | **Bestätigt.** Zeile 241: `<label className="..." >🖼 Bild<input type="file" accept="image/*" className="hidden" onChange={handleImagePick} /></label>`. Der Grep über die gesamte Datei liefert `title`/`aria-label` für **jedes** andere Bedienelement (Zeilen 46-47, 69, 113, 117, 135-138, 142, 145, 153, 162, 165, 173, 194, 205, 216, 230) — **nicht** für das Bild-Element. |
-| `insertImage` setzt nie `width`/`height` | `src/formats/shared/editor/commands.ts:66-74` gelesen | **Bestätigt, wortgleich.** `export function insertImage(src: string, alt = ''): Command { ...wordSchema.nodes.image.create({ src, alt })... }` — kein `width`/`height`-Attribut im übergebenen Objekt, Schema-Default `null` bleibt aktiv. |
-| `handleImagePick` prüft `file.type` nicht, keine Größenprüfung, kein try/catch, `alt` = `file.name` | `Toolbar.tsx:97-108` gelesen | **Bestätigt.** Kein Zugriff auf `file.type`/`file.size` im gesamten Funktionskörper; die `FileReader`-Promise (`reader.onerror` reject) hat keinen umschließenden `try`/`catch`; Zeile 107: `run(view, insertImage(dataUrl, file.name))`. |
-| `image`-Schema-Attribute `width`/`height` ohne `validate`, `parseDOM` liefert String/`null` statt Zahl | `src/formats/shared/schema.ts:45-72` gelesen | **Bestätigt.** `width: { default: null }`/`height: { default: null }` ohne `validate`-Schlüssel (im Unterschied zu `src`/`alt`, die `validate: 'string'` tragen); `getAttrs` (Zeile 57-65) gibt `el.getAttribute('width')`/`('height')` unverändert zurück (String oder `null`), keine `Number(...)`-Umwandlung. |
-| DOCX-Writer erzwingt Fallback 300×200 px | `src/formats/docx/writer.ts:72-92` (`imageParagraphXml`) gelesen | **Bestätigt.** Zeile 76-77: `const widthPx = Number(node.attrs?.width ?? 300)` / `const heightPx = Number(node.attrs?.height ?? 200)`. |
-| DOCX-Reader liest `wp:extent` nicht | `src/formats/docx/reader.ts` gelesen, gezielt `grep -n "extent\|docPr"` | **Bestätigt.** Einziger Treffer für `wp`-Namespace-Kindelemente ist `docPr` (Zeile 137, nur für `alt`); kein Zugriff auf `getElementsByTagNameNS(OOXML_NAMESPACES.wp, 'extent')` an irgendeiner Stelle. Der erzeugte Bild-Node (Zeile 138 direkt anschließend, vollständige Struktur an anderer Stelle der Datei) enthält nur `imageRelId`/`imageAlt`, keine Größenfelder. |
-| ODT-Writer verwendet Fallback `6cm`/`4cm`, schreibt `px`-Einheit bei vorhandener Größe | `src/formats/odt/writer.ts:112-119` (`blockToOdt`, Fall `'image'`) gelesen | **Bestätigt.** Zeile 115-116: `` const width = node.attrs?.width ? `${node.attrs.width}px` : '6cm' `` / analog für `height`/`4cm`. `"px"` ist kein gültiger ODF-`length`-Wert (siehe Anforderung Neufund 1.3). |
-| ODT-Reader liest `svg:width`/`svg:height` nicht | `src/formats/odt/reader.ts` gelesen, gezielt `grep -n "svg\|width\|height"` | **Bestätigt.** Einziger Treffer ist `colwidth` (Tabellenspaltenbreite, Zeile 197, unrelated) — kein Zugriff auf `getAttributeNS(ODF_NAMESPACES.svg, 'width'/'height')` am `draw:frame`-Element. |
-| Kein `.ProseMirror-selectednode`-CSS | `src/index.css` vollständig gelesen (72 Zeilen) | **Bestätigt.** Datei enthält `.ProseMirror img { max-width: 100%; height: auto }` (Zeile 39-42, bereits vorhandener, korrekter Fix für die visuelle Seitenbreiten-Begrenzung aus Anforderung Abschnitt 4), aber **keine** Regel für `.ProseMirror-selectednode`. |
-| `ImageCollector` dedupliziert nach exakt gleicher Data-URL, nicht nach Dokumentposition | `src/formats/docx/imageCollector.ts:11-33` gelesen | **Bestätigt.** `add(dataUrl)` prüft `fileNameByDataUrl.get(dataUrl)` und gibt bei Treffer denselben Dateinamen zurück — betrifft nur die Zip-Mediendatei, nicht die Anzahl der `image`-Knoten im Dokument selbst (die bleibt dem aufrufenden Writer-Code überlassen, der pro Knoten einen eigenen `<w:drawing>`-Block erzeugt). |
-| Kein existierender Browser-Test für Bild-Einfügen | `grep -rniE "image\|bild\|filechooser\|insertimage" tests/e2e/*.spec.ts` ausgeführt | **Bestätigt.** Null Treffer in `docx.spec.ts`, `odt.spec.ts`, `lifecycle.spec.ts`, `selection-regression.spec.ts` (die einzigen vier vorhandenen E2E-Dateien). |
-| Bestehende Unit-Tests prüfen `width`/`height` nicht, obwohl teils im Eingabe-Node vorhanden | `src/formats/docx/__tests__/roundtrip.test.ts:251-276`, `src/formats/odt/__tests__/roundtrip.test.ts:212-245` gelesen | **Bestätigt.** DOCX-Test Zeile 253 konstruiert `width: 100, height: 80`, Assertions (Zeile 256-258) prüfen ausschließlich `image.type`/`image.attrs.src`. ODT-Test (Zeile 214) enthält **gar keine** `width`/`height` im Eingabe-Node. |
+| Bild-Kontrolleintrag ist `<label>`, kein `<button>`, ohne `title`/`aria-label` | `Toolbar.tsx` › `Toolbar` return-JSX, `<label>…🖼 Bild…</label>` (ca. Z. 291–293) | **Bestätigt.** `<label className="…">🖼 Bild<input type="file" accept="image/*" className="hidden" onChange={handleImagePick} /></label>`. Jedes **andere** Bedienelement (F/K/U/S über `MarkButton`, `AlignButton`, „Tabelle einfügen", „Ausschneiden" über `ScissorsIcon`) trägt `title`/`aria-label` — das Bild-Element **nicht**. |
+| `insertImage` setzt nie `width`/`height` | `commands.ts` › `insertImage(src, alt = '')` (ca. Z. 66–74) | **Bestätigt, wortgleich.** `wordSchema.nodes.image.create({ src, alt })` — kein `width`/`height`, Schema-Default `null` bleibt. `state.tr.replaceSelectionWith(node)`. |
+| `handleImagePick` prüft `file.type`/`file.size` nicht, kein `try/catch`, `alt` = `file.name` | `Toolbar.tsx` › `handleImagePick` (ca. Z. 124–135) | **Bestätigt.** `event.target.value = ''` ist vorhanden (Z. 126). `FileReader`-Promise mit `reader.onerror = () => reject(reader.error)`, aber **ohne** umschließendes `try/catch` `await`et (Z. 129–133) → unbehandelte Promise-Ablehnung möglich. Abschluss `run(view, insertImage(dataUrl, file.name))` (Z. 134). |
+| `image`-Schema-Attribute `width`/`height` ohne `validate`, `parseDOM` liefert String/`null` | `schema.ts` › `nodes.image` (ca. Z. 58–85) | **Bestätigt.** `width`/`height` mit `default: null`, **ohne** `validate` (Unterschied zu `src`/`alt` = `validate: 'string'`); `parseDOM.getAttrs` gibt `getAttribute('width'|'height')` unverändert (String/`null`) zurück. |
+| DOCX-Writer erzwingt Fallback 300×200 px, feste `wp:docPr id="1"`/`pic:cNvPr id="0"` | `docx/writer.ts` › `imageParagraphXml` (ca. Z. 74–94) | **Bestätigt.** `Number(attrs.width ?? 300)`/`Number(attrs.height ?? 200)`; EMU-Umrechnung inline; `wp:docPr id="1"` **und** `pic:cNvPr id="0"` fest verdrahtet ⇒ ID-Kollision bei mehreren Bildern (F15). |
+| DOCX-Reader liest `wp:extent` nicht | `docx/reader.ts` › `decodeDrawingOrPict` (ca. Z. 143–168) | **Bestätigt.** Liest `a:blip/@r:embed` und `wp:docPr/@name` → `alt`; **kein** Zugriff auf `getElementsByTagNameNS(OOXML_NAMESPACES.wp, 'extent')`. Node erhält nur `{ src, alt }`, `width`/`height` bleiben `null`. Alt aus `@name`, nicht `@descr` (F16). |
+| ODT-Writer verwendet `6cm`/`4cm`, schreibt `px` bei vorhandener Größe | `odt/writer.ts` › `blockToOdt` Fall `'image'` (ca. Z. 176–183) | **Bestätigt.** `` node.attrs?.width ? `${node.attrs.width}px` : '6cm' `` (analog `height`/`4cm`). `"px"` ist kein gültiger ODF-`length`-Wert (Neufund A / F8). |
+| ODT-Reader liest `svg:width`/`svg:height` nicht | `odt/reader.ts` › `frameToBlocks` (ca. Z. 232–248) | **Bestätigt.** Liest `draw:image/@xlink:href` → `src`, `draw:frame/@draw:name` → `alt`; **kein** Zugriff auf `getAttributeNS(ODF_NAMESPACES.svg, 'width'/'height')`. |
+| Kein `.ProseMirror-selectednode`-CSS | `src/index.css` | **Bestätigt.** Enthält `.ProseMirror img { max-width: 100%; height: auto }` (bereits korrekt, Anforderung Abschnitt 4), aber **keine** `.ProseMirror-selectednode`-Regel. |
+| `ImageCollector` dedupliziert nach Data-URL, nicht nach Dokumentposition | `docx/imageCollector.ts` › `add` | **Bestätigt.** Trefferprüfung auf `fileNameByDataUrl` betrifft nur die Zip-Mediendatei, nicht die Anzahl der `image`-Knoten. |
 
-### 0.1 Zusätzlicher, durch diese QA-Prüfung neu bestätigter Befund
+### 0.1 Korrektur eines faktisch falschen Befunds der Vorfassung (E2E-Bestand)
 
-Der in `bild-einfuegen-req.md` Abschnitt 0 (letzte Zeile) und
-`bild-einfuegen-code.md` Abschnitt 5.3 als „noch zu klären" markierte Punkt
-wurde gegengeprüft: `tests/fixtures/external/README.md` erwähnt zwar
-„Kopf-/Fußzeilen, Bildern, Tabellen" als Inhalt der 202 ODT-Fixtures aus
-`tdf/odftoolkit`, es existiert aber **keine** Zeile in
-`src/formats/odt/__tests__/external-fixtures.test.ts` oder
-`src/formats/docx/__tests__/external-fixtures.test.ts`, die auf einen
-`image`-Knoten, `src`, `width` oder `height` prüft (per Sichtung beider
-Dateien bestätigt — beide enthalten ausschließlich „importiert ohne
-Absturz"/`paragraphCount`-Prüfungen, siehe `external-fixtures.test.ts:49-51`
-in beiden Formaten). **Konkrete Konsequenz für diesen Plan:** Abschnitt 5.1
-Punkt 8 der Anforderung (Abnahmekriterium 8, reale Word-/LibreOffice-Dateien
-mit bekannter Bildgröße) ist zum jetzigen Zeitpunkt **komplett ungetestet**,
-nicht nur lückenhaft — es ist noch nicht einmal bekannt, *welche* der 127/202
-vorhandenen Fixture-Dateien überhaupt ein Bild enthalten. Diese Sichtung (in
-`bild-einfuegen-code.md` Abschnitt 5.3/9.5 als offene, manuelle
-Voraussetzung benannt) wird unten als eigener, blockierender erster
-Testplan-Schritt geführt (siehe 2.7, 3.14, Abschnitt 7 Punkt 1).
+Die Vorfassung dieses QA-Dokuments behauptete in Section 0/0.1: „Null Treffer …
+die **einzigen vier** vorhandenen E2E-Dateien (`docx.spec.ts`, `odt.spec.ts`,
+`lifecycle.spec.ts`, `selection-regression.spec.ts`)". **Das ist falsch und war
+schon in `bild-einfuegen-req.md` Abschnitt 0 sowie `bild-einfuegen-code.md`
+(Revision Punkt / Ist-Stand-Tabelle) als überholt markiert.** Verifiziert für
+diesen Durchlauf (`tests/e2e/*.spec.ts`): es existieren **17** E2E-Spec-Dateien,
+und der echte Bild-Upload-Pfad wird **bereits mehrfach** exerziert:
 
-Konsequenz für diesen Testplan: Alle unten aufgeführten neuen Testfälle, die
-einen der bestätigten Defekte (F1/F3/F5/F6/F7/F8/F10 aus
-`bild-einfuegen-code.md`) direkt betreffen, werden als **aktuell rot
-erwartet** geführt — Regressionstests, die die Lücke bereits vor jeder
-Umsetzung dokumentieren, nicht hypothetische Grenzfälle.
+| Datei | Bild-Bezug (verifiziert) |
+|---|---|
+| `cut.spec.ts` (Testfall 8, Rundreise 6) | `page.locator('label:has-text("Bild")').locator('input[type=file]').setInputFiles(tinyPng)` — Bild als **Vorbedingung** fürs Ausschneiden. |
+| `clipboard.spec.ts` (u. a. T-12, Perf-Fall) | derselbe `label:has-text("Bild")`-Locator; `large-copy-perf.png` als Großdatei-Fixture. |
+| `export-error-handling.spec.ts` | `page.locator('input[type="file"][accept="image/*"]').setInputFiles({ name, mimeType:'image/png', buffer })`; danach `expect(page.locator('.ProseMirror img')).toBeVisible()` und echter Export. **Belegt zusätzlich:** Bild-Einfügen erzeugt **keine** Object-URL (reines `data:`-URL via `FileReader.readAsDataURL`). |
 
----
+**Konsequenz (unverändert gültig):** Es gibt zwar erprobte Upload-**Mechanik**,
+aber **keinen dedizierten Test der Einfüge-Funktion selbst** (Cursor-Position,
+beide Textteile, Undo, Größen-/Verzerrungsprüfung, Rundreise über die UI,
+Formatprüfung, Toolbar-Bedienbarkeit). Genau diese Lücke füllt Teil B.
 
-## 1. Testumgebung
+### 0.2 Fixture-Sichtung als eigener, blockierender Vorbereitungsschritt
 
-- Unit-Tests: `npm test` (Vitest, `jsdom`-Environment).
-- E2E-Tests: `npm run test:e2e` (Playwright, `playwright.config.ts`):
-  - `baseURL: 'http://localhost:4173/salamanido/'`, `webServer` baut (`npm run build`)
-    und startet `vite preview` automatisch.
-  - Drei Projekte: **Desktop Chrome**, **Mobile** (`Pixel 7`), **Tablet**
-    (`iPad Mini`) — jeder neue Testfall muss in **allen drei** grün sein, sofern
-    er nicht explizit auf reine Tastaturbedienung angewiesen ist (siehe 3.15).
-- Bestehende Konventionen (aus `docx.spec.ts`/`odt.spec.ts`/
-  `selection-regression.spec.ts`, fortzuführen in `tests/e2e/images.spec.ts`):
-  - `page.goto('/')` → Privacy-Banner wegklicken:
-    `page.getByRole('button', { name: /verstanden/i }).click()`.
-  - Karten-Locator: `docxCard(page)`/`odtCard(page)` über
-    `page.locator('div.rounded-lg', { has: page.getByRole('heading', { name: '...' }) })`
-    (Kartentitel: „Word-Dokument (.docx)" bzw. „OpenDocument Text (.odt)").
-  - Editor-Locator: `page.locator('.ProseMirror')`.
-  - Export: `page.getByRole('button', { name: 'Exportieren' })` +
-    `page.waitForEvent('download')`.
-  - Datei-Upload, **echter** Klickpfad (Pflicht für Teil B, siehe 3.13):
-    `page.waitForEvent('filechooser')` +
-    `docxCard(page).getByRole('button', { name: 'Datei hochladen' }).click()`
-    (Button existiert bereits, `src/app/FormatPicker.tsx:62-68`), dann
-    `fileChooser.setFiles({ name, mimeType, buffer })`.
-  - Bild-Kontrolleintrag: **aktuell** nur über
-    `locator('label:has-text("🖼 Bild") input[type="file"]')` ansprechbar (kein
-    `title`/`role="button"`, siehe 0) — sobald F2 umgesetzt ist, wechselt der
-    Locator auf `page.getByRole('button', { name: 'Bild einfügen' })`. Beide
-    Varianten werden unten explizit geführt (siehe 3.6).
-  - Test-Bilder: synthetische PNG/JPEG-Buffer direkt im Testcode erzeugt
-    (kein neues Binär-Fixture nötig für die synthetischen Fälle), analog
-    `buildSampleDocx()` in `docx.spec.ts:7-48`. Für Größen-/Seitenverhältnis-
-    Tests werden echte, minimale PNG-Encoder-Bytes benötigt (z. B. über eine
-    kleine, im Testcode gepflegte Helper-Funktion, die ein unkomprimiertes
-    PNG mit bekannten `IHDR`-Maßen erzeugt — kein Rückgriff auf `file.type`
-    als Signal, da genau das laut Grenzfall 3.3 geprüft werden soll).
+Für Abnahmekriterium 8 (reale Word-/LibreOffice-Dateien mit bekannter, vom
+Ersatzwert abweichender Bildgröße) benennt `bild-einfuegen-code.md` Abschnitt 5.3
+**konkrete, tatsächlich im Repo vorhandene** Fixtures mit real gemessenen Größen —
+`docx/headerPic.docx` (`wp:extent cx=cy=763270` EMU, quadratisch ≈ 80×80 px, Bild
+in `word/header1.xml`), `docx/drawing.docx` (10 Medien, u. a. ≈ 259×82 px),
+`docx/WithGIF.docx`, `odt/image-attributes.odt` (`svg:width/height` `2.147cm`…),
+`odt/imageAsChar.odt`, `odt/image.odt`. **QA-Vorbedingung:** vor Schreiben von
+EF1/EF2 und B42/B43 wird per einmaligem Wegwerf-Skript
+(`unzip -l`/`unzip -p … | grep -c 'w:drawing'` bzw. `draw:frame`) verifiziert,
+welche dieser Dateien tatsächlich bildhaltig sind und mit welcher Größe; das
+Ergebnis wird in Abschnitt 8 nachgetragen. **Anders als die Vorfassung** („noch
+nicht einmal bekannt, welche Datei ein Bild enthält") sind die Kandidaten damit
+bereits benannt; offen bleibt nur die Bestätigung der Messwerte.
+
+**Konsequenz für die Status-Erwartung:** Alle neuen Testfälle, die einen der
+bestätigten Defekte (F1/F3/F5/F6/F7/F8/F15) direkt betreffen, werden als **aktuell
+rot erwartet** geführt — Regressionstests, die die Lücke **vor** jeder Umsetzung
+festhalten, nicht hypothetische Grenzfälle.
 
 ---
 
-## 2. Teil A — Unit-Tests: Reader/Writer-Rundreise (DOCX + ODT)
+## 1. Testumgebung und bewährte Locator
 
-**Zweck:** Schnelle, browserunabhängige Absicherung der Datenebene
-(ProseMirror-`image`-Node ⇄ XML). Testet ausschließlich `insertImage`,
-`writeDocx`/`readDocx`, `writeOdt`/`readOdt` sowie die neuen Hilfsmodule
-(`imageValidation.ts`, `units.ts` aus `bild-einfuegen-code.md` Abschnitt 4.2/
-4.3) direkt — **keine** Playwright-Interaktion.
+- **Unit-Tests:** `npm test` (Vitest, `jsdom`).
+- **E2E-Tests:** `npm run test:e2e` (Playwright, `playwright.config.ts`):
+  - `webServer` baut (`npm run build`, mit `VITE_ENABLE_TEST_HOOKS=true`) und
+    startet `vite preview`.
+  - **Drei Projekte:** Desktop Chrome, Mobile (`Pixel 7`, Chromium-Touch), Tablet
+    (`iPad Mini`, **WebKit**). Jeder neue Testfall muss in **allen drei** grün
+    sein, außer er ist explizit tastatur-/clipboard-abhängig (dann dokumentierter
+    `test.skip`, siehe 2.6 und 4.13).
+- **Bewährte, im Repo real genutzte Locator** (fortzuführen in
+  `tests/e2e/images.spec.ts`; **keine** neu erfundenen Selektoren):
+  - Start: `page.goto('/')` → `page.getByRole('button', { name: /verstanden/i }).click()`
+    (Privacy-Banner).
+  - Neues Dokument: `docxCard(page)`/`odtCard(page)` +
+    `.getByRole('button', { name: 'Neu erstellen' }).click()`, mit
+    `card = page.locator('div.rounded-lg', { has: page.getByRole('heading', { name: 'Word-Dokument (.docx)' }) })`
+    (bzw. „OpenDocument Text (.odt)").
+  - Editor: `page.locator('.ProseMirror')`.
+  - Toolbar: `page.getByTitle('Fett')`, `page.getByTitle('Aufzählung')`,
+    `page.getByRole('button', { name: 'Tabelle einfügen' })`,
+    `page.getByRole('button', { name: 'Ausschneiden' })` — alle im Repo verifiziert.
+  - **Bild-Kontrolleintrag (Ist-Zustand, verifiziert):** proben-gestützt sind
+    **zwei** gleichwertige, real genutzte Locator:
+    `page.locator('label:has-text("Bild")').locator('input[type=file]')`
+    (`cut.spec.ts`/`clipboard.spec.ts`) **oder**
+    `page.locator('input[type="file"][accept="image/*"]')`
+    (`export-error-handling.spec.ts`). **Nicht** den emoji-basierten
+    `label:has-text("🖼 Bild")`/`label:has-text("🖼")` verwenden (unbewährt,
+    emoji-Textmatching ist fragil). Nach F2 wechselt der **sichtbare** Auslöser auf
+    `page.getByRole('button', { name: 'Bild einfügen' })`.
+  - Karten-Upload (Import/Reimport, **anderer** Upload als Bild-Einfügen):
+    `docxCard(page).locator('input[type="file"]').setInputFiles({ name, mimeType, buffer })`
+    (überall im Repo) **oder** echter Klickpfad
+    `const chooser = page.waitForEvent('filechooser'); await card.getByRole('button', { name: 'Datei hochladen' }).click(); (await chooser).setFiles(…)`
+    (verifiziert in `file-open-edge-cases.spec.ts`).
+  - Export/Download: `const dl = page.waitForEvent('download'); await page.getByRole('button', { name: 'Exportieren' }).click(); const download = await dl`.
+    Zurück zur Formatauswahl für Reimport: `page.getByRole('button', { name: /formate/i }).click()`.
+  - Konsolen-/JS-Fehler-Wächter (für „keine unbehandelte Promise-Ablehnung",
+    B15/B17): das in `cut.spec.ts` etablierte `watchForConsoleErrors(page)`-Muster
+    (`page.on('pageerror', …)` + `page.on('console', … type==='error')`),
+    am Testende `assertNoConsoleErrors()`.
+- **Test-Bilder mit bekannten Maßen:** kleine, im Testcode erzeugte PNG/JPEG-Buffer
+  mit **bewusst nicht-3:2-Seitenverhältnis** (z. B. 40×40 = 1:1, 160×90 = 16:9),
+  damit die Verzerrung durch den 300×200-Ersatzwert (F1) sichtbar wird. Ein
+  gültiges 1×1-PNG als Base64 ist bereits in `cut.spec.ts`/`clipboard.spec.ts`
+  vorhanden und wiederverwendbar; für definierte `IHDR`-Maße eine kleine
+  Testcode-Helferfunktion (unkomprimiertes PNG mit gesetzten Breite/Höhe-Bytes),
+  **ohne** Rückgriff auf `file.type` als Signal (genau das wird per Grenzfall 3.3
+  geprüft).
 
-### 2.1 Bestandsaufnahme (bereits vorhanden, als Basisschutz zu erhalten)
+---
 
-| Datei | Test | Deckt ab | Ist-Zustand |
-|---|---|---|---|
-| `src/formats/docx/__tests__/roundtrip.test.ts:252` („preserves an embedded image as a self-contained data URL") | Grundfall, Data-URL bleibt erhalten | Anforderung 5.1.1 (Teilaspekt) | **GRÜN**, aber lückenhaft — prüft `width`/`height` nicht, obwohl Eingabe sie enthält (siehe 0) |
-| `src/formats/docx/__tests__/roundtrip.test.ts:261` („splits a paragraph containing both text and an image into separate blocks") | Trennung Text/Bild als eigene Blocktypen | Anforderung 3.2 (Teilaspekt, nur konstruierte Daten) | **GRÜN**, aber deckt nur Blocktyp-Trennung ab, nicht die in 3.2 geforderte Cursor-Positions-Matrix und nicht den echten `filechooser`-Flow |
-| `src/formats/docx/__tests__/roundtrip.test.ts:310` (Whole-Document-Fidelity) | Bild als Geschwisterelement neben Überschrift/Absatz/Liste/Tabelle | Grundstruktur | **GRÜN**, aber Bild taucht nur als letztes Element auf — keine Abdeckung für Bild **innerhalb** Tabellenzelle/Listenpunkt/Kopf-Fußzeile |
-| `src/formats/odt/__tests__/roundtrip.test.ts:213` (analog) | Data-URL + Alt-Text-Rundreise | Anforderung 2.5, 5.1.2 (Teilaspekt) | **GRÜN**, aber Eingabe-Node enthält gar kein `width`/`height` — Maß-Rundreise nicht einmal versucht |
-| `src/formats/odt/__tests__/roundtrip.test.ts:223` (analog) | Trennung Text/Bild | analog | **GRÜN**, gleiche Einschränkung wie DOCX-Pendant |
+## 2. Determinismus-Disziplin (verbindlich für Teil B)
 
-Diese Tests bleiben unverändert Teil der Suite; sie werden **ergänzt**, nicht
-ersetzt.
+Dieser Abschnitt ist **kein** eigener Testfall, sondern die für **jeden** Teil-B-Test
+geltende Autorenregel. Er kodifiziert die im Repo bereits bewährten und
+kommentierten Muster (`selection-regression.spec.ts`, `cut.spec.ts`), damit die
+neuen Bild-Tests nicht dieselbe Flakiness reproduzieren, die dort mühsam behoben
+wurde.
 
-### 2.2 Neue Datei: `src/formats/shared/editor/__tests__/commands.test.ts`
+### 2.1 Grundregel: Beobachten statt schlafen — außer bei echten async-Sync-Races
 
-Isoliert, formatunabhängig — schnellster Nachweis für F1/F11 (`insertImage`
-selbst, ohne Reader/Writer). Nutzt `EditorState.create({ schema: wordSchema,
-doc: wordSchema.nodeFromJSON(...) })` + `TextSelection.create(...)` an
-definierter Position, ruft `insertImage(...)(state, tr => dispatch)` auf und
-inspiziert `tr.doc.toJSON()` — genau das Muster, das laut
-`bild-einfuegen-code.md` Abschnitt 1.6 bereits temporär (und wieder entfernt)
-verwendet wurde, hier aber **dauerhaft** als Regressionstest verankert wird.
+- Für **Erwartungen** (Bild sichtbar, Textinhalt, Absatzanzahl) **immer**
+  auto-wartende Assertions nutzen: `await expect(editor.locator('img')).toBeVisible()`,
+  `await expect(page.locator('.ProseMirror p')).toHaveCount(n)`,
+  `await expect(editor).toContainText(...)`. **Kein** `waitForTimeout` als Ersatz
+  für eine Assertion.
+- Feste Wartezeiten (`waitForTimeout`) sind **ausschließlich** für die drei unten
+  benannten, im Editor real vorhandenen asynchronen Übergänge zulässig — nicht als
+  allgemeines „Stabilisierungs"-Mittel.
 
-| # | Testfall | Vorgehen | Erwartung | Bezug | Erwarteter Status |
-|---|---|---|---|---|---|
-| CI1 | Cursor inmitten eines Wortes in einem nicht-leeren Absatz | `"HalloWelt"`, Cursor zwischen „Hallo" und „Welt" | Zwei Absätze `"Hallo"`/`"Welt"`, Bild dazwischen, **kein** Textverlust | 2.1.3/3.2(c), Kernfall der Meldung | **GRÜN erwartet** (laut Codeanalyse in `bild-einfuegen-code.md` 1.6 bereits korrekt — muss aber tatsächlich als Test existieren, nicht nur behauptet werden) |
-| CI2 | Cursor ganz am Anfang eines nicht-leeren Absatzes | analog 3.2(a) | Bild **vor** unverändertem Absatz, kein leerer Stub | 3.2(a) | **GRÜN erwartet** |
-| CI3 | Cursor ganz am Ende eines nicht-leeren Absatzes | analog 3.2(b) | Bild **nach** unverändertem Absatz | 3.2(b) | **GRÜN erwartet** |
-| CI4 | Cursor inmitten fett-/kursiv-formatierten Textteils | Absatz mit `strong`-Mark auf Teiltext, Cursor mittig | Beide Textteile behalten `strong`, Bild-Node **ohne** geerbte Mark | 3.2(d) | **GRÜN erwartet** |
-| CI5 | Cursor in komplett leerem Absatz | leerer `paragraph` als einziger Inhalt | Absatz wird durch Bild **ersetzt**, kein verwaister leerer Block danach | 3.2(e) | **GRÜN erwartet** |
-| CI6 | Cursor unmittelbar vor einem `hard_break` | Absatz mit `hard_break`-Kind, Cursor davor | `hard_break` bleibt im **zweiten** Teilabsatz erhalten | 3.2(f) | **GRÜN erwartet** |
-| CI7 | Cursor inmitten einer Überschrift | `heading`-Node, Cursor mittig im Text | Überschrift wird in zwei gleichrangige `heading`-Knoten geteilt, Bild dazwischen, kein Crash | 2.8, offene Entscheidung 9.3 | **GRÜN erwartet**, aber **Dokumentationspflicht**: Testkommentar muss ausdrücklich festhalten, dass dies eine noch nicht produktseitig bestätigte Verhaltensentscheidung ist (siehe Abschnitt 8) |
-| CI8 | Cursor am Anfang/Ende einer Überschrift | analog CI2/CI3, aber `heading` | Bild vor/nach unveränderter Überschrift, **kein** Teilen | 2.8 | **GRÜN erwartet** |
-| CI9 | Cursor am Anfang des (einzigen) Absatzinhalts eines `list_item` | `bullet_list > list_item > paragraph`, Cursor am Anfang | Bild bleibt **innerhalb** desselben `list_item` (führendes `paragraph`-Kind bleibt erhalten, ggf. 1-Zeichen-Stub), Liste bricht nicht | 2.8, F1 | **GRÜN erwartet** |
-| CI10 | Cursor mittig/am Ende im Absatz eines `list_item`, zwei benachbarte `list_item`s | analog CI9 | Bild bleibt im **ersten** `list_item`, **kein** Vertauschen/Vermischen mit dem zweiten | 2.8 | **GRÜN erwartet** |
-| CI11 | Cursor mittig im Absatz einer `table_cell` | `table > table_row > table_cell > paragraph` | Zelle bleibt gültig (`block+`), Bild zwischen zwei Absätzen in derselben Zelle | 2.8 | **GRÜN erwartet** |
-| CI12 | Bestehende, nicht-leere Selektion beim Einfügen | Wort selektieren, dann `insertImage` aufrufen | Selektierter Text wird **ersetzt**, nicht ergänzt | 2.2 | **GRÜN erwartet** |
-| CI13 | `insertImage(src)` ohne drittes Argument/Options | wie heutige Signatur `insertImage(src, alt)` | `width`/`height` bleiben `null` (Abwärtskompatibilität, falls Signatur laut F1-Fix erweitert wird) | Abwärtskompatibilität | **GRÜN erwartet nach F1-Fix**, **heute bereits trivial grün** (da `width`/`height` schlicht nie existieren) |
-| CI14 | **Regressionstest F1** — `insertImage` mit expliziter Zielbreite/-höhe (z. B. aus `computeDisplaySize`) | `insertImage(src, { alt, width: 400, height: 300 })` (neue, laut Code-Plan vorgesehene Signatur) | Erzeugter Node hat **exakt** `attrs.width === 400`, `attrs.height === 300` | F1, 2.4 | **ROT** — heutige Signatur `insertImage(src, alt = '')` akzeptiert kein drittes Argument; Test muss vor F1-Umsetzung fehlschlagen (Kompilierfehler oder ignoriertes Argument) |
+### 2.2 Selektions-Sync abwarten (der Kern-Race dieses Features)
 
-Testfälle CI1–CI13 sind bewusst **schon heute grün erwartet** (sie
-dokumentieren das laut `bild-einfuegen-code.md` Abschnitt 1.6 bereits korrekte
-`replaceSelectionWith`-Verhalten als dauerhaften Regressionsschutz — bislang
-existierte dafür **kein einziger** Test, nur eine einmalige, wieder entfernte
-manuelle Prüfung). CI14 ist der einzige in diesem Block bewusst **rot**
-geführte Fall, weil er eine noch nicht existierende Signaturerweiterung
-voraussetzt.
+ProseMirror lernt eine **native, tastaturgetriebene** Cursorbewegung (`Home`,
+`End`, `ArrowLeft/Right/Up/Down`, `Ctrl+Home`) erst über das **asynchrone**
+Browser-Event `selectionchange`. Eine unmittelbar folgende Aktion (weiterer
+Tastendruck **oder** das Auslösen des Bild-Uploads) kann diesem Nachziehen
+vorauslaufen und auf der **alten** Position operieren.
 
-### 2.3 Neue Datei: `src/formats/shared/editor/__tests__/imageValidation.test.ts`
+**Regeln:**
+1. Wird eine Selektion per gedrückter Umschalttaste **aufgebaut** (Serie von
+   `Shift+ArrowRight`/`ArrowUp`), erhält **jeder** Tastendruck ein `{ delay: 20 }`
+   (bewährt in `cut.spec.ts` Testfall 1/Grenzfall 13; 15–20 ms genügt, entspricht
+   realistischer Key-Repeat-Rate).
+2. Nach `keyboard.up('Shift')` bzw. nach einer einzelnen nativen Cursorbewegung
+   und **vor** der nächsten selektionsverändernden Aktion:
+   `await page.waitForTimeout(50)` (bewährtes Muster, überall mit identischem
+   Kommentar). **Konkret für Bild-Einfügen:** Cursor per Tastatur setzen →
+   `await page.waitForTimeout(50)` → **erst dann** den Bild-Upload auslösen. Damit
+   fügt der Command (`run(view, insertImage(...))` liest `view.state` zum
+   Einfügezeitpunkt) an der **beabsichtigten** Position ein.
+3. Für die Cursor-Positionierung „an den Absatzanfang" **`Ctrl+Home`** statt `Home`
+   verwenden: `Home` springt zum Anfang der aktuellen **visuellen** Zeile; auf dem
+   schmalen Mobile-Viewport umbricht ein längerer Satz, und `Home` landet dann
+   mitten im Absatz (in `cut.spec.ts` direkt verifiziert).
 
-Voraussetzung: Modul `src/formats/shared/editor/imageValidation.ts` existiert
-(laut `bild-einfuegen-code.md` 4.2 vorgesehen, **aktuell nicht vorhanden** —
-per `Glob src/formats/shared/editor/imageValidation.ts` verifiziert: Datei
-existiert nicht). Alle Testfälle hier sind daher zwangsläufig **ROT**, bis die
-Datei geschrieben ist.
+### 2.3 Asynchrone Einfüge-Kette abwarten, bevor getippt wird
+
+Bild-Einfügen ist selbst asynchron: `FileReader.readAsDataURL` bzw. (nach Fix)
+`file.arrayBuffer()` + `new Image()`-Decoding laufen **nach** dem `setInputFiles`/
+`setFiles`. Vor jeder Folgeaktion, die vom eingefügten Bild abhängt (insb. der
+„sofort tippen"-Test 4.4 / Anforderung 3.12), **zuerst** die Sichtbarkeit
+abwarten: `await expect(editor.locator('img')).toBeVisible()`. Erst danach
+`page.keyboard.type(...)`. Das ist die auto-wartende, deterministische Klammer um
+die async-Kette; ein fester Timeout wäre hier weder nötig noch zuverlässig.
+
+### 2.4 Undo-Gruppierung: 600 ms Settle vor der zu trennenden Aktion
+
+`prosemirror-history` fasst benachbarte Transaktionen innerhalb seines
+Default-`newGroupDelay` (~500 ms) zu **einem** Undo-Schritt zusammen. Für Tests,
+die „Bild-Einfügen ist **ein** eigener Undo-Schritt" beweisen (B12,
+Anforderung 2.6/3.11), **vor** dem Einfügen `await page.waitForTimeout(600)`, damit
+das vorherige Tippen nicht mit dem Einfügen in dieselbe Undo-Gruppe fällt (in
+`cut.spec.ts` Testfall 9 exakt so begründet und verifiziert). Sonst würde ein
+einzelnes `Strg+Z` Tippen **und** Einfügen gemeinsam rückgängig machen und der Test
+grün täuschen.
+
+### 2.5 Keine pixelbasierte Maus-Drag-Selektion für Textbereiche
+
+Eine `mouse.move/down/up`-Drag-Selektion mit festen Pixelkoordinaten ist über die
+drei Projekte **unzuverlässig**, weil die Druckseiten-Breite (`pageLayout.ts`) je
+Viewport unterschiedlich umbricht (in `cut.spec.ts` dokumentiert). Für
+Textselektionen daher `Ctrl+Home` + `Shift+ArrowRight`-Serie (mit `delay`)
+verwenden. Maus-Drag bleibt nur dort zulässig, wo es unvermeidlich ist
+(z. B. Tabellenzellen-Bereich, `cut.spec.ts` Testfall 7).
+
+### 2.6 Bekannte, dokumentierte Automatisierungsgrenzen (nicht als Flakiness kaschieren)
+
+- **WebKit-Clipboard:** Cut→Paste per Tastenkürzel ist auf dem Tablet-Projekt
+  (WebKit) unzuverlässig; betroffene Fälle `test.skip(browserName === 'webkit', …)`
+  mit Begründung (Muster aus `cut.spec.ts` Testfall 2/12). Für Bild-Einfügen
+  **nur** relevant, falls ein Test die Zwischenablage nutzt (nicht der Regelfall).
+- **CI-only Mobile-Race:** Für Sequenzen „Selektion bis Dokumentende +
+  unmittelbares `Strg+X`" ist eine ausschließlich in GitHub-Actions-Mobile
+  auftretende, lokal nicht reproduzierbare No-op-Anomalie dokumentiert
+  (`cut.spec.ts` Rundreise 1/2 mit begründetem `test.skip(project.name === 'Mobile', …)`).
+  **Neue Bild-Tests dürfen einen solchen Skip nur mit derselben ausführlichen
+  Begründung setzen** und erst, nachdem die beiden im Repo bereits erprobten Fixes
+  (Sync-Wait nach Shift-Release; Clipboard-Permission) nachweislich nicht greifen —
+  kein pauschaler Skip „gegen Flakiness".
+- Fester Timeout als **Assertion-Ersatz** ist unzulässig (2.1); die o. g. 50/600-ms-
+  Waits sind **Übergangs-**Waits vor der nächsten *Eingabe*, nicht vor der Prüfung.
+
+---
+
+## 3. Teil A — Unit-Tests: Reader/Writer-Rundreise (DOCX + ODT)
+
+**Zweck:** schnelle, browserunabhängige Absicherung der Datenebene
+(ProseMirror-`image`-Node ⇄ XML). Testet `insertImage`, `writeDocx`/`readDocx`,
+`writeOdt`/`readOdt` und die neuen Hilfsmodule (`imageValidation.ts`, `units.ts`
+laut `bild-einfuegen-code.md` 4.2/4.3) direkt — **keine** Playwright-Interaktion.
+
+### 3.1 Bestandsaufnahme (bereits vorhanden, als Basisschutz zu erhalten)
+
+| Datei / Test | Deckt ab | Ist-Zustand |
+|---|---|---|
+| `docx/__tests__/roundtrip.test.ts` „preserves an embedded image as a self-contained data URL" | Data-URL bleibt erhalten (5.1.1 Teilaspekt) | **GRÜN**, aber lückenhaft — prüft `width`/`height` nicht, obwohl die Eingabe `width: 100, height: 80` setzt (siehe 0) |
+| `docx/__tests__/roundtrip.test.ts` „splits a paragraph containing both text and an image…" | Blocktyp-Trennung Text/Bild (3.2 Teilaspekt) | **GRÜN**, deckt aber nur die Blocktyp-Trennung ab, nicht die Cursor-Positions-Matrix und nicht den echten Browser-Flow |
+| `docx/__tests__/roundtrip.test.ts` Whole-Document-Fidelity | Bild als Geschwister neben Überschrift/Absatz/Liste/Tabelle | **GRÜN**, aber Bild nur als letztes Element — **kein** Bild **innerhalb** Zelle/Listenpunkt/Kopf-Fußzeile |
+| `odt/__tests__/roundtrip.test.ts` (Data-URL + Alt-Text) | 2.5, 5.1.2 (Teilaspekt) | **GRÜN**, aber Eingabe-Node hat **kein** `width`/`height` — Maß-Rundreise nicht versucht |
+| `odt/__tests__/roundtrip.test.ts` (Trennung Text/Bild) | analog DOCX | **GRÜN**, gleiche Einschränkung |
+
+Diese Tests bleiben unverändert Teil der Suite; sie werden **ergänzt**, nicht ersetzt.
+
+### 3.2 NEU: `src/formats/shared/editor/__tests__/commands.test.ts` (erweitern) — F11
+
+Datei existiert bereits (`canCut`/`cutSelection`). Neuer `describe('insertImage')`.
+Muster: `EditorState.create({ schema: wordSchema, doc: wordSchema.nodeFromJSON(...) })`
++ `TextSelection.create(...)`/`NodeSelection` an definierter Position →
+`insertImage(src, opts)(state, tr => (state = state.apply(tr)))` →
+`state.doc.toJSON()` prüfen. (Rein synchron, keine Race-Thematik — deshalb hier auf
+Unit-Ebene der schnellste Nachweis des Kernfalls.)
 
 | # | Testfall | Erwartung | Bezug | Status |
 |---|---|---|---|---|
-| IV1 | `sniffImageMimeType` mit echtem PNG-Signatur-Byte-Präfix (`89 50 4E 47 0D 0A 1A 0A`) | `'image/png'` | 3.3, F3 | **ROT** (Modul fehlt) |
-| IV2 | analog JPEG (`FF D8 FF`), GIF87a, GIF89a, BMP (`42 4D`) | jeweils korrekter MIME-Typ | 3.3 | **ROT** |
-| IV3 | WebP (RIFF-Container, `RIFF....WEBP`) | `'image/webp'` | 3.3 | **ROT** |
-| IV4 | Leerer Byte-Puffer, zu kurzer Puffer, zufälliger/unbekannter Puffer (z. B. Anfang einer `.txt`-Datei) | `null` | Grenzfall 3.3 (Kernfall: falscher MIME-Typ) | **ROT** |
-| IV5 | `computeDisplaySize`: Bild kleiner als `maxWidth` | Rückgabe unverändert (keine Hochskalierung) | 2.4 | **ROT** |
-| IV6 | `computeDisplaySize`: Bild breiter als `maxWidth` | Herunterskaliert, Seitenverhältnis erhalten (Rundungstoleranz ±1px) | 2.4, 3.4 | **ROT** |
-| IV7 | `computeDisplaySize`: 0×0-Eingabe | sinnvoller Fallback statt `NaN`/Division durch 0 | Robustheit | **ROT** |
-| IV8 | `arrayBufferToBase64`: Rundreise gegen `atob()` für Puffer < 0x8000 Bytes **und** > 0x8000 Bytes | identisches Ergebnis, kein Stack-Overflow beim großen Puffer | F4, 3.7 | **ROT** |
-| IV9 | `MAX_IMAGE_BYTES`/`SUPPORTED_IMAGE_MIME_TYPES`: Snapshot der dokumentierten Werte | Werte entsprechen der freigegebenen Entscheidung aus Abschnitt 9 von `bild-einfuegen-code.md` (**vor** Test-Implementierung mit dem Product Owner zu bestätigen, siehe Abschnitt 8 dieses Plans) | offene Entscheidung 9.1/9.2 | **ROT/blockiert bis Freigabe** |
+| CI1 | Cursor inmitten eines Wortes („HalloWelt", zwischen „Hallo"/„Welt") | Zwei Absätze `"Hallo"`/`"Welt"`, Bild dazwischen, **kein** Textverlust | 2.1.3/3.2(c), Kernfall | **GRÜN erwartet** (laut Code-Analyse 1.6 korrekt — muss aber als Test **existieren**) |
+| CI2 | Cursor am Absatzanfang | Bild **vor** unverändertem Absatz, kein leerer Stub | 3.2(a) | **GRÜN erwartet** |
+| CI3 | Cursor am Absatzende | Bild **nach** unverändertem Absatz | 3.2(b) | **GRÜN erwartet** |
+| CI4 | Cursor mitten in `strong`-Text | Beide Teile behalten `strong`; Bild-Node **ohne** geerbte Mark | 3.2(d) | **GRÜN erwartet** |
+| CI5 | Leerer Absatz | Absatz wird durch Bild ersetzt, kein verwaister Leerblock | 3.2(e) | **GRÜN erwartet** |
+| CI6 | Cursor vor `hard_break` | `hard_break` bleibt im **zweiten** Teilabsatz | 3.2(f) | **GRÜN erwartet** |
+| CI7 | Cursor mitten in `heading` | Verhalten **festnageln** (Teilen in zwei gleichrangige `heading` **oder** was der Lauf zeigt) | 2.8, offene Entscheidung 9.3 | **GRÜN erwartet + Dokumentationspflicht** (Kommentar: noch nicht produktseitig bestätigt) |
+| CI8 | Cursor am Anfang/Ende einer `heading` | Bild vor/nach unveränderter Überschrift, **kein** Teilen | 2.8 | **GRÜN erwartet** |
+| CI9 | `list_item` (Content `block+`), Cursor am Anfang | Bild bleibt **innerhalb** desselben `list_item`, Liste bricht nicht ab | 2.8 | **GRÜN erwartet** (gegen das **tatsächliche** `block+`-Modell formulieren, nicht gegen das falsche `'paragraph block*'`) |
+| CI10 | Zwei `list_item`s, Cursor mittig/Ende im ersten | Bild bleibt im **ersten** `list_item`, **kein** Vertauschen | 2.8 | **GRÜN erwartet** |
+| CI11 | `table_cell` (`block+`), Cursor mittig | Zelle bleibt gültig, Bild zwischen zwei Absätzen derselben Zelle | 2.8 | **GRÜN erwartet** |
+| CI12 | Bestehende, nicht-leere Selektion | Selektierter Text wird **ersetzt**, nicht ergänzt | 2.2 | **GRÜN erwartet** |
+| CI13 | `insertImage(src)` ohne Options | `width`/`height` bleiben `null` (Abwärtskompatibilität) | Kompatibilität | **GRÜN erwartet** (heute trivial, da Maße nie existieren) |
+| CI14 | **F1-Regression:** `insertImage(src, { alt, width: 400, height: 300 })` | Node trägt **exakt** `width===400`, `height===300` | F1, 2.4 | **ROT** — heutige Signatur `insertImage(src, alt='')` akzeptiert kein Options-Objekt; muss vor F1 fehlschlagen |
 
-**Bewusst nicht hier abgedeckt:** `loadImageDimensions` (echte
-Bilddekodierung über `new Image()`) — jsdom dekodiert keine echten Bilddaten
-(bereits im Projekt etabliertes, dokumentiertes Muster, vgl.
-`SKIP_SLOW_UNDER_JSDOM` in `docx/__tests__/external-fixtures.test.ts:40`).
-Wird ausschließlich per E2E (3.8) mit echten Testbild-Dateien abgesichert.
+CI1–CI13 dokumentieren das laut Code-Analyse bereits korrekte, aber bislang
+**ungetestete** `replaceSelectionWith`-Verhalten; CI14 ist der einzige bewusst rote
+Fall.
 
-### 2.4 Neue Datei: `src/formats/shared/units.test.ts`
+### 3.3 NEU: `src/formats/shared/editor/__tests__/imageValidation.test.ts` — F3/F4
 
-Voraussetzung: Modul `src/formats/shared/units.ts` (laut Code-Plan 4.3,
-**aktuell nicht vorhanden**, per `Glob` verifiziert).
+Voraussetzung: Modul `imageValidation.ts` (Code-Plan 4.2, **aktuell nicht
+vorhanden**). Alle Fälle **ROT**, bis die Datei existiert.
+
+| # | Testfall | Erwartung | Bezug |
+|---|---|---|---|
+| IV1 | `sniffImageMimeType` mit PNG-Signatur (`89 50 4E 47 0D 0A 1A 0A`) | `'image/png'` | 3.3, F3 |
+| IV2 | JPEG (`FF D8 FF`), GIF87a, GIF89a, BMP (`42 4D`) | jeweils korrekter MIME | 3.3 |
+| IV3 | WebP (`RIFF`…`WEBP`) | `'image/webp'` | 3.3 |
+| IV4 | leerer/zu kurzer/zufälliger Puffer (z. B. Beginn einer `.txt`) | `null` | 3.3 (Kernfall) |
+| IV5 | `computeDisplaySize`: kleiner als `maxWidth` | unverändert (keine Hochskalierung) | 2.4 |
+| IV6 | `computeDisplaySize`: breiter als `maxWidth` | herunterskaliert, Verhältnis erhalten (±1 px) | 2.4, 3.4 |
+| IV7 | `computeDisplaySize`: 0×0 | sinnvoller Fallback statt `NaN`/Div-durch-0 | Robustheit |
+| IV8 | `arrayBufferToBase64`: Rundreise gegen `atob()`, Puffer < **und** > 0x8000 Byte | identisch, kein Stack-Overflow beim großen Puffer | F4, 3.7 |
+| IV9 | `MAX_IMAGE_BYTES`/`SUPPORTED_IMAGE_MIME_TYPES`-Snapshot | Werte = freigegebene Entscheidung (Abschnitt 9 Code-Plan) | offene Entscheidung 9.1/9.2 — **bis Freigabe blockiert** |
+
+**Nicht hier:** `loadImageDimensions` (`new Image()`) — jsdom dekodiert keine
+echten Bilddaten (etabliertes Muster, vgl. `SKIP_SLOW_UNDER_JSDOM` in
+`external-fixtures.test.ts`). Ausschließlich per E2E (4.6) mit echten Bytes.
+
+### 3.4 NEU: `src/formats/shared/units.test.ts`
+
+Voraussetzung: Modul `units.ts` (Code-Plan 4.3, **aktuell nicht vorhanden**). Alle **ROT**.
+
+| # | Testfall | Erwartung |
+|---|---|---|
+| U1 | `pxToEmu(96)` | `914400` (1 Zoll) |
+| U2 | `emuToPx(pxToEmu(x))` für mehrere `x` | Rundreise ±1 px |
+| U3 | `pxToCm(96)` | `2.54` |
+| U4 | `pxToCm(300)` | ≈ `7.94` (Toleranz 0.01) |
+| U5 | `parseOdfLength('6cm'/'1in'/'28.35pt'/'120mm'/'300px')` | jeweils korrekter px-Wert |
+| U6 | `parseOdfLength(''/null/'abc'/'-5cm')` | `null` (kein Wurf, defensiv) |
+| U7 | `parseOdfLength('300px')` interpretiert `px` als 96-dpi-Pixel, nicht als `pt` | `300` (Neufund/F8) |
+
+### 3.5 `docx/__tests__/roundtrip.test.ts` — Erweiterungen (F13/F5/F15/F1)
 
 | # | Testfall | Erwartung | Status |
 |---|---|---|---|
-| U1 | `pxToEmu(96)` | `914400` (exakt 1 Zoll) | **ROT** (Modul fehlt) |
-| U2 | `emuToPx(pxToEmu(x))` für mehrere `x` | Rundreise im Rahmen der Rundungsgenauigkeit (±1px) | **ROT** |
-| U3 | `pxToCm(96)` | `2.54` | **ROT** |
-| U4 | `pxToCm(300)` | `≈7.94` (Toleranz 0.01) | **ROT** |
-| U5 | `parseOdfLength('6cm')`, `('1in')`, `('28.35pt')`, `('120mm')`, `('300px')` | jeweils korrekter px-Wert (Referenzwerte aus Code-Plan 4.3 nachrechnen) | **ROT** |
-| U6 | `parseOdfLength('')`, `(null)`, `('abc')`, `('-5cm')` | `null` (kein Wurf, defensiv gegen reale Fremddateien) | **ROT** |
-| U7 | **Regressionstest gegen den in Anforderung 1.3/Neufund dokumentierten Bug:** `parseOdfLength('300px')` interpretiert `px` **nicht** als `pt` oder sonstige Einheit, sondern exakt als CSS-Pixel bei 96 dpi | `300` | Neufund 1.3 (F8) | **ROT** |
+| D1 | Bestehenden Test um `expect(image.attrs.width).toBe(100)`/`.height).toBe(80)` ergänzen (Eingabe hat sie bereits) | Maße exakt zurück | **ROT** — Reader liest `wp:extent` nicht (0) |
+| D2 | Bild **ohne** Maße → Rundreise | gemeinsame Ersatzgröße 300×200 (nicht `null`) | **ROT bis F5/F7** |
+| D3 | **F5:** handgebautes `document.xml` mit `<wp:extent cx="1828800" cy="1143000"/>` (192×120 px) per JSZip | `width===192`, `height===120` | **ROT** — Lesepfad fehlt |
+| D4 | **F15:** Dokument mit **drei** unterschiedlichen Bildern → `document.xml` parsen, **alle** `wp:docPr/@id` einsammeln | `new Set(ids).size===3`, jede `id>0`, `pic:cNvPr/@id`==zugehörige `wp:docPr/@id` | **ROT** — heute alle `id="1"`/`"0"` |
+| D5 | Bild in Tabellenzelle mit Maßen | Rundreise erhält Zelle+Größe (5.1.8 Unit-Ebene) | **ROT** (Größe), Struktur **grün erwartbar** |
+| D6 | Bild in Kopf-/Fußzeile mit Maßen | Größe bleibt; Fußzeilen-Bild-ID kollidiert **nicht** mit Body-ID (gemeinsame `DrawingIdSequence`) | **ROT** (Größe/ID), Struktur **grün erwartbar** |
+| D7 | Zwei **identische** Data-URLs an verschiedenen Positionen | **beide** Vorkommen erhalten; `ImageCollector` dedupliziert nur die Mediendatei; Content-Types deklarieren die Endung genau einmal | **GRÜN erwartet** (Writer-Verhalten, nur ungetestet) |
 
-### 2.5 `src/formats/docx/__tests__/roundtrip.test.ts` — Erweiterungen (F13/F5/F1)
+### 3.6 `odt/__tests__/roundtrip.test.ts` — Erweiterungen (F13/F6/F8/F7/F1)
 
-| # | Testfall | Vorgehen | Erwartung | Status |
-|---|---|---|---|---|
-| D1 | **Ergänzung des bestehenden Tests Zeile 252**: `expect(image.attrs.width).toBe(100)` / `expect(image.attrs.height).toBe(80)` hinzufügen | Eingabe hat bereits `width: 100, height: 80` (Zeile 253) | Muss die Maße exakt zurückerhalten | **ROT** — Reader liest `wp:extent` nicht (bestätigt in 0), Writer schreibt zwar `cx`/`cy` aus den Eingabewerten korrekt, aber der Reader ignoriert sie beim Reimport → `width`/`height` kommen als `null` zurück |
-| D2 | Bild **ohne** `width`/`height` im Eingabe-Node → Rundreise | `{ type: 'image', attrs: { src: TINY_PNG, alt: '' } }` (kein width/height) | Nach F1/F5/F7: gemeinsame Ersatzgröße 300×200 (nicht `null`, da Writer jetzt aktiv schreibt und Reader jetzt liest) | **ROT bis F5/F7 umgesetzt** (heute: bleibt `null`, da Reader den geschriebenen Fallback-Wert gar nicht liest) |
-| D3 | **Deckt F5 direkt:** handgebautes DOCX-XML mit `<wp:extent cx="1828800" cy="1143000"/>` (2×1,25 Zoll = 192×120 px) direkt per JSZip zusammengesetzt, unabhängig vom eigenen Writer | Reader auf dieses Roh-XML anwenden | `image.attrs.width === 192`, `image.attrs.height === 120` | **ROT** — Lesepfad existiert nicht (bestätigt 0) |
-| D4 | Bild in Tabellenzelle mit `width`/`height` | `table_cell.content = [{ type: 'image', attrs: { src, width: 150, height: 100 } }]` | Nach Rundreise: Zelle enthält weiterhin genau ein Bild mit identischer Größe (deckt Rundreise-Szenario 5.1.8 auf Unit-Ebene ab — laut Anforderung Abschnitt 0 bislang **nicht einmal** diese Grundstruktur getestet) | **ROT** (Größe), aber Positions-/Strukturerhalt bereits heute **grün erwartbar** — getrennt zu protokollieren |
-| D5 | Bild in Kopf-/Fußzeile mit `width`/`height` | `header`/`footer` mit `image`-Node | Größe bleibt nach Rundreise erhalten | **ROT** (Größe), Struktur **grün erwartbar** |
-| D6 | Zwei **unterschiedliche** Bilder (verschiedene Data-URLs) an unterschiedlichen Positionen mit unterschiedlicher Größe | zwei `image`-Nodes im Dokument | Beide bleiben nach Rundreise an ihrer jeweiligen Position, mit je eigener (heute: keiner, nach Fix: korrekter) Größe unterscheidbar | Struktur **grün erwartbar** (Grenzfall betrifft nur Größe) |
-| D7 | **Deckt Grenzfall 3.6:** zweimaliges Einfügen **derselben** Data-URL an unterschiedlichen Positionen | zwei `image`-Nodes mit identischem `src` | Nach Rundreise **beide** Vorkommen erhalten (nicht auf eines dedupliziert) — `ImageCollector` dedupliziert nur die Zip-Mediendatei (bestätigt 0), nicht die Dokumentposition | **GRÜN erwartet** (bereits vorhandenes Writer-Verhalten, nur bislang ungetestet) |
+| # | Testfall | Erwartung | Status |
+|---|---|---|---|
+| O1 | Eingabe **mit** `width`/`height` → Assertion auf exakte Werte | Maße exakt zurück | **ROT** — ODT-Test hat heute nicht mal `width`/`height`; Reader-Defekt wie DOCX |
+| O2 | **F6:** handgebautes `content.xml` mit `<draw:frame svg:width="5cm" svg:height="3cm">` per JSZip | `width≈189px`, `height≈113px` (Toleranz) | **ROT** — Lesepfad fehlt |
+| O3 | **F8:** exportiertes `content.xml` enthält **keine** `svg:width="…px"`-Zeichenkette | Regex-Assertion greift nicht auf `px` | **ROT** — Writer schreibt heute `${width}px` |
+| O4 | Bild ohne Größe → Rundreise | gemeinsame Ersatzgröße (in cm, aus `DEFAULT_IMAGE_WIDTH_PX`) statt `6cm`/`4cm` | **ROT bis F7** |
+| O5 | Bild in Zelle/Kopf-Fußzeile mit Größe | Größe bleibt | **ROT** (Größe), Struktur **grün** |
+| O6 | Zwei unterschiedliche + zwei identische Bilder | analog D6/D7 | teils **rot** (Größe), teils **grün** (Dedup/Position) |
 
-### 2.6 `src/formats/odt/__tests__/roundtrip.test.ts` — Erweiterungen (F13/F6/F8/F1)
+### 3.7 NEU: `src/formats/shared/editor/__tests__/cross-format-roundtrip.test.ts`
 
-| # | Testfall | Vorgehen | Erwartung | Status |
-|---|---|---|---|---|
-| O1 | Ergänzung analog D1: Eingabe **mit** `width`/`height` → Assertion auf exakte Werte | analog | Muss Maße exakt zurückerhalten | **ROT** — heutiger ODT-Test hat nicht einmal `width`/`height` im Eingabe-Node (siehe 0); nach Ergänzung tritt derselbe Reader-Defekt wie bei DOCX zutage |
-| O2 | **Deckt F6 direkt:** handgebautes `content.xml` mit `<draw:frame svg:width="5cm" svg:height="3cm">...` per JSZip, unabhängig vom eigenen Writer | Reader auf Roh-XML anwenden | `width ≈ 189px`, `height ≈ 113px` (Toleranz aus Rundung) | **ROT** — Lesepfad existiert nicht (bestätigt 0) |
-| O3 | **Deckt F8:** exportiertes `content.xml` enthält **keine** `svg:width="...px"`-Zeichenkette mehr | Bild mit `width`/`height` exportieren, rohen XML-String per Regex prüfen | Kein `px`-Suffix bei `svg:width`/`svg:height` (nur `cm`/`mm`/…) | **ROT** — aktueller Writer schreibt exakt `${width}px` (bestätigt 0, `odt/writer.ts:115-116`) |
-| O4 | Bild ohne Größe → Rundreise | wie D2 | gemeinsame Ersatzgröße (in cm ausgedrückt, umgerechnet aus `DEFAULT_IMAGE_WIDTH_PX`) statt der heutigen, undokumentiert abweichenden `6cm`/`4cm` | **ROT bis F7 umgesetzt** |
-| O5 | Bild in Tabellenzelle / Kopf-Fußzeile mit Größe | analog D4/D5 | Größe bleibt erhalten | **ROT** (Größe), Struktur **grün erwartbar** |
-| O6 | Zwei unterschiedliche + zwei identische Bilder | analog D6/D7 | analog | D6-Teil **rot** (Größe), D7-Teil **grün erwartbar** |
+Unit-Ebene für 5.1.5/5.1.6/5.1.7, schneller als E2E; ergänzt (ersetzt nicht) 4.7.
 
-### 2.7 Erweiterung `external-fixtures.test.ts` (DOCX + ODT) — F14, schließt 0.1
+| # | Testfall | Erwartung | Status |
+|---|---|---|---|
+| X1 | DOCX → ODT: Bild mit Größe (`320×180`) via `readOdt(writeOdt(readDocx(writeDocx(c))))` | Größe (umgerechnet) + Alt-Text erhalten | **ROT bis F5/F6/F7/F8** |
+| X2 | ODT → DOCX, spiegelbildlich | analog | **ROT bis Fixes** |
+| X3 | Doppelte Rundreise DOCX → ODT → DOCX (5.1.7) | inhaltlich identisch, kein kumulativer Maßverlust | **ROT bis Fixes** |
 
-**Vorbedingung, vor Testimplementierung durchzuführen (kein Code, reine
-Sichtung, siehe Abschnitt 7 Punkt 1):** Die 127 DOCX-/202 ODT-Fixture-Zips in
-`tests/fixtures/external/{docx,odt}/` müssen auf tatsächlich enthaltene
-`<w:drawing>`/`draw:frame`-Elemente durchsucht werden (z. B. per einmaligem
-Wegwerf-Skript: `for f in *.docx; do unzip -p "$f" word/document.xml | grep -l
-"w:drawing"; done` bzw. ODT-Äquivalent über `draw:frame`) — **nicht** anhand
-von Dateinamen raten. Ergebnisliste dieser Sichtung wird Teil des
-QA-Testberichts, sobald ausgeführt (aktuell offen, siehe Abschnitt 8).
+### 3.8 `external-fixtures.test.ts` (DOCX + ODT) — Erweiterung, schließt 0.2 (F14)
 
-| # | Testfall | Vorgehen | Erwartung | Status |
-|---|---|---|---|---|
-| EF1 | Für jede laut Vorab-Sichtung bildhaltige Fixture: gefundene `image`-Knoten haben `width`/`height` **nicht** `null` | bestehende Lade-Schleife (`loadFixtures()`) um Knoten-Traversal erweitern | mind. 1 `image`-Knoten mit numerischem `width`/`height` je bildhaltiger Datei | **ROT bis F5/F6 umgesetzt** |
-| EF2 | Für dieselben Fixtures: Rundreise (Import → unveränderter Export → Reimport) erhält Anzahl der `image`-Knoten exakt | wie bestehende Fixture-Tests, nur mit zusätzlicher Zählung | Anzahl vor/nach identisch | **GRÜN erwartbar** unabhängig vom Größen-Bug (reine Strukturzählung) |
+**Vorbedingung:** Fixture-Sichtung aus 0.2 abgeschlossen.
 
-### 2.8 Neue Datei: `src/formats/shared/editor/__tests__/cross-format-roundtrip.test.ts`
-
-Unit-Ebene für Anforderung 5.1.5/5.1.6/5.1.7 (Cross-Format), schneller als
-E2E, ergänzt — ersetzt nicht — den Browser-Test in 3.9.
-
-| # | Testfall | Vorgehen | Erwartung | Status |
-|---|---|---|---|---|
-| X1 | DOCX → ODT: Bild mit Größe | `WordDocumentContent` mit `image`-Node (`width: 320, height: 180`) → `readDocx(writeDocx(c))` → `readOdt(writeOdt(...))` | Größe bleibt (umgerechnet in die jeweilige interne px-Einheit) erhalten, Alt-Text ebenfalls | **ROT bis F5/F6/F7/F8 umgesetzt** |
-| X2 | ODT → DOCX, spiegelbildlich | analog | analog | **ROT bis Fixes** |
-| X3 | Doppelte Rundreise DOCX → ODT → DOCX (Anforderung 5.1.7) | dreifache Konvertierung eines Dokuments mit Bild | Bild inhaltlich identisch, kein kumulativer Maßverlust | **ROT bis Fixes** |
+| # | Testfall | Erwartung | Status |
+|---|---|---|---|
+| EF1 | Für jede bildhaltige Fixture (`headerPic.docx`, `drawing.docx`, `image-attributes.odt`, …): gefundene `image`-Knoten haben `width`/`height` **≠ null** | mind. 1 Knoten mit numerischer Größe je Datei | **ROT bis F5/F6** |
+| EF2 | Für dieselben Fixtures: Import → unveränderter Export → Reimport erhält die `image`-Knoten-Anzahl exakt | Anzahl vor/nach identisch | **GRÜN erwartbar** (reine Strukturzählung) |
 
 ---
 
-## 3. Teil B — Echte Playwright-Browser-Tests
+## 4. Teil B — Echte Playwright-Browser-Tests
 
-**Grundsatz (bindend für diesen Abschnitt, wortgleich mit dem Auftrag zu
-diesem Plan):** Kein Testfall in Teil B darf durch direkten Aufruf interner
-Funktionen (`insertImage(...)`, `readDocx(...)`, `sniffImageMimeType(...)`
-etc.) im Node-Kontext ersetzt werden. Jeder Testfall läuft über echte
-Nutzer:innen-Handlungen im Browser: `locator.click()`,
-`page.keyboard.press(...)`/`.type(...)`, echter Datei-Upload
-(`page.waitForEvent('filechooser')` + Klick auf ein sichtbares
-Bedienelement, **nicht** blankes `setInputFiles` auf den versteckten Input
-als einziger Weg — siehe 3.13 für die Ausnahme, wo `setInputFiles` zusätzlich
-zulässig ist), `page.waitForEvent('download')` + Auslesen und
-**strukturelles** Parsen der heruntergeladenen Datei vom Dateisystem
-(`JSZip` + `DOMParser`, nicht nur `.toContain`-Stringsuche). Löst vollständig
-den in `bild-einfuegen-req.md` Abschnitt 0 (letzte Zeile) und Abschnitt 6.3
-(„aktuell nicht vorhanden") dokumentierten Befund.
+**Grundsatz (bindend, wortgleich mit dem Auftrag):** Kein Teil-B-Test wird durch
+direkten Aufruf interner Funktionen (`insertImage`, `readDocx`,
+`sniffImageMimeType` …) im Node-Kontext ersetzt. Jeder Fall läuft über echte
+Handlungen im Browser: `locator.click()`, `keyboard.press/type`, echter
+Datei-Upload und `waitForEvent('download')` + **strukturelles** Parsen der
+heruntergeladenen Datei (`JSZip` + `DOMParser`, **nicht** `.toContain`-Stringsuche).
+**Alle Fälle unterliegen der Determinismus-Disziplin aus Abschnitt 2** — die
+betroffenen Zeilen verweisen ausdrücklich darauf.
 
-### 3.1 Neue Datei: `tests/e2e/images.spec.ts`
+### 4.1 NEU: `tests/e2e/images.spec.ts`
 
-Folgt den bestehenden Konventionen aus `docx.spec.ts`/`odt.spec.ts`/
-`selection-regression.spec.ts` (`docxCard`/`odtCard`-Locator-Helfer lokal
-dupliziert, `page.getByRole('button', ...)`-Selektoren,
-`page.waitForEvent('download')` + `JSZip` für Export-Prüfung). Deckt **beide**
-Formate über echten Datei-Upload/-Download ab. Eine `describe`-Gliederung je
-Themenblock unten, ein `test` je Zeile.
+Folgt den Konventionen aus `docx.spec.ts`/`odt.spec.ts`/`cut.spec.ts`
+(`docxCard`/`odtCard`-Helfer lokal, `watchForConsoleErrors`-Helfer,
+`waitForEvent('download')` + `JSZip`). `describe`-Gliederung je Themenblock.
 
-**Wichtiger Hinweis zum aktuellen Bild-Bedienelement (Konsequenz aus F2, siehe
-0):** Solange `Toolbar.tsx:241-244` unverändert ist, gibt es **kein**
-`role="button"`-Element und **keinen** `title`/`aria-label="Bild
-einfügen"` — Tests, die den Kontrolleintrag ansprechen, müssen bis zur
-Umsetzung von F2 den Fallback-Locator
-`page.locator('label:has-text("🖼")').locator('input[type="file"]')` bzw.
-direkt `page.locator('.hidden[type="file"][accept="image/*"]')` verwenden.
-**Test L-B1 unten (3.6) prüft explizit, dass genau dieser Fallback nötig ist**
-und muss nach F2-Umsetzung auf den Ziel-Locator (`getByRole('button', { name:
-'Bild einfügen' })`) umgestellt werden — nicht stillschweigend weiterlaufen.
+**Hinweis zum echten Klickpfad des Bild-Uploads (statt nur `setInputFiles`):** Da
+der Bild-Kontrolleintrag heute ein `<label>` um einen versteckten `<input>` ist,
+öffnet ein **Klick auf das Label** bereits den nativen Dialog. Der echte Klickpfad
+ist damit **schon vor F2** möglich:
+```ts
+const chooser = page.waitForEvent('filechooser')
+await page.locator('label:has-text("Bild")').click()
+;(await chooser).setFiles({ name, mimeType, buffer })
+```
+Nach F2 wird daraus `page.getByRole('button', { name: 'Bild einfügen' }).click()`.
+**Regel (siehe 4.11):** mindestens der **erste** Fall jeder Interaktionsart läuft
+über diesen echten Klickpfad; reine Wiederholungen dürfen aus Laufzeitgründen
+`setInputFiles` auf `input[type="file"][accept="image/*"]` nutzen (im Kommentar
+vermerken).
 
-#### 3.2 Grundfall: Einfügen an der Cursor-Position, echter `filechooser`-Flow (Anforderung 2.1, 3.2 — höchste Priorität)
+### 4.2 Grundfall: Einfügen an der Cursor-Position (Anforderung 2.1/3.2 — höchste Priorität)
 
-| # | Test | Schritte | Assertion | Bezug | Erwarteter Status |
-|---|---|---|---|---|---|
-| B1 | Cursor inmitten eines Wortes (Kernfall der Nutzerinnen-Meldung) | Editor fokussieren, `"HalloWelt"` tippen, Cursor per `ArrowLeft`-Sequenz zwischen „Hallo"/„Welt" setzen, echten Upload über den Bild-Kontrolleintrag auslösen (`page.waitForEvent('filechooser')` + Klick auf das Label/den versteckten Input, siehe Hinweis oben), Test-PNG auswählen | `page.locator('.ProseMirror img')` sichtbar; Editor-Text enthält weiterhin **beide** Teile „Hallo" und „Welt" (`toContainText`, zusätzlich exakte Absatzanzahl `page.locator('.ProseMirror p')` prüfen) | 3.2(c), zentraler gemeldeter Fehler | **GRÜN erwartet** (Command-Ebene laut CI1 bereits korrekt), **muss aber der erste tatsächlich ausgeführte Beweis über den echten Browser-Weg sein** — bislang nicht real getestet |
-| B2 | Cursor ganz am Anfang eines Absatzes | analog, `Home` statt Cursor mittig | Bild **vor** unverändertem Absatztext | 3.2(a) | **GRÜN erwartet** |
-| B3 | Cursor ganz am Ende eines Absatzes | analog, `End` | Bild **nach** unverändertem Absatztext | 3.2(b) | **GRÜN erwartet** |
-| B4 | Cursor inmitten fett-formatierten Textteils | Wort fett formatieren (Toolbar „Fett"), Cursor mittig hinein, Bild einfügen | Beide Textteile bleiben **fett**, Bild selbst nicht fett gerendert | 3.2(d) | **GRÜN erwartet** |
-| B5 | Cursor in leerem Absatz | neues leeres Dokument, Cursor im einzigen leeren Absatz | Bild ersetzt Absatz, Editor bleibt bedienbar (Text davor/danach eintippbar) | 3.2(e), 3.8 | **GRÜN erwartet** |
-| B6 | Cursor inmitten einer Überschrift | „Überschrift 1" wählen, Text tippen, Cursor mittig, Bild einfügen | Zwei Überschriften gleichen Levels, Bild dazwischen, kein Crash — **Ergebnis explizit protokollieren**, da laut Code-Plan offene Entscheidung 9.3 noch nicht produktseitig bestätigt | 2.8, 9.3 | **Dokumentationspflichtig** |
-| B7 | Cursor in Listenpunkt (einzelner Punkt) | Aufzählung erzeugen, Cursor in den Text, Bild einfügen | Bild bleibt **innerhalb** des `<li>`, Liste bleibt als `<ul>` erhalten (kein Abbruch der Aufzählung) | 2.8 | **GRÜN erwartet** |
-| B8 | Cursor in Tabellenzelle | Tabelle einfügen, in Zelle klicken, Bild einfügen | Bild erscheint **innerhalb** der Zelle, restliche Zellen unverändert bedienbar | 2.8 | **GRÜN erwartet** |
-| B9 | Bestehende Textselektion wird ersetzt | Wort markieren, Bild einfügen | Markierter Text verschwindet, Bild an seiner Stelle | 2.2 | **GRÜN erwartet** |
-| B10 | Bild am Dokumentanfang/-ende | Bild als allererstes bzw. -letztes Element einfügen | Editor bleibt bedienbar, Cursor davor/danach positionierbar, weiterer Text eintippbar | 3.8 | **GRÜN erwartet** |
-| B11 | Bild unmittelbar neben Tabelle/Liste | Bild direkt vor/nach einer Tabelle bzw. Liste einfügen | Keine Vermischung/Verschiebung der Nachbarstruktur | 3.9 | **GRÜN erwartet** |
+Determinismus: **Cursor per Tastatur setzen → `waitForTimeout(50)` (2.2) → Upload
+auslösen → `await expect(editor.locator('img')).toBeVisible()` (2.3)**, dann erst
+Assertions.
 
-#### 3.3 Undo/Redo (Anforderung 2.6, Grenzfall 3.11)
-
-| # | Test | Schritte | Assertion | Bezug | Status |
-|---|---|---|---|---|---|
-| B12 | Undo direkt nach Einfügung inmitten eines Absatzes | im Anschluss an B1: `ControlOrMeta+z` | Bild verschwindet, **ein** zusammenhängender Absatz `"HalloWelt"` (nicht zwei leere Absätze übrig) | 2.6, 3.11 | **GRÜN erwartet** |
-| B13 | Redo | im Anschluss an B12: `ControlOrMeta+y`/`ControlOrMeta+Shift+z` | Bild inkl. aller Attribute identisch wieder da | 2.6 | **GRÜN erwartet** |
-| B14 | Undo/Redo bei Einfügung am Dokumentanfang/-ende | im Anschluss an B10 | Einzelner sauberer Undo-Schritt | 2.6 | **GRÜN erwartet** |
-
-#### 3.4 Formatprüfung / Fehlerbehandlung (Anforderung 2.3, Grenzfall 3.3 — bestätigter Defekt)
-
-| # | Test | Schritte | Assertion | Bezug | Erwarteter Status |
-|---|---|---|---|---|---|
-| B15 | Nicht-Bild-Datei mit Bild-Endung (`.txt`-Inhalt, umbenannt auf `bild.png`, oder `mimeType: 'text/plain'` bei `setFiles`) | über den Bild-Kontrolleintrag hochladen | Sichtbare, verständliche Fehlermeldung (`role="alert"` o. ä.); **kein** `<img>` im DOM eingefügt; `page.on('pageerror', ...)`/`page.on('console', ...)` zeigt **keine** unbehandelte Promise-Ablehnung | 2.3, 3.3, F3 | **ROT** — heute: kein MIME-Check, Datei wird anstandslos als `<img src="data:text/plain;base64,...">` eingefügt (bestätigter Befund, siehe 0); Browser zeigt natives „Bild kann nicht angezeigt werden"-Symbol, **keine** App-Fehlermeldung |
-| B16 | 0-Byte-Datei | leerer Buffer über `setFiles` | Fehlermeldung, keine Einfügung | 2.3 | **ROT** — kein Größen-/Leer-Check vorhanden |
-| B17 | Beschädigte Bilddatei (gültiger PNG-Header, abgeschnittener/zufälliger Rumpf) | über Kontrolleintrag hochladen | Fehlermeldung statt kaputtem `<img>`-Platzhalter | 3.3 | **ROT** — `FileReader.readAsDataURL` liest jede Byte-Folge anstandslos, keine Dekodier-Prüfung |
-| B18 | Abbrechen des Dateiauswahl-Dialogs (kein Datei-Event) | `filechooser`-Event auslösen, dann **keine** Datei setzen (`fileChooser.setFiles([])` bzw. Dialog ohne Auswahl schließen simulieren) | Keine Änderung am Dokument, kein Fehler | 2.3, bereits korrekter `if (!file) return`-Pfad | **GRÜN erwartet** (einziger in diesem Block bereits korrekter Pfad, muss aber mit Test abgesichert sein) |
-
-#### 3.5 Toolbar-Bedienbarkeit (Anforderung Abschnitt 1, Grenzfall betrifft F2)
-
-| # | Test | Schritte | Assertion | Bezug | Erwarteter Status |
-|---|---|---|---|---|---|
-| B19 | Kontrolleintrag ist **kein** per Rolle auffindbarer Button | `page.getByRole('button', { name: 'Bild einfügen' })` | Locator liefert **0** Treffer (`toHaveCount(0)`) — Regressionstest, der den aktuellen Defekt aktiv festhält | F2, §1 Zeile 1 | **ROT-als-Nachweis** (siehe Erläuterung unten) — Test ist bewusst so formuliert, dass er **heute grün** ist (0 Treffer korrekt vorhergesagt) und nach F2-Fix **rot** wird, weil dann ein Button existiert; muss dann durch B20/B21 ersetzt werden |
-| B20 | Nach F2: Tastaturfokussierung + Enter öffnet Dialog | `Tab`-Sequenz bis `getByRole('button', { name: 'Bild einfügen' })` fokussiert (`toBeFocused()`), `Enter` | `page.waitForEvent('filechooser')` löst aus | F2, §1 Zeile 8 | **Blockiert bis F2 umgesetzt** — bis dahin nicht ausführbar, da kein fokussierbares `<button>`-Element existiert |
-| B21 | Nach F2: Leertaste aktiviert ebenfalls | wie B20 mit `' '` statt `Enter` | Dialog öffnet | F2 | **Blockiert bis F2** |
-| B22 | Icon bleibt ohne Emoji-Schriftstütze erkennbar | Screenshot-Vergleich oder DOM-Prüfung, dass **kein** reines Unicode-Zeichen als einziger visueller Träger dient (nach F2: SVG-Icon vorhanden) | SVG-Element (`svg`) im Kontrolleintrag vorhanden | §1 Zeile 3, F2 | **ROT** — aktuell ausschließlich Unicode-Emoji „🖼" (bestätigt: `Toolbar.tsx:242`) |
-
-*Erläuterung B19:* Dieser Test ist ein bewusster „Lückennachweis" (analog dem
-Muster aus `aufzaehlungsliste-qa.md` 3.7 für Tab/Umschalt+Tab) — er ist **heute
-grün**, weil er exakt den fehlenden Zustand beschreibt, und wird nach F2 durch
-B20/B21 abgelöst, nicht einfach gelöscht. Bis F2 umgesetzt ist, bleibt B19 der
-einzige verlässliche automatisierte Nachweis, dass „Bild einfügen" für
-Tastaturnutzer:innen nicht erreichbar ist.
-
-#### 3.6 Größe/Seitenverhältnis nach Export (Grenzfall 3.4 — bestätigter Defekt, kritischer Test)
-
-| # | Test | Schritte | Assertion | Bezug | Erwarteter Status |
-|---|---|---|---|---|---|
-| B23 | Quadratisches Testbild (z. B. 40×40 px, Seitenverhältnis 1:1) einfügen → als DOCX exportieren | echter Upload eines 40×40-PNG, Export auslösen, `download.path()` lesen, `JSZip` → `word/document.xml` per `DOMParser` parsen, `<wp:extent cx cy>` auslesen | `cx`/`cy`-Verhältnis entspricht 1:1 (± Rundungstoleranz) | 3.4, 5.1 | **ROT** — Writer erzwingt ohne gesetzte `width`/`height` immer 300×200 px (Verhältnis 3:2), unabhängig vom tatsächlichen 1:1-Quellbild — **das ist der durch Code-Analyse bereits vorhergesagte, hier erstmals tatsächlich am Browser nachzuweisende Verzerrungs-Bug** |
-| B24 | Dasselbe Testbild → als ODT exportieren | analog, `content.xml` → `svg:width`/`svg:height` per `DOMParser` (Namespace `urn:oasis:names:tc:opendocument:xmlns:svg-compatible:1.0`) auslesen | Verhältnis 1:1 | 3.4, 5.1 | **ROT** — analog, ODT-Fallback 6×4 cm (ebenfalls 3:2) |
-| B25 | 16:9-Testbild (z. B. 160×90 px) → DOCX **und** ODT | analog B23/B24 mit 16:9-Quellbild | Exportiertes Verhältnis ≈ 16:9, **nicht** 3:2 | 3.4 | **ROT** |
-| B26 | Editor-Darstellung vs. Export-Größe direkt gegenübergestellt | Bild einfügen, `page.locator('.ProseMirror img').boundingBox()` lesen **und** Export-Maße (B23-Methode) lesen | Beide Werte weichen bei aktuellem Code voneinander ab (Editor: Browser-Rendergröße durch `max-width:100%`/native Größe; Export: fix 300×200 px) — Test dokumentiert die **Diskrepanz** explizit als Assertion (`expect(editorRatio).not.toBeCloseTo(exportRatio)` **vor** Fix, `toBeCloseTo` **nach** Fix) | 2.4, 3.4 | **ROT (Diskrepanz vorhanden)** — wird nach F1 zu einem Gleichheits-Assert umgekehrt |
-
-#### 3.7 Rundreise DOCX/ODT, echter Upload/Export-Roundtrip im Editor (Anforderung 5.1.1/5.1.2)
-
-| # | Test | Schritte | Assertion | Bezug | Status |
-|---|---|---|---|---|---|
-| B27 | DOCX, reine Editor-Erzeugung | Text tippen, Cursor mittig, Bild einfügen (echter Flow), exportieren, `download.path()` erneut über den echten Upload-Weg importieren (`filechooser` + Klick auf „Datei hochladen") | Bild weiterhin an derselben relativen Position sichtbar, beide Textteile vorhanden, Bild nicht verzerrt (Seitenverhältnis wie B23 prüfen) | 5.1.1 | **Teilweise ROT** (Positions-/Textanteil grün erwartet, Größenanteil rot bis F1/F5) |
-| B28 | ODT, analog | analog | analog | 5.1.2 | **Teilweise ROT** |
-| B29 | Bild löschen, dann exportieren (Anforderung 5.1.10) | Bild einfügen, anklicken (Node-Selection), `Entf`, exportieren | Exportierte Datei enthält **kein** verwaistes Bild im Zip (`zip.file('word/media/...')` bzw. `Pictures/...` liefert nichts Neues; `word/_rels/document.xml.rels` bzw. `META-INF/manifest.xml` ohne verwaisten Eintrag) | 5.1.10 | **GRÜN erwartet** (kein bekannter Defekt hierzu, muss aber ausgeführt werden) |
-| B30 | Mehrere Bilder im selben Dokument (≥ 3, unterschiedliche Positionen) | drei unterschiedliche Testbilder nacheinander einfügen, exportieren, reimportieren | Alle drei bleiben einzeln, unterscheidbar, an ihrer jeweiligen Position | 5.1.9 | **GRÜN erwartet** (Struktur), Größenanteil wie üblich rot |
-| B31 | **Validierung gegen unabhängigen Parser (Anforderung 5.1.11):** exportiertes `<w:drawing>` strukturell per `DOMParser` (Namespaces `wp`/`a`/`pic`/`r`) validieren — vorhandene Pflichtelemente `wp:extent`, `a:blip[@r:embed]`, `pic:pic` | wie B23, zusätzliche Strukturprüfung statt reiner String-Suche | Alle Pflichtelemente vorhanden und korrekt referenziert (Relationship-ID aus `document.xml.rels` löst tatsächlich zu einer vorhandenen `media/*`-Datei auf) | 5.1.11 | **GRÜN erwartet** (Struktur ist unabhängig vom Größen-Bug bereits korrekt) |
-| B32 | **Validierung ODT analog (5.1.12):** `draw:frame`/`draw:image` **und** Eintrag in `META-INF/manifest.xml` | analog | `draw:image[@xlink:href]` referenziert eine tatsächlich im Zip vorhandene Datei, **und** diese Datei hat einen `<manifest:file-entry>` in `META-INF/manifest.xml` | 5.1.12 | **GRÜN erwartet für Struktur**; **separat zu prüfen** (siehe B33), ob `svg:width="...px"` das ODF-Schema tatsächlich verletzt |
-| B33 | **Deckt F8 auf E2E-Ebene:** exportiertes ODT enthält kein `svg:width="...px"` mehr | Regex/DOM-Attribut-Prüfung auf `content.xml` | `getAttributeNS(svg, 'width')` matched `/^[\d.]+(cm|mm|in|pt|pc)$/`, **nicht** `px` | Neufund 1.3, F8 | **ROT** (bestätigt in 0: aktueller Writer schreibt `px`) |
-| B34 | Cross-Format-Rundreise DOCX → ODT (Anforderung 5.1.5) | Bild in DOCX-Karte einfügen → exportieren → Download über ODT-Karte hochladen → als ODT exportieren | Bild, Alt-Text, Größe (umgerechnet) bleiben erhalten | 5.1.5 | **Teilweise ROT** (Größe) |
-| B35 | Cross-Format-Rundreise ODT → DOCX (Anforderung 5.1.6) | umgekehrt | analog | 5.1.6 | **Teilweise ROT** |
-| B36 | Doppelte Rundreise DOCX → Editor → ODT → Editor → DOCX (Anforderung 5.1.7) | Bild in DOCX einfügen → ODT-Export/Import → DOCX-Export/Import | Bild inhaltlich identisch, kein kumulativer Maßverlust | 5.1.7 | **Teilweise ROT** |
-
-#### 3.8 Selektions-Sync-Regression (Grenzfall 3.1, Anforderung 6.7 — Pflichtbestandteil)
-
-| # | Test | Schritte | Assertion | Bezug | Status |
-|---|---|---|---|---|---|
-| B37 | **Erweiterung von `tests/e2e/selection-regression.spec.ts`** (neuer `test`-Block, gleiche Datei, gleiches Muster wie die bestehenden zwei Tests Zeile 14-32/34-50): Text eingeben → Bild einfügen (echter Flow) → Klick zur Neupositionierung im Editor → `Enter` → weiter tippen | analog bestehendem Muster, mit „Bild einfügen" als dritte Trigger-Aktion statt „Fett" | Kein Textverlust, `page.locator('.ProseMirror p')`-Anzahl wie erwartet, Bild weiterhin an ursprünglicher Position sichtbar | 3.1, Hauptspezifikation Abschnitt 2, §6.7 | **GRÜN erwartet** (laut `bild-einfuegen-code.md` 1.7 strukturell bereits korrekt, da `run(view, ...)` stets die aktuelle `view.state` liest) — **muss aber tatsächlich ausgeführt werden**, nicht nur argumentiert |
-| B38 | Stresstest: mehrere Zyklen Text → Bild → Klick → Enter | analog bestehendem dritten Test (Zeile 52-71), mit Bild statt Fett, mehrfach wiederholt | Stabil über ≥ 3 Zyklen, keine kumulative Verschlechterung | 3.1 | **GRÜN erwartet** |
-
-#### 3.9 Weitere Grenzfälle (Anforderung Abschnitt 3)
-
-| # | Test | Schritte | Assertion | Bezug | Status |
-|---|---|---|---|---|---|
-| B39 | Wiederholtes schnelles Einfügen mehrerer Bilder (Grenzfall 3.10) | drei verschiedene Testbilder nacheinander einfügen, **ohne** Zwischenklick auf den Editor, jeweils Cursor per Tastatur neu setzen zwischen den Einfügungen | Alle drei landen an der zum jeweiligen Zeitpunkt korrekten Cursor-Position, nicht alle an derselben veralteten Stelle | 3.10 | **GRÜN erwartet** |
-| B40 | Großdatei (Grenzfall 3.7, Testplan-Hinweis 10) | Bilddatei nahe an `MAX_IMAGE_BYTES` (bzw. ohne definierte Grenze: 10–20 MB, siehe offene Entscheidung 9.2) über echten Upload einfügen, Zeit bis sichtbarer Darstellung messen (`performance.now()`-Differenz oder Playwright-Zeitstempel um `setFiles`/`expect(img).toBeVisible()`) | Zeit protokolliert (`console.log`/Testreport-Anhang), **kein** hartes Zeitlimit als Assertion (Flakiness-Vermeidung auf CI), aber UI muss unmittelbar danach weiterhin bedienbar sein (z. B. Toolbar-Klick funktioniert direkt im Anschluss) | 3.7, Testplan-Hinweis 10 | **Dokumentationspflichtig** — heutiges Verhalten (kein Limit, synchrones `FileReader.readAsDataURL`) muss gemessen, nicht nur vermutet werden |
-| B41 | Datei über `MAX_IMAGE_BYTES` (sobald F4 umgesetzt) | Datei > definierter Grenze hochladen | Fehlermeldung statt Einfügung | F4, Grenzfall 3.7 | **Blockiert bis F4 umgesetzt und Grenzwert freigegeben** (siehe offene Entscheidung 9.2) |
-
-#### 3.10 Reale Fixture-Dateien (Anforderung 6.9, Abnahmekriterium 8 — aktuell komplett offen, siehe 0.1)
-
-**Blockierende Vorbedingung:** Siehe 2.7 — vor Schreiben dieser Tests muss
-geklärt sein, welche der 127/202 vorhandenen Fixture-Dateien tatsächlich
-Bilder enthalten, **und** ob zusätzlich mit echtem Microsoft Word/LibreOffice
-neu erzeugte Dateien mit bewusst untypischer Bildgröße beschafft werden
-(Testplan-Hinweis 9 der Anforderung, offene Entscheidung 9.5 im Code-Plan).
-
-| # | Test | Fixtures | Prüfung | Status |
+| # | Test | Assertion | Bezug | Status |
 |---|---|---|---|---|
-| B42 | Import einer/mehrerer bildhaltiger DOCX-Fixture(s) aus `apache/poi`-Korpus (Namen erst nach Sichtung final, siehe 2.7) | TBD nach Sichtung | Import ohne Absturz, Bild sichtbar im Editor, unveränderter Export enthält dasselbe Bild mit derselben Größe (falls die Fixture eine von 300×200 px abweichende Größe enthält — genau das ist Pflicht-Testfall aus Anforderung 3.5) | **Blockiert bis Fixture-Sichtung abgeschlossen (Abschnitt 7 Punkt 1)** |
-| B43 | Import einer/mehrerer bildhaltiger ODT-Fixture(s) aus `tdf/odftoolkit`-Korpus | TBD nach Sichtung | analog, `svg:width`/`svg:height` bleibt erhalten (deckt F6 an einer **echten** Fremddatei ab, nicht nur synthetischem XML) | **Blockiert bis Fixture-Sichtung** |
-| B44 | Neu mit echtem Microsoft Word erzeugte Datei, Bild bewusst auf z. B. 5×5 cm gesetzt | manuell zu beschaffen (kein automatisierter Weg) | Rundreise erhält 5×5 cm (± Rundungstoleranz) | **Blockiert, externe Beschaffung nötig** (siehe Abschnitt 8) |
-| B45 | Neu mit echtem LibreOffice Writer erzeugte Datei, analog | manuell zu beschaffen | analog | **Blockiert, externe Beschaffung nötig** |
+| B1 | Cursor inmitten eines Wortes (Kernfall der Meldung) — `"HalloWelt"` tippen, per `ArrowLeft`-Serie (`delay:20`) mittig setzen, `waitForTimeout(50)`, echter Label-Klick-Upload eines Test-PNG | `.ProseMirror img` sichtbar; Editor enthält **beide** Teile „Hallo"/„Welt"; exakte Absatzanzahl `.ProseMirror p` = 2 | 3.2(c), zentraler Fehler | **GRÜN erwartet** — **erster** echter Browser-Beweis des Kernfalls |
+| B2 | Cursor am Absatzanfang (`Ctrl+Home`, **nicht** `Home` — 2.2) | Bild **vor** unverändertem Text | 3.2(a) | **GRÜN erwartet** |
+| B3 | Cursor am Absatzende (`End`, dann `waitForTimeout(50)`) | Bild **nach** unverändertem Text | 3.2(b) | **GRÜN erwartet** |
+| B4 | Cursor mitten in fett-Text (Wort markieren, `getByTitle('Fett')`, Cursor hinein) | Beide Teile bleiben **fett**, Bild nicht fett | 3.2(d) | **GRÜN erwartet** |
+| B5 | Cursor in leerem Absatz (neues Dokument) | Bild ersetzt Absatz, Editor weiter bedienbar | 3.2(e), 3.8 | **GRÜN erwartet** |
+| B6 | Cursor inmitten einer Überschrift („Überschrift 1" wählen) | Zwei Überschriften gleichen Levels, Bild dazwischen, kein Crash — **Ergebnis protokollieren** (offene Entscheidung 9.3) | 2.8, 9.3 | **Dokumentationspflichtig** |
+| B7 | Cursor in Listenpunkt (`getByTitle('Aufzählung')`) | Bild **innerhalb** des `<li>`, `<ul>` bleibt (kein Listenabbruch) | 2.8 | **GRÜN erwartet** |
+| B8 | Cursor in Tabellenzelle (`Tabelle einfügen`, in Zelle klicken) | Bild **innerhalb** der Zelle, übrige Zellen bedienbar | 2.8 | **GRÜN erwartet** |
+| B9 | Bestehende Textselektion wird ersetzt | Markierter Text weg, Bild an seiner Stelle | 2.2 | **GRÜN erwartet** |
+| B10 | Bild am Dokumentanfang/-ende | Editor bedienbar, Cursor davor/danach setzbar, Text eintippbar | 3.8 | **GRÜN erwartet** |
+| B11 | Bild direkt vor/nach Tabelle bzw. Liste | keine Vermischung/Verschiebung der Nachbarstruktur | 3.9 | **GRÜN erwartet** |
 
-### 3.11 Datei-Upload: echter `filechooser`, nicht nur `setInputFiles` auf versteckten Input
+### 4.3 Undo/Redo (Anforderung 2.6, Grenzfall 3.11)
 
-Wie bereits in `aufzaehlungsliste-qa.md` 3.13 für Listen festgestellt: Die
-bestehenden Upload-Tests in `docx.spec.ts`/`odt.spec.ts` verwenden
-`input.setInputFiles(...)` direkt auf dem versteckten `<input type="file">`
-und umgehen damit den sichtbaren „Datei hochladen"-Button. Für **alle** neuen
-Tests in diesem Plan, die einen Datei-Upload auslösen (B1–B45, wo zutreffend),
-gilt: mindestens der **erste** Testfall jeder Testgruppe (z. B. B1 für den
-Grundfall, B15 für Formatprüfung, B42/B43 für Fixtures) muss über den
-tatsächlichen Klickpfad laufen
-(`page.waitForEvent('filechooser')` + Klick auf das sichtbare Bedienelement +
-`fileChooser.setFiles(...)`) — nicht nur `setInputFiles` auf den versteckten
-Input. Für Wiederholungen derselben Interaktion innerhalb einer Testgruppe
-(z. B. B2–B11, die alle denselben Upload-Mechanismus mit unterschiedlicher
-Cursor-Position testen) ist `setInputFiles` auf den bereits als korrekt
-nachgewiesenen Input akzeptabel, um Testlaufzeit zu sparen — dies muss aber
-im jeweiligen Testkommentar explizit vermerkt sein, damit die Abgrenzung
-„mindestens einmal echter Klickpfad pro Interaktionsart" nachvollziehbar
-bleibt.
+Determinismus: **vor dem Einfügen `waitForTimeout(600)` (2.4)**, damit Einfügen ein
+eigener Undo-Schritt ist; Bild-Sichtbarkeit vor dem Undo abwarten.
 
-### 3.12 Unabhängige Prüfung der heruntergeladenen Datei (nicht nur `.toContain`)
+| # | Test | Assertion | Bezug | Status |
+|---|---|---|---|---|
+| B12 | Undo nach Einfügung inmitten eines Absatzes: nach B1 (mit 600-ms-Settle vor dem Upload) `ControlOrMeta+z` | Bild weg; **ein** zusammenhängender Absatz `"HalloWelt"` (nicht zwei Reste) | 2.6, 3.11 | **GRÜN erwartet** |
+| B13 | Redo (`ControlOrMeta+y` bzw. `ControlOrMeta+Shift+z`) | Bild inkl. aller Attribute identisch zurück | 2.6 | **GRÜN erwartet** |
+| B14 | Undo/Redo bei Einfügung am Dokumentanfang/-ende | einzelner sauberer Undo-Schritt | 2.6 | **GRÜN erwartet** |
 
-Für alle Rundreise-/Größen-Tests (B23–B36) gilt zwingend strukturelles Parsen
-statt String-Suche, analog dem in `aufzaehlungsliste-qa.md` 3.14 etablierten
-Muster:
+### 4.4 Tippen unmittelbar nach dem Einfügen (Anforderung 2.1.4/3.12)
+
+Determinismus (kritisch): **erst `await expect(editor.locator('img')).toBeVisible()`
+(2.3), dann tippen** — sonst rennt der Tastendruck der async-Einfüge-Kette voraus
+und der Test misst einen Race, nicht das Produktverhalten.
+
+| # | Test | Assertion | Bezug | Status |
+|---|---|---|---|---|
+| B15 | Bild einfügen → Bild sichtbar abwarten → sofort tippen | Bild **bleibt**, Text erscheint **dahinter** (Sollverhalten). Falls die Produktentscheidung „NodeSelection auf Bild belassen" fällt: dokumentiertes Alternativverhalten (Tippen ersetzt Bild) explizit als solches asserten | 2.1.4/3.12, offene Entscheidung 9.3 | **Ausgang offen bis Entscheidung** — heute: `NodeSelection` bleibt, Tippen ersetzt das Bild |
+
+### 4.5 Formatprüfung / Fehlerbehandlung (Anforderung 2.3, Grenzfall 3.3 — bestätigter Defekt)
+
+Determinismus: `watchForConsoleErrors(page)` **vor** der Aktion setzen,
+`assertNoConsoleErrors()` am Ende (fängt die unbehandelte Promise-Ablehnung).
+
+| # | Test | Assertion | Bezug | Status |
+|---|---|---|---|---|
+| B16 | Nicht-Bild-Datei mit Bild-Endung (`{ name:'bild.png', mimeType:'text/plain', buffer:<txt> }`) | sichtbare Fehlermeldung (`getByRole('alert')`); **kein** `<img>` im DOM; **keine** `pageerror`/Konsolen-Fehler | 2.3, 3.3, F3 | **ROT** — heute kein Check, Datei wird als kaputtes `<img>` eingefügt |
+| B17 | 0-Byte-Datei | Fehlermeldung, keine Einfügung | 2.3 | **ROT** — kein Leer-Check |
+| B18 | Beschädigtes Bild (gültiger PNG-Header, abgeschnittener Rumpf) | Fehlermeldung statt kaputtem `<img>` (greift `Image.onerror`, Code-Plan 4.2) | 3.3 | **ROT** — keine Dekodier-Prüfung |
+| B19 | Dialog-Abbruch (`filechooser`-Event, dann **keine** Datei: `fileChooser.setFiles([])`) | keine Änderung, kein Fehler | 2.3 (`if (!file) return`) | **GRÜN erwartet** (einziger bereits korrekter Pfad, mit Test abzusichern) |
+| B20 | **Dieselbe Datei zweimal** hintereinander wählen | beide Male eingefügt (Regression für `input.value = ''`-Reset) | 2.3 | **GRÜN erwartet** |
+
+### 4.6 Größe/Seitenverhältnis nach Export (Grenzfall 3.4 — bestätigter Verzerrungs-Defekt)
+
+Prüfung **strukturell** (4.12), nicht per String. Determinismus: nach Upload Bild
+sichtbar abwarten, **dann** exportieren (`waitForEvent('download')`).
+
+| # | Test | Assertion | Bezug | Status |
+|---|---|---|---|---|
+| B21 | 1:1-Bild (40×40) → DOCX-Export, `word/document.xml` parsen, `<wp:extent cx cy>` | `cx/cy ≈ 1:1` (±Toleranz) | 3.4, 5.1 | **ROT** — ohne Maße erzwingt Writer 300×200 (3:2) |
+| B22 | Dasselbe Bild → ODT-Export, `content.xml` → `svg:width`/`svg:height` (NS `…:svg-compatible:1.0`) | Verhältnis 1:1 | 3.4, 5.1 | **ROT** — ODT-Fallback 6×4 cm (3:2) |
+| B23 | 16:9-Bild (160×90) → DOCX **und** ODT | Verhältnis ≈ 16:9, **nicht** 3:2 | 3.4 | **ROT** |
+| B24 | Editor-Rendergröße vs. Export-Größe direkt gegenübergestellt (`.ProseMirror img` `boundingBox()` vs. Export-Maße) | vor Fix: `expect(editorRatio).not.toBeCloseTo(exportRatio)`; nach F1: `toBeCloseTo` | 2.4, 3.4 | **ROT (Diskrepanz)** — nach F1 zu Gleichheits-Assert umkehren |
+
+### 4.7 Rundreise DOCX/ODT über echten Upload/Export (Anforderung 5.1.1/5.1.2 und 5.1.5–5.1.12)
+
+Determinismus: für Reimport den echten Karten-Upload-Pfad (1) nutzen; Bild-
+Sichtbarkeit nach jedem Import abwarten.
+
+| # | Test | Assertion | Bezug | Status |
+|---|---|---|---|---|
+| B25 | DOCX, reine Editor-Erzeugung: Text → Cursor mittig (50-ms-Sync) → Bild (echter Flow) → Export → über echten Karten-Upload reimportieren | Bild an gleicher relativer Position, beide Textteile da, unverzerrt (Verhältnis wie B21) | 5.1.1 | **Teilweise ROT** (Position/Text grün, Größe rot bis F1/F5) |
+| B26 | ODT, analog | analog | 5.1.2 | **Teilweise ROT** |
+| B27 | Bild löschen, dann exportieren: Bild einfügen, anklicken (`NodeSelection`), `Delete`, exportieren | Export-Zip enthält **kein** verwaistes `word/media/*` bzw. `Pictures/*`; kein verwaister Relationship-/Manifest-Eintrag | 5.1.10 | **GRÜN erwartet** (vgl. `cut.spec.ts` Rundreise 6, dort bereits grün) |
+| B28 | Mehrere Bilder (≥ 3, unterschiedliche Positionen) einfügen, exportieren, reimportieren | alle drei einzeln, unterscheidbar, positionsrichtig | 5.1.9 | **GRÜN erwartet** (Struktur), Größe rot |
+| B29 | **5.1.11 unabhängige DOCX-Struktur:** exportiertes `<w:drawing>` per `DOMParser` (NS `wp`/`a`/`pic`/`r`): `wp:extent`, `a:blip[@r:embed]`, `pic:pic` vorhanden; `r:embed` löst über `document.xml.rels` zu vorhandener `media/*`-Datei auf; **alle `wp:docPr/@id` eindeutig** | alle Pflichtelemente + eindeutige IDs | 5.1.11, F15 | **Struktur GRÜN erwartet; ID-Eindeutigkeit ROT bis F15** |
+| B30 | **5.1.12 unabhängige ODT-Struktur:** `draw:image[@xlink:href]` referenziert vorhandene Zip-Datei **und** hat `<manifest:file-entry>` in `META-INF/manifest.xml` | Referenz + Manifest-Eintrag korrekt | 5.1.12 | **GRÜN erwartet (Struktur)** |
+| B31 | **F8 auf E2E-Ebene:** exportiertes ODT — `getAttributeNS(svg,'width')` matcht `/^[\d.]+(cm|mm|in|pt|pc)$/`, **nicht** `px` | keine `px`-Einheit | Neufund/F8 | **ROT** — Writer schreibt heute `px` |
+| B32 | Cross-Format DOCX → ODT (5.1.5): Bild in DOCX → Export → über ODT-Karte hochladen → als ODT exportieren | Bild, Alt-Text, Größe (umgerechnet) erhalten | 5.1.5 | **Teilweise ROT** (Größe) |
+| B33 | Cross-Format ODT → DOCX (5.1.6), umgekehrt | analog | 5.1.6 | **Teilweise ROT** |
+| B34 | Doppelte Rundreise DOCX → ODT → DOCX (5.1.7) | inhaltlich identisch, kein kumulativer Maßverlust | 5.1.7 | **Teilweise ROT** |
+
+> **Hinweis zu 5.1.11 (mammoth):** Der DOCX-„external-validation"-Kanal
+> (`docx/__tests__/external-validation.test.ts`, mammoth) ist **tolerant** und
+> erzwingt die `wp:docPr/@id`-Eindeutigkeit **nicht** (Code-Plan Revision Punkt 8).
+> Die eigentliche Eindeutigkeits-Assertion ist daher der XML-Parse (D4 auf Unit-,
+> B29 auf E2E-Ebene), **nicht** der mammoth-Lauf allein.
+
+### 4.8 Toolbar-Bedienbarkeit (Anforderung Abschnitt 1 — F2)
+
+| # | Test | Assertion | Bezug | Status |
+|---|---|---|---|---|
+| B35 | Kontrolleintrag ist **kein** per Rolle auffindbarer Button (`getByRole('button', { name: 'Bild einfügen' })`) | `toHaveCount(0)` — bewusster Lückennachweis | F2, §1 | **Heute GRÜN** (0 Treffer korrekt); wird nach F2 **rot** und dann durch B36/B37 abgelöst (nicht gelöscht) |
+| B36 | Nach F2: `Tab` bis `getByRole('button', { name: 'Bild einfügen' })` (`toBeFocused()`), `Enter` | `waitForEvent('filechooser')` löst aus | F2, §1 | **Blockiert bis F2** |
+| B37 | Nach F2: Leertaste statt Enter | Dialog öffnet | F2 | **Blockiert bis F2** |
+| B38 | Icon ohne Emoji-Font erkennbar: `svg`-Element im Kontrolleintrag vorhanden | SVG vorhanden | §1 Zeile 3, F2 | **ROT** — heute nur Unicode-Emoji „🖼" |
+
+### 4.9 Selektions-Sync-Regression mit Bild als Auslöser (Grenzfall 3.1, Anforderung 6.9 — Pflicht)
+
+**Erweiterung von `tests/e2e/selection-regression.spec.ts`** (neuer `test`-Block,
+gleiche Datei, gleiches Muster wie die drei bestehenden Tests — inkl. deren
+`waitForTimeout(50)` nach `End`/`ArrowUp`, siehe 2.2). Bild-Einfügen ersetzt „Fett"
+als dritte Trigger-Aktion.
+
+| # | Test | Assertion | Bezug | Status |
+|---|---|---|---|---|
+| B39 | Text → Bild (echter Flow) → Klick zur Neupositionierung → `End` → `waitForTimeout(50)` → `Enter` → weiter tippen | kein Textverlust, `.ProseMirror p`-Anzahl wie erwartet, Bild an ursprünglicher Position | 3.1, §6.9 | **GRÜN erwartet** (strukturell korrekt laut 1.7) — **muss ausgeführt** werden |
+| B40 | Stress: ≥ 3 Zyklen Text → Bild → Klick → 50-ms-Sync → `Enter` | stabil, keine kumulative Verschlechterung | 3.1 | **GRÜN erwartet** |
+
+### 4.10 Weitere Grenzfälle (Anforderung Abschnitt 3)
+
+| # | Test | Assertion | Bezug | Status |
+|---|---|---|---|---|
+| B41 | Schnelles Einfügen mehrerer Bilder (3.10): drei verschiedene Bilder nacheinander, Cursor je Tastatur neu setzen (je 50-ms-Sync), Bild-Sichtbarkeit je Schritt abwarten | jedes an der **jeweils** aktuellen Position, nicht alle an derselben veralteten | 3.10 | **GRÜN erwartet** |
+| B42 | Großdatei (3.7): Bild nahe `MAX_IMAGE_BYTES` (bzw. 10–20 MB) über echten Upload, Zeit bis Sichtbarkeit messen | Zeit protokolliert (kein hartes Zeitlimit → CI-Flakiness vermeiden), UI danach bedienbar (Toolbar-Klick funktioniert) | 3.7, Hinweis 11 | **Dokumentationspflichtig** (Ist-Verhalten messen, nicht vermuten) |
+| B43 | Datei über `MAX_IMAGE_BYTES` (nach F4) | Fehlermeldung statt Einfügung | F4, 3.7 | **Blockiert bis F4 + Grenzwert-Freigabe** |
+| B44 | Transparenz-PNG / animiertes GIF (3.14): einfügen → exportieren → reimportieren | Bytes/Format erhalten (PNG-Alpha bleibt, GIF nicht zu Standbild anderer Kodierung) | 3.14 | **GRÜN erwartbar** (Bytes werden unverändert eingebettet) — verifizieren |
+| B45 | Externe URL nicht exportierbar (3.15): Bild-Node mit `src="https://…"` über per Zwischenablage eingefügtes `<img>`-HTML → Export | sichtbare Fehlermeldung statt stillem Abbruch (`ImageCollector.add` wirft) | 3.15, §20.4 | **Ausgang offen** — heute: Wurf; ob die UI ihn sichtbar macht, ist zu prüfen (vgl. `export-error-handling.spec.ts`) |
+
+### 4.11 Reale Fixture-Dateien (Anforderung 6.10, Abnahmekriterium 8 — abhängig von 0.2)
+
+| # | Test | Fixture | Prüfung | Status |
+|---|---|---|---|---|
+| B46 | Import bildhaltiger DOCX-Fixture | `headerPic.docx` (quadratisch ≈ 80×80, in `header1.xml`), `drawing.docx` (mehrere Bilder), `WithGIF.docx` | Import ohne Absturz, Bild sichtbar; unveränderter Export erhält Bild **und** reale Größe (nicht 300×200); Kopfzeilen-Kontext (5.1.8) | **ROT** (Größe) bis F5/F6; Struktur **grün** — abhängig von 0.2 |
+| B47 | Import bildhaltiger ODT-Fixture | `image-attributes.odt` (`svg:width` `2.147cm`…), `imageAsChar.odt`, `image.odt` | analog, `svg:width`/`svg:height` erhalten (F6 an **echter** Fremddatei) | **ROT** bis F6 — abhängig von 0.2 |
+| B48 | Neu mit echtem Word erzeugte Datei, Bild bewusst 5×5 cm | manuell zu beschaffen (siehe 8), **nur falls** die vorhandenen Korpora 5.1.5/5.1.6 nicht abdecken | Rundreise erhält 5×5 cm (±Toleranz) | **Blockiert, ggf. entbehrlich nach 0.2** |
+| B49 | Neu mit echtem LibreOffice erzeugte Datei, analog | manuell | analog | **Blockiert, ggf. entbehrlich** |
+
+### 4.12 Unabhängiges, strukturelles Parsen der heruntergeladenen Datei (nicht `.toContain`)
+
+Für **alle** Größen-/Rundreise-Tests (B21–B34, B44) verbindlich, analog dem
+etablierten Muster (`cut.spec.ts` Rundreise, `roundtrip-fidelity.spec.ts`):
 
 ```ts
-import { JSDOM } from 'jsdom' // bereits Devdependency, kein neues Package nötig
-const parser = new JSDOM('').window.DOMParser()
-const xmlDoc = parser.parseFromString(documentXml, 'application/xml')
+const zip = await JSZip.loadAsync(await fs.readFile((await download.path())!))
+const documentXml = await zip.file('word/document.xml')!.async('text')
+const xmlDoc = new DOMParser().parseFromString(documentXml, 'application/xml')
 const WP_NS = 'http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing'
 const extents = [...xmlDoc.getElementsByTagNameNS(WP_NS, 'extent')]
-expect(extents).toHaveLength(1)
+expect(extents).toHaveLength(<erwartete Bildanzahl>)
 const cx = Number(extents[0]!.getAttribute('cx'))
 const cy = Number(extents[0]!.getAttribute('cy'))
 expect(cx / cy).toBeCloseTo(sourceWidthPx / sourceHeightPx, 1)
 ```
 
-Für ODT analog über `getAttributeNS(SVG_NS, 'width'/'height')` +
-`parseOdfLength`-äquivalente Umrechnung im Testcode (unabhängig vom
-Produktionscode implementiert, um eine zirkuläre Prüfung — „der Writer prüft
-sich selbst" — zu vermeiden).
+ODT analog über `getAttributeNS(SVG_NS, 'width'/'height')`, mit im **Testcode**
+(nicht aus dem Produktionscode importierter) Einheiten-Umrechnung — sonst „der
+Writer prüft sich selbst". Maß-Toleranz gemäß Anforderung 5.3 (px↔EMU/cm bei 96 dpi,
+±1 px) im Test festschreiben.
 
-### 3.13 Bestehende Tests, die unverändert weiterlaufen müssen
+### 4.13 Cross-Browser-Matrix
 
-- `tests/e2e/selection-regression.spec.ts` (alle bestehenden 3 Tests) —
-  **Pflichtbestandteil**, bleibt bestehen, wird um B37/B38 ergänzt (nicht
-  ersetzt).
-- `tests/e2e/docx.spec.ts`, `tests/e2e/odt.spec.ts` — bleiben bestehen, decken
-  andere, nicht bildbezogene Aspekte ab.
-- `tests/e2e/lifecycle.spec.ts` — unverändert, keine Bild-Berührung erwartet.
-
-### 3.14 Cross-Browser-Matrix
-
-| Testgruppe | Desktop Chrome | Mobile (Pixel 7) | Tablet (iPad Mini) | Anmerkung |
+| Testgruppe | Desktop Chrome | Mobile (Pixel 7) | Tablet (iPad Mini/WebKit) | Anmerkung |
 |---|---|---|---|---|
-| Klick-/Upload-basierte Tests (B1–B19, B22–B36, B39, B42–B45) | Pflicht | Pflicht | Pflicht | `.click()`/`setFiles()` funktionieren projektunabhängig |
-| Tastatur-only-Tests (B20, B21) | Pflicht | Best-effort/dokumentieren | Best-effort/dokumentieren | Touch-Geräte ohne Hardware-Tastatur — `page.keyboard.press` bleibt über CDP auslösbar, reales Nutzer:innen-Verhalten auf Touch-Geräten separat dokumentieren |
-| Undo/Redo, Selection-Sync (B12–B14, B37–B38) | Pflicht | Pflicht | Pflicht | Tastenkombinationen via `page.keyboard` unabhängig vom Projekt |
-| Großdatei-Timing (B40) | Pflicht (Referenzwert) | Dokumentieren (ggf. abweichende Performance-Charakteristik mobiler Emulation) | Dokumentieren | Kein hartes Cross-Device-Zeitlimit |
+| Klick-/Upload-Tests (B1–B35, B38–B47) | Pflicht | Pflicht | Pflicht | `.click()`/`setFiles()` projektunabhängig |
+| Tastatur-only (B36, B37) | Pflicht | Best-effort/dokumentieren | Best-effort/dokumentieren | Touch ohne Hardware-Tastatur; `keyboard.press` bleibt via CDP auslösbar |
+| Undo/Redo, Selection-Sync (B12–B14, B39–B40) | Pflicht | Pflicht | Pflicht | Determinismus-Waits aus 2.2/2.4 zwingend |
+| Großdatei-Timing (B42) | Pflicht (Referenz) | Dokumentieren | Dokumentieren | kein hartes Cross-Device-Limit |
+| Clipboard-abhängige Fälle (nur B45, falls über Zwischenablage) | Pflicht | Pflicht (Chromium) | `test.skip(webkit)` (2.6) | WebKit-Clipboard-Grenze |
+
+### 4.14 Bestehende Tests, die unverändert weiterlaufen müssen
+
+- `selection-regression.spec.ts` (alle 4 bestehenden Tests) — **Pflicht**, bleibt,
+  wird um B39/B40 **ergänzt**.
+- `cut.spec.ts` (Testfall 8, Rundreise 6 nutzen Bild-Upload) — **Pflicht**, dürfen
+  durch die neuen Tests **nicht** brechen.
+- `clipboard.spec.ts`, `export-error-handling.spec.ts` (Bild-Upload) — bleiben.
+- `docx.spec.ts`, `odt.spec.ts`, `lifecycle.spec.ts` — unverändert.
 
 ---
 
-## 4. Traceability-Matrix
+## 5. Traceability-Matrix
 
-### 4.1 Anforderung Abschnitt 2 (Gewünschtes Verhalten) → Testfall(e)
+### 5.1 Anforderung Abschnitt 2 → Testfall(e)
 
-| §2, Abschnitt | Testfall(e) |
+| §2 | Testfall(e) |
 |---|---|
-| 2.1 Grundfall Cursor-Position | B1–B3 (Unit: CI1–CI3) |
-| 2.2 Einfügen über Selektion | B9 (Unit: CI12) |
-| 2.3 Dateiauswahl/Formatprüfung | B15–B18 (Unit: IV1–IV4) |
-| 2.4 Bildgröße beim Einfügen | B23–B26 (Unit: IV5–IV7) |
-| 2.5 Alt-Text | O1 (bereits teilweise durch bestehenden ODT-Test abgedeckt, siehe 2.1) |
+| 2.1 Grundfall Cursor-Position | B1–B3 (Unit CI1–CI3) |
+| 2.2 Einfügen über Selektion | B9 (Unit CI12) |
+| 2.3 Dateiauswahl/Formatprüfung | B16–B20 (Unit IV1–IV4) |
+| 2.4 Bildgröße beim Einfügen | B21–B24 (Unit IV5–IV7) |
+| 2.5 Alt-Text | O1, bestehende ODT-Roundtrip-Basis (3.1) |
 | 2.6 Undo/Redo | B12–B14 |
-| 2.7 Zusammenspiel mit Löschen | B29 |
-| 2.8 Geltungsbereich Dokumentstruktur | B6–B8 (Unit: CI7–CI11) |
+| 2.7 Zusammenspiel mit Löschen | B27 |
+| 2.8 Geltungsbereich Dokumentstruktur | B6–B8 (Unit CI7–CI11) |
 
-### 4.2 Anforderung Abschnitt 3 (Grenzfälle) → Testfall(e)
+### 5.2 Anforderung Abschnitt 3 (Grenzfälle) → Testfall(e)
 
 | Grenzfall | Testfall(e) |
 |---|---|
-| 3.1 Cursor-Position nach Toolbar-Klick (Selection-Sync) | B37, B38 |
-| 3.2 Text-Absatz-Teilung (Kernverdacht) | B1–B6, CI1–CI8 |
-| 3.3 Fehlende MIME-Prüfung | B15–B17, IV1–IV4 |
-| 3.4 Diskrepanz Editor-Darstellung vs. Export-Größe | B23–B26 |
-| 3.5 Verlust der Bildgröße bei Fremddatei-Rundreise | D3, O2, B42–B45 |
-| 3.6 Mehrere Bilder mit identischem Binärinhalt | D7, O6, B30 |
-| 3.7 Sehr große Bilddatei | B40, B41, IV8 |
+| 3.1 Selection-Sync nach Toolbar-Klick | B39, B40 |
+| 3.2 Text-Absatz-Teilung (Kernfall) | B1–B6, CI1–CI8 |
+| 3.3 Fehlende Formatprüfung | B16–B18, IV1–IV4 |
+| 3.4 Diskrepanz Darstellung vs. Export-Größe | B21–B24 |
+| 3.5 Größenverlust Fremddatei-Rundreise | D3, O2, B46–B49 |
+| 3.6 Mehrere/identische Bilder | D7, O6, B28 |
+| 3.7 Sehr große Bilddatei | B42, B43, IV8 |
 | 3.8 Bild am Dokumentanfang/-ende | B10, CI2/CI3 |
-| 3.9 Bild neben anderem Block-Element | B11 |
-| 3.10 Wiederholtes schnelles Einfügen | B39 |
+| 3.9 Bild neben anderem Block | B11 |
+| 3.10 Schnelles Einfügen mehrerer Bilder | B41 |
 | 3.11 Undo nach Absatz-Teilung | B12 |
+| 3.12 Tippen unmittelbar nach Einfügen | B15 |
+| 3.13 EXIF-Orientierung | (dokumentiert, min. B44-nah; kein Auto-Test — jsdom/Playwright dekodieren EXIF nicht zuverlässig; als bekannte Grenze in 8) |
+| 3.14 Transparenz/GIF | B44 |
+| 3.15 Externe URL nicht exportierbar | B45 |
 
-### 4.3 Anforderung Abschnitt 5.1 (Rundreise-Pflicht-Szenarien 1–12) → Testfall(e)
+### 5.3 Anforderung 5.1 (Rundreise-Szenarien 1–12) → Testfall(e)
 
-| 5.1, Szenario | Testfall(e) |
+| 5.1 | Testfall(e) |
 |---|---|
-| 1. DOCX, reine Editor-Erzeugung | B27 |
-| 2. ODT, reine Editor-Erzeugung | B28 |
-| 3. DOCX-Fremddatei-Rundreise | B42, B44 |
-| 4. ODT-Fremddatei-Rundreise | B43, B45 |
-| 5. Cross-Format DOCX → ODT | B34, X1 |
-| 6. Cross-Format ODT → DOCX | B35, X2 |
-| 7. Doppelte Rundreise | B36, X3 |
-| 8. Bild in Tabellenzelle/Listenpunkt/Kopf-Fußzeile | B8, D4, D5, O5 |
-| 9. Mehrere Bilder im selben Dokument | B30, D6 |
-| 10. Bild löschen, dann exportieren | B29 |
-| 11. Validierung gegen unabhängigen Parser (DOCX) | B31 |
-| 12. Validierung ODT analog | B32, B33 |
+| 1. DOCX Editor-Erzeugung | B25 |
+| 2. ODT Editor-Erzeugung | B26 |
+| 3. DOCX-Fremddatei | B46, B48 |
+| 4. ODT-Fremddatei | B47, B49 |
+| 5. Cross-Format DOCX → ODT | B32, X1 |
+| 6. Cross-Format ODT → DOCX | B33, X2 |
+| 7. Doppelte Rundreise | B34, X3 |
+| 8. Bild in Zelle/Listenpunkt/Kopf-Fußzeile | B8, D5, D6, O5, B46 |
+| 9. Mehrere Bilder | B28, D4, D6 |
+| 10. Bild löschen, dann exportieren | B27 |
+| 11. Unabhängige DOCX-Validierung | B29, D4 |
+| 12. Unabhängige ODT-Validierung (mit Größe) | B30, B31, O3 |
 
-### 4.4 `bild-einfuegen-code.md` Fehlerliste (F1–F14) → Testfall(e)
+### 5.4 `bild-einfuegen-code.md` Fehlerliste (F1–F17) → Testfall(e)
 
 | # | Befund | Testfall(e) |
 |---|---|---|
-| F1 | `insertImage` setzt nie `width`/`height` | CI14, D1–D2, O1, O4, B23–B26 |
-| F2 | Toolbar-Element `<label>` statt `<button>`, kein `title`/`aria-label`, Emoji-Icon | B19–B22 |
-| F3 | Keine Formatprüfung (MIME/Magic-Number) | B15–B17, IV1–IV4 |
-| F4 | Keine Größenobergrenze/Messung | B40, B41 |
-| F5 | DOCX-Reader liest `wp:extent` nicht | D1, D3, B23, B27 |
-| F6 | ODT-Reader liest `svg:width`/`svg:height` nicht | O1, O2, B24, B28 |
-| F7 | Unterschiedliche, undokumentierte Ersatzgrößen DOCX/ODT | D2, O4 |
-| F8 | ODT-Writer schreibt ungültige `px`-Einheit | O3, B33 |
-| F9 | Keine `.ProseMirror-selectednode`-Stilregel | *(kein eigener Testfall in diesem Plan — gehört zum Löschen/Markieren-Verhalten von `bild-loeschen-req.md`; hier nur als Randbedingung von B29 relevant, siehe Abschnitt 8)* |
-| F10 | Schema-`validate` fehlt bei `width`/`height` | *(indirekt über IV/CI-Tests abgedeckt — kein separater Testfall nötig, reine Härtung ohne beobachtbares Verhalten)* |
-| F11 | Kein Unit-Test für `insertImage` selbst | CI1–CI14 (gesamter Abschnitt 2.2) |
-| F12 | Keine E2E-Tests für Bild-Einfügen | Gesamter Abschnitt 3 |
-| F13 | Keine `width`/`height`-Assertions in bestehenden Roundtrip-Tests | D1, O1 |
-| F14 | Keine realen Fixture-Dateien mit bekannter Größe eingebunden | EF1–EF2, B42–B45 |
+| F1 | `insertImage` setzt nie Maße | CI14, D1–D2, O1/O4, B21–B24 |
+| F2 | `<label>` statt `<button>`, kein Label/Icon | B35–B38 |
+| F3 | Keine Byte-Signatur-Prüfung | B16–B18, IV1–IV4 |
+| F4 | Keine Größenobergrenze | B42, B43, IV8 |
+| F5 | DOCX-Reader liest `wp:extent` nicht | D1, D3, B21, B25, B46 |
+| F6 | ODT-Reader liest `svg:width/height` nicht | O1, O2, B22, B26, B47 |
+| F7 | Zwei nicht umrechenbare Ersatzgrößen | D2, O4 |
+| F8 | ODT-Writer schreibt `px` | O3, B31 |
+| F9 | Keine `.ProseMirror-selectednode`-Regel | *(Slug `bild-loeschen`; hier nur Randbedingung von B27 — kein eigener Fall, siehe 8)* |
+| F10 | Schema `validate` fehlt | *(indirekt über IV/CI; reine Härtung ohne beobachtbares Verhalten)* |
+| F11 | Kein Unit-Test für `insertImage` | CI1–CI14 |
+| F12 | Keine E2E-Tests | gesamter Abschnitt 4 |
+| F13 | Keine Maß-Assertions im Roundtrip | D1, O1 |
+| F14 | Keine realen Fixtures eingebunden | EF1–EF2, B46–B49 |
+| F15 | Feste `wp:docPr/@id` ⇒ ID-Kollision | D4, B29 |
+| F16 | Alt-Text aus `@name` statt `@descr` | *(dokumentiert; optionaler Reader-Fix, Unit-Zusatz zu D-Reihe möglich — siehe 8)* |
+| F17 | `.emf`/`.wmf`/`.tiff` ⇒ leeres Bild | *(dokumentiert; Zusatz-Unit-Fall bei Bedarf — siehe 8)* |
 
 ---
 
-## 5. Erwarteter Ist-Status je neuem Testfall (vor Umsetzung von `bild-einfuegen-code.md`)
+## 6. Erwarteter Ist-Status je neuem Testfall (vor Umsetzung von `bild-einfuegen-code.md`)
 
 | Status | Testfälle | Grund |
 |---|---|---|
-| **Erwartet ROT** (dokumentiert bestätigten Bug/bestätigte Lücke) | CI14, IV1–IV9, U1–U7, D1–D3, O1–O3, EF1, X1–X3, B15–B17, B22–B26, B31 (nur B33-Teil), B33, B34–B36 (Größenanteil), B41 | F1, F3, F4, F5, F6, F7, F8, F13, F14 — siehe Abschnitt 0 |
-| **Erwartet GRÜN** (sollte mit aktuellem Code bereits bestehen) | CI1–CI13, B1–B14, B18–B21 (B19 als bewusster Lückennachweis), B27–B30 (Struktur-/Positionsanteil), B37–B39, EF2, D4–D7 (Struktur), O5–O6 (Struktur) | Basiert auf laut `bild-einfuegen-code.md` 1.6/1.7 bereits korrektem, aber bislang **ungetestetem** Grundverhalten (`replaceSelectionWith`, Selektions-Timing, `ImageCollector`-Dedup, Zip-Struktur) |
-| **Blockiert** (kann erst nach anderer Umsetzung/Entscheidung geschrieben werden) | B20, B21 (F2), B41 (F4/Grenzwert), B42–B45 (Fixture-Sichtung/Beschaffung), IV9 (Formatliste-Freigabe) | siehe Abschnitt 7/8 |
-| **Dokumentationspflichtig, Ausgang offen** | B6 (Bild in Überschrift), B40 (Großdatei-Timing) | Tatsächliches Verhalten muss durch Ausführung ermittelt und festgehalten werden, bevor final „akzeptiert"/„abgelehnt" behauptet werden kann |
-| **Absichtlich als Lückennachweis geführt, bis F2 umgesetzt ist** | B19 | Wird dieser Test eines Tages rot, ist das ein *positives* Signal (Button existiert jetzt) — dann durch B20/B21 als primäre Tests ablösen, nicht nur löschen |
+| **Erwartet ROT** (belegter Bug/Lücke) | CI14, IV1–IV9, U1–U7, D1–D4, O1–O4, EF1, X1–X3, B16–B18, B21–B24, B31, B38; Größenanteil von B25/B26/B32–B34/B46/B47; ID-Anteil von B29 | F1/F3/F4/F5/F6/F7/F8/F13/F14/F15 |
+| **Erwartet GRÜN** (sollte heute schon bestehen) | CI1–CI13, D7, EF2, D5/D6/O5/O6 (Struktur), B1–B14, B19, B20, B27–B30 (Struktur/Position), B35 (Lückennachweis), B39–B41, B44 | laut Code-Analyse 1.6/1.7 korrektes, bislang **ungetestetes** Verhalten |
+| **Blockiert** | B36, B37 (F2), B43 (F4/Grenzwert), B46–B49 (0.2/Beschaffung), IV9 (Formatliste-Freigabe) | siehe 7/8 |
+| **Ausgang offen / dokumentationspflichtig** | B6 (Bild in Überschrift), B15 (Selektion nach Einfügen), B42 (Timing), B45 (externe URL) | Ist-Verhalten durch Ausführung ermitteln, bevor „akzeptiert"/„abgelehnt" behauptet wird |
 
-Sobald `bild-einfuegen-code.md` Abschnitt 4 (Fixes F1–F10) umgesetzt ist, müssen
-alle oben als „erwartet ROT" markierten Fälle auf GRÜN wechseln — das ist der
-konkrete, maschinell prüfbare Nachweis, dass die Fixes wirken (nicht nur
-Code-Review).
+Sobald `bild-einfuegen-code.md` Abschnitt 4 (F1–F8/F15) umgesetzt ist, müssen **alle**
+„erwartet ROT" auf GRÜN wechseln — der maschinell prüfbare Nachweis, dass die Fixes
+wirken.
 
 ---
 
-## 6. Abgleich mit der Definition of Done (`bild-einfuegen-req.md` Abschnitt 7)
+## 7. Ausführungsreihenfolge
 
-| DoD-Punkt | Abdeckung in diesem Testplan |
-|---|---|
-| 1. Alle Testfälle aus Abschnitt 2 über den echten `filechooser`-Flow grün | Abschnitt 3.2–3.5 (B1–B22) |
-| 2. Jeder Grenzfall aus Abschnitt 3 einzeln beantwortet, insbesondere 3.4/3.5 behoben oder bewusst dokumentiert | Traceability-Matrix 4.2; B23–B26 (3.4), D3/O2/B42–B45 (3.5) |
-| 3. Zentraler gemeldeter Fall (3.2) für **alle** Cursor-Positionen mit echtem Browser-Test abgesichert | B1–B6, CI1–CI8 |
-| 4. Alle zwölf Rundreise-Szenarien aus 5.1 grün, inkl. unabhängiger Validierungen und Szenario 8 | Traceability-Matrix 4.3, Abschnitt 3.7 |
-| 5. Selektions-Sync-Regressionstest mit Bild-Einfügen dauerhaft Teil der Suite | B37, B38 (Erweiterung von `selection-regression.spec.ts`) |
-| 6. MIME-Typ-/Formatprüfung implementiert und getestet | B15–B17, IV1–IV4 |
-| 7. Toolbar-Bedienelement erfüllt Mindeststandard (`title`/`aria-label`, tastaturerreichbar, Icon erkennbar) | B19–B22 |
-| 8. Reale Fixture-Dateien (Word **und** LibreOffice) mit bekannter, abweichender Bildgröße vorhanden und in Rundreise-Test eingebunden | B42–B45 — **aktuell vollständig blockiert, siehe 0.1/7/8** |
-
-**Zusätzlicher, in `bild-einfuegen-req.md` nicht enthaltener DoD-Ergänzungspunkt
-aus dieser QA-Prüfung:** Solange die in 0.1 dokumentierte Fixture-Sichtung
-nicht durchgeführt ist, kann DoD-Punkt 8 **nicht einmal begonnen** werden —
-das ist strenger als „lückenhaft", es ist „nicht startbereit". Dieser Punkt
-muss vor jeder weiteren Planung der Testfälle B42/B43 aufgelöst werden.
-
----
-
-## 7. Ausführungsreihenfolge (Vorschlag)
-
-1. **Fixture-Sichtung durchführen** (Abschnitt 2.7/0.1) — vor jeder weiteren
-   Arbeit an B42–B45/EF1: welche der 127 DOCX-/202 ODT-Fixtures enthalten
-   tatsächlich Bilder, mit welcher Größe. Ergebnis dieser Sichtung in dieses
-   Dokument nachtragen (Abschnitt 8).
-2. **CI1–CI14, IV1–IV9, U1–U7** (Abschnitt 2.2–2.4) zuerst schreiben —
-   schnellster, formatunabhängiger Nachweis von F1/F3/F4. CI1–CI13 dürfen
-   direkt grün laufen (dokumentieren bereits korrektes Verhalten), CI14/IV/U
-   bewusst rot.
-3. **D1–D7, O1–O6, X1–X3** (Abschnitt 2.5–2.8) — Reader/Writer-Rundreise-
-   Ebene, inkl. bewusst rot laufender Regressionstests für F5–F8.
-4. **Erweiterung `external-fixtures.test.ts`** (EF1–EF2) — abhängig von
-   Schritt 1.
-5. **`tests/e2e/images.spec.ts` Abschnitt 3.2–3.6** (B1–B22) — Grundbedienung,
-   Formatprüfung, Toolbar-Zustand.
-6. **`tests/e2e/images.spec.ts` Abschnitt 3.6–3.10** (B23–B45) — Größe/
-   Seitenverhältnis, Rundreise über echten Upload/Export, reale Fixtures.
-   B42–B45 bleiben blockiert, bis Schritt 1 abgeschlossen und ggf. externe
-   Word-/LibreOffice-Dateien beschafft sind (siehe Abschnitt 8).
-7. **Erweiterung `selection-regression.spec.ts`** (B37, B38).
-8. Nach Umsetzung von `bild-einfuegen-code.md` Abschnitt 4: alle als „ROT
-   erwartet" markierten Fälle erneut ausführen, Statuswechsel auf GRÜN
-   dokumentieren; `selection-regression.spec.ts` **vollständig** (auch die
-   drei bestehenden Tests) erneut laufen lassen.
-9. Traceability-Matrizen (Abschnitt 4) und DoD-Abgleich (Abschnitt 6) final
-   gegenprüfen, bevor der Backlog-Status auf „verifiziert" geändert wird.
+1. **Fixture-Sichtung (0.2)** — Messwerte der benannten Kandidaten bestätigen; Ergebnis in 8 nachtragen. Blockiert EF1/EF2/B46–B49.
+2. **CI1–CI14, IV1–IV9, U1–U7** (3.2–3.4) — schnellster, formatunabhängiger Nachweis von F1/F3/F4; CI1–CI13 grün, Rest bewusst rot.
+3. **D1–D7, O1–O6, X1–X3** (3.5–3.7) — Reader/Writer-Rundreise, inkl. **vor** dem Fix nachweislich roter Regressionen für F5/F6/F8/F15.
+4. **`external-fixtures.test.ts`** (EF1–EF2) — abhängig von 1.
+5. **`tests/e2e/images.spec.ts` 4.2–4.5** (B1–B20) — Grundbedienung, Tippen-nach-Einfügen, Formatprüfung. **Determinismus (Abschnitt 2) beim Schreiben zwingend anwenden.**
+6. **`tests/e2e/images.spec.ts` 4.6–4.11** (B21–B49) — Größe/Verhältnis, Rundreise, Toolbar, reale Fixtures.
+7. **`selection-regression.spec.ts`** um B39/B40 ergänzen.
+8. Nach Umsetzung von `bild-einfuegen-code.md` Abschnitt 4: alle „ROT erwartet" erneut ausführen, Statuswechsel dokumentieren; die bestehenden `selection-regression.spec.ts`/`cut.spec.ts`-Tests **vollständig** erneut laufen lassen (Regression).
+9. Traceability (5) und DoD-Abgleich (Abschnitt 6 unten) final gegenprüfen, bevor der Backlog-Status auf „verifiziert" gesetzt wird.
 
 ---
 
 ## 8. Offene Punkte für QA
 
-- **Fixture-Sichtung (Abschnitt 0.1/2.7/7 Punkt 1) ist die zentrale
-  Blockade dieses Plans.** Ohne sie können B42/B43/EF1 nicht geschrieben
-  werden und DoD-Punkt 8 bleibt unerfüllbar. Muss vor Testimplementierung
-  priorisiert werden.
-- **Externe Beschaffung echter Word-/LibreOffice-Dateien (B44/B45)** ist kein
-  automatisierbarer Schritt — erfordert manuelle Erstellung außerhalb dieses
-  Testplans (identisch zur in `bild-einfuegen-code.md` Abschnitt 5.3/9.5
-  benannten offenen Entscheidung). Falls die vorhandenen Korpora nach
-  Sichtung bereits geeignete Dateien enthalten, könnten B44/B45 entfallen —
-  das muss **nach** Schritt 1 entschieden werden, nicht vorher angenommen.
-- **Freigabe der Formatliste/Obergrenze (IV9, B41)** hängt von den in
-  `bild-einfuegen-code.md` Abschnitt 9, Punkt 1/2 benannten offenen
-  Entscheidungen (PNG/JPEG/GIF/WebP/BMP, `MAX_IMAGE_BYTES = 20 MB`) ab — diese
-  Tests können erst nach Freigabe exakt formuliert werden (aktuell nur als
-  Platzhalterwerte geführt, identisch zu den im Code-Plan vorgeschlagenen
-  Werten).
-- **B6 (Bild in Überschrift)** benötigt vor endgültiger Testformulierung eine
-  Produktentscheidung (offene Entscheidung 9.3 im Code-Plan: Ist
-  „Überschrift wird geteilt" das gewünschte Verhalten, oder soll das Bild
-  automatisch herausverschoben werden?). Der Test läuft so oder so, aber die
-  Assertion (welches Verhalten als „korrekt" gilt) kann erst nach dieser
-  Entscheidung endgültig fixiert werden.
-- **F9 (`.ProseMirror-selectednode`-CSS) und die damit verbundene
-  Markier-/Lösch-Bedienung** werden hier bewusst **nicht** mit eigenem
-  Testfall geführt — das gehört laut Abgrenzung in `bild-einfuegen-req.md`
-  Abschnitt 0 (Tabelle) und `bild-einfuegen-code.md` Abschnitt 0 zum
-  separaten Slug `bild-loeschen`. Bei Freigabe dieses Plans bestätigen, dass
-  diese Abgrenzung QA-seitig ebenfalls so akzeptiert wird (B29 prüft nur das
-  Lösch-*Ergebnis* im Export, nicht die visuelle Selektions-Rückmeldung
-  selbst).
-- **B40 (Großdatei-Timing)** benötigt einen projektweit konsistenten
-  Schwellenwert für „kein spürbares Einfrieren" — mit anderen Feature-QA-
-  Plänen (z. B. `datei-oeffnen-qa.md`) abgleichen, falls dort bereits ein
-  Wert etabliert ist, statt einen neuen, unkoordinierten Platzhalter
-  einzuführen.
-- **Alt-Text-Rundreise (Anforderung 2.5)** ist bewusst nur knapp behandelt
-  (bereits durch bestehenden ODT-Test teilweise abgedeckt, siehe 2.1) — der
-  **editierbare** Alt-Text selbst gehört zum separaten Slug `bild-alt-text`
-  und ist hier explizit **nicht** Gegenstand, analog zur Abgrenzung in beiden
-  Vorgängerdokumenten.
+- **Fixture-Sichtung (0.2)** ist die zentrale Vorbedingung für B46/B47/EF1 und
+  DoD-Punkt 8. Die Kandidaten sind aus `bild-einfuegen-code.md` 5.3 benannt; zu
+  bestätigen sind nur die gemessenen Größen (ein `unzip`-Wegwerf-Skript genügt).
+- **Externe Beschaffung (B48/B49)** ist kein automatisierbarer Schritt; **entfällt
+  ggf.**, falls die vorhandenen Korpora die Cross-Format-Fälle (5.1.5/5.1.6) bereits
+  abdecken — nach 0.2 entscheiden, nicht vorher annehmen.
+- **Formatliste/Obergrenze (IV9, B43)** — abhängig von den offenen Entscheidungen
+  im Code-Plan Abschnitt 9 (PNG/JPEG/GIF/WebP/BMP, `MAX_IMAGE_BYTES = 20 MB`). Erst
+  nach Freigabe exakt formulieren.
+- **B6 (Bild in Überschrift)** und **B15 (Selektion nach Einfügen)** — jeweils
+  Produktentscheidung (Code-Plan 9.3): Überschrift teilen vs. Bild herausschieben;
+  Textcursor hinter Bild vs. Bild markiert lassen. Der Test läuft so oder so; die
+  **Assertion** wird erst nach der Entscheidung endgültig fixiert (Ausgang zunächst
+  protokollieren, siehe CI7/B6).
+- **F9 (`.ProseMirror-selectednode`)** wird hier bewusst **nicht** mit eigenem Fall
+  geführt — gehört zum Slug `bild-loeschen`. B27 prüft nur das Lösch-**Ergebnis** im
+  Export, nicht die visuelle Selektions-Rückmeldung. QA-seitig bei Freigabe
+  bestätigen, dass diese Abgrenzung akzeptiert wird.
+- **F16 (`@descr`-Alt-Text)** und **F17 (`.emf`/`.wmf`/`.tiff`)** — im Code-Plan als
+  „dokumentiert"/optional eingestuft. Falls als Fix umgesetzt: je ein Unit-Zusatzfall
+  in der D-Reihe (Reader liest `@descr` bevorzugt) bzw. ein Fremd-Endungs-Fall
+  (nicht darstellbares Format ⇒ Platzhalter statt leerem `<img>`); sonst als bekannte
+  Grenze festhalten.
+- **B42 (Großdatei-Timing)** — projektweit konsistenten Schwellenwert für „kein
+  spürbares Einfrieren" mit anderen QA-Plänen abgleichen (z. B.
+  `datei-oeffnen-qa.md`), statt einen neuen Platzhalter einzuführen.
+- **3.13 (EXIF-Orientierung)** — als bekannte Automatisierungsgrenze festhalten:
+  headless Chromium/WebKit und jsdom liefern über `naturalWidth/naturalHeight` die
+  ungedrehten Maße; ein zuverlässiger automatisierter Verzerrungs-Nachweis ist nicht
+  gegeben. Mindestforderung (kein Absturz, kein Hochkant-Quer-Tausch) manuell prüfen.
+- **Determinismus-Review (Abschnitt 2)** — beim Code-Review von `images.spec.ts`
+  aktiv gegenprüfen: jede Sequenz „Cursor bewegen → Upload/Enter" trägt den 50-ms-
+  Sync-Wait, jede Shift-Arrow-Serie ein `delay`, jeder „ein Undo-Schritt"-Test den
+  600-ms-Settle, jede Bild-abhängige Folgeaktion ein vorheriges
+  `toBeVisible()`. Fixe Timeouts **nur** an diesen Stellen, nie als Assertion-Ersatz.
+
+---
+
+## 9. Abgleich mit der Definition of Done (`bild-einfuegen-req.md` Abschnitt 7)
+
+| DoD-Punkt | Abdeckung |
+|---|---|
+| 1. Kernfall (3.2/2.1.3) für **alle** Cursor-Positionen per echtem Browser-Test | B1–B6, CI1–CI8 |
+| 2. Größe-Rundreise (3.5/3.4) behoben, Unit **und** E2E abgesichert | D1/D3/O1/O2 + B21–B26, B46/B47 |
+| 3. Alle 12 Rundreise-Szenarien (5.1) grün, inkl. unabhängiger Validierungen + Szenario 8 | 5.3-Matrix; B29/B30/B31, B8/D5/D6/O5 |
+| 4. Mehrere Bilder: eindeutige `wp:docPr/@id`; Mehr-/Identisch-Bilder positionsrichtig | D4, B29, D7, B28 |
+| 5. Formatprüfung (Byte-Signatur), Fehlermeldung, keine unhandled Rejection | B16–B18, IV1–IV4 (+ `assertNoConsoleErrors`) |
+| 6. Selektion nach Einfügen (2.1.4/3.12) | B15 |
+| 7. Selection-Sync-Regression mit Bild dauerhaft in der Suite | B39, B40 |
+| 8. Bedienelement: `<button>` + `title`/`aria-label`, tastaturerreichbar, SVG-Icon; `.selectednode`-Markierung | B35–B38 (`.selectednode` via Slug `bild-loeschen`) |
+| 9. Robustheit: Großdatei, externe URL, EXIF, Transparenz/GIF | B42/B43, B45, 3.13 (manuell), B44 |
+| 10. Dieselbe-Datei-zweimal + Dialog-Abbruch abgesichert | B20, B19 |
+| 8b (Fixtures Word **und** LibreOffice) | B46–B49 — abhängig von 0.2 |
+
+Andernfalls ist der Backlog-Status auf **teilweise** zu setzen und die konkret
+offenen Teilpunkte hier nachzutragen.

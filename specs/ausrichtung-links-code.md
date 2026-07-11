@@ -3,134 +3,253 @@
 Rolle: Entwickler-Antwort auf `specs/ausrichtung-links-req.md`. Dieses Dokument prüft
 den **tatsächlichen** Code-Stand (nicht nur die in der Anforderung zitierten
 Zeilenangaben) gegen jede Behauptung der Spezifikation, führt zusätzlich **ausführbare**
-Reproduktionen einzelner Grenzfälle durch (nicht nur Codelektüre — siehe Methodik unten)
-und legt fest, welche Dateien wie geändert bzw. neu angelegt werden. Stil orientiert an
-`FEATURE-SPEC-DOCX-ODT.md`, `specs/fett-code.md` und `specs/unterstrichen-einfach-code.md`.
-Kein Punkt hier ist bereits umgesetzt — dies ist der Plan, nicht der Vollzug.
+Reproduktionen der kritischen Grenzfälle gegen den echten Produktivcode durch (nicht nur
+Codelektüre — siehe Methodik in Abschnitt 1) und legt fest, welche Dateien wie geändert
+bzw. neu angelegt werden. Stil orientiert an `FEATURE-SPEC-DOCX-ODT.md`, `specs/fett-code.md`
+und `specs/unterstrichen-einfach-code.md`. Kein Punkt hier ist bereits umgesetzt — dies ist
+der Plan, nicht der Vollzug.
+
+Alle Code-Referenzen (Symbolname **und** Zeilennummer) wurden am Arbeitsstand vom
+**2026-07-04** frisch gegen die Dateien im Working Tree geprüft. Verbindlicher Anker ist
+immer der **Symbolname**; die Zeilennummer ist eine Momentaufnahme.
+
+**Nachgeführt am 2026-07-05 (Re-Verifikation gegen den Working Tree nach dem
+„Ausschneiden"-Commit `9f8fa03` und den Folge-Commits `db61c89`/`175d86d`/`29cbc80`).** Der
+in `WordEditor.tsx` eingefügte `Shift-Delete`-/Cut-Pfad hat die dortige Keymap um ~8 Zeilen
+nach unten verschoben — **nur `WordEditor.tsx`** ist betroffen (die Cut-Commits berührten
+keine der übrigen Referenzdateien; die Folge-Commits betrafen ausschließlich
+Test-Flakiness/Clipboard-Permissions/CI-Skip). Alle `WordEditor.tsx`-Zeilenangaben in diesem
+Dokument sind daher **neu gesetzt**: Keymap `85–107` (vorher zitiert `77–99`), `Mod-b/i/u`
+`98–100` (vorher `90–92`), `dispatchTransaction` `125–133` (vorher `117–124`),
+`onChange`-Aufruf `128–130` (vorher `120–122`), `mouseup`-Handler (`onMouseUp`) `146–153`
+(vorher `138–145`); `reconcileSelectionOnClick` bleibt `43–50`. **Alle** Anker in
+`commands.ts`, `schema.ts`, `Toolbar.tsx`, `docx/reader.ts`+`writer.ts`,
+`odt/reader.ts`+`writer.ts`+`styleRegistry.ts` und `documentModel.ts` wurden erneut Zeile für
+Zeile gegen den Working Tree geprüft und sind **unverändert korrekt**. Genau dieses
+Nachziehen (statt „sieht plausibel aus, übernehme ich") ist die vom Korrekturhinweis in
+`ausrichtung-links-req.md` geforderte Disziplin — und bestätigt den Anker-vor-Zeile-Grundsatz:
+der einzige durch die Cut-Commits ungültig gewordene Bezug ist ein reiner Zeilenversatz in
+**einer** Datei, kein Symbol.
+
+**Unabhängige Entwickler-Re-Verifikation (2026-07-05, gegen denselben Working Tree nach
+`29cbc80`).** Statt die vorherigen Prüfvermerke zu übernehmen, wurde in dieser Runde erneut
+direkt am Code und an echten Artefakten geprüft, nicht nur gelesen:
+
+- **Alle** Symbol-/Zeilenanker aus Abschnitt 2 wurden erneut Zeile für Zeile gegen
+  `commands.ts`, `schema.ts`, `Toolbar.tsx`, `WordEditor.tsx`, `docx/reader.ts`+`writer.ts`,
+  `odt/reader.ts`+`writer.ts`+`styleRegistry.ts`, `documentModel.ts` gelesen — **exakt**
+  bestätigt, keine Korrektur nötig.
+- **Fehler 1 (kritisch) erneut durch tatsächliche Ausführung reproduziert** (frischer,
+  eigenständiger Wegwerf-`vitest`-Test gegen den echten `setAlign` + echtes `wordSchema` +
+  eine echte `EditorView` mit der `dispatchTransaction`-Verdrahtung aus `WordEditor.tsx`):
+  zwei zentrierte Absätze, Selektion über beide, `setAlign('left')` → wirft
+  `RangeError: Applying a mismatched transaction` (Stacktrace zeigt den Wurf exakt in
+  `commands.ts:21` innerhalb von `Fragment.nodesBetween`); Doc-Zustand danach
+  `['left','center']` — **identisch** zum in Abschnitt 3.1 dokumentierten Befund.
+- **Fehler 2 ebenfalls erneut reproduziert:** 3×3-Tabelle, `CellSelection.create` über die
+  mittlere Spalte → `ranges.length === 3`, aber nach `setAlign('left')` ist nur **eine** der
+  drei Zellen der Spalte auf `left` (die übrigen acht Absätze — inkl. der zwei anderen
+  Zellen derselben Spalte — bleiben `center`) — bestätigt „Unter-", nicht „Überanwendung".
+- **Fehler 3/4/5 erneut mit den echten Fixtures nachvollzogen** (Zip-Entpacken +
+  direkter XML-Textvergleich, unabhängig vom eigenen Reader): `bug-paragraph-alignment.docx`
+  — Absatz 1 `<w:pStyle w:val="Title"/>` ohne eigenes `<w:jc>`, `styles.xml`-Stil `Title` mit
+  `<w:jc w:val="center"/>`, Absatz 2 zusätzlich direktes `<w:jc w:val="left"/>` — **exakt**
+  wie in Abschnitt 3.3 zitiert. `EasyList.odt` → ausschließlich `fo:text-align="end"` (3×),
+  `FruitDepot-SeasonalFruits4.odt` → ausschließlich `"start"` (2×),
+  `feature_attributes_paragraph_MSO2013.odt` → gemischt `"center"`/`"end"`/`"justify"` — **exakt**
+  wie in Abschnitt 3.5 zitiert.
+- **Eine Ungenauigkeit gefunden und korrigiert (Abschnitt 6.1):** Die vorherige Fassung
+  bezeichnete `src/formats/shared/editor/__tests__/commands.test.ts` als **neu anzulegen**.
+  Tatsächlich existiert diese Datei bereits (angelegt durch das „Ausschneiden"-Feature,
+  Commit `9f8fa03`, mit `describe('canCut', …)`/`describe('cutSelection', …)`) — der
+  vorgeschlagene Datei-Header hätte diese bestehenden Tests überschrieben. Korrigiert auf
+  „Erweiterung": neue `describe`-Blöcke plus ergänzte Importe werden an die bestehende Datei
+  angehängt, bestehende Importe (`wordSchema`, `canCut`/`cutSelection` aus `../commands`)
+  werden wiederverwendet statt dupliziert.
+- Kein weiterer Befund dieser Runde erforderte eine Korrektur — der einzige tatsächliche
+  Fund ist der `commands.test.ts`-Punkt oben, der genau in die vom Korrekturhinweis in
+  `ausrichtung-links-req.md` beschriebene Fehlerklasse fällt (eine ungeprüfte Übernahme
+  einer „Neu"-Behauptung) und deshalb hier explizit dokumentiert statt still gefixt wird.
+
+---
+
+## 0.0 Korrekturen gegenüber der vorherigen Fassung dieser Datei (verbindlich)
+
+Diese Datei existierte bereits. Die inhaltliche Analyse (die acht in Abschnitt 0
+gelisteten Fehler samt Fixes und Testplan) war **fachlich richtig und wurde bestätigt** —
+zwei der schwerwiegendsten Punkte sogar durch **erneute Ausführung** verifiziert (siehe
+Abschnitt 1). Die vorherige Fassung hatte jedoch **drei Genauigkeitsmängel**, die genau die
+Fehlerklasse reproduzierten, wegen der das Feature laut Anforderung als „nicht
+vertrauenswürdig" gilt. Sie sind in dieser Fassung korrigiert:
+
+1. **Durchgehend veraltete Zeilennummern bei gleichzeitiger Behauptung „Zeilen exakt".**
+   Die vorherige Verifikationstabelle (Abschnitt 2) nannte u. a. `AlignButton` bei
+   `Toolbar.tsx:64-84` (tatsächlich **91–111**; 64–84 liegt **innerhalb** von `MarkButton`),
+   die Button-Instanz bei `:185` (tatsächlich **234**), `JC_TO_ALIGN` bei `docx/reader.ts:13`
+   (tatsächlich **14**), `paragraphToBlocks`/`jc`-Auswertung bei `reader.ts:146-183`/`150-152`
+   (tatsächlich **229–280** / **238–240**), `JC_BY_ALIGN` bei `writer.ts:16` (tatsächlich
+   **18**), die ODT-Absatz-/Überschrift-Konsumstellen bei `odt/reader.ts:126`/`173`
+   (tatsächlich **178** / **259**), den ODT-Writer-Fallback bei `writer.ts:65` (tatsächlich
+   **89**) und die Unit-Rundreisetests bei `roundtrip.test.ts:41-45,48-53` (tatsächlich
+   DOCX **47–51** / **54–59**, ODT **49–53** / **56–61**). Ironischerweise waren die in
+   `ausrichtung-links-req.md` genannten Zeilen an diesen Stellen **korrekt** — die
+   vorherige Code-Fassung hatte sie gegen einen älteren, kürzeren Stand „korrigiert".
+   **Alle Zeilenangaben sind hier neu gegen den Working Tree gesetzt.**
+
+2. **Faktisch falsche Aussage „keine E2E-Abdeckung von Ausrichtung".** Die vorherige
+   Fassung schrieb in Abschnitt 2: „Keine E2E-Tests für Ausrichtung | Bestätigt — kein
+   Treffer für ‚align'/‚Ausrichtung' in `tests/e2e/*.spec.ts`." Das ist **falsch** und ist
+   **wortgleich der Fehler, den die Anforderung im Korrekturhinweis ausdrücklich anprangert**
+   (eine frühere Anforderungsfassung behauptete dasselbe). Tatsächlich prüft
+   `tests/e2e/roundtrip-fidelity.spec.ts` unter „Criterion 4: Absatzausrichtung"
+   (Z. 56–58, Re-Verify Z. 128–129 / 178–179 / 242–243) `text-align: center` an einem
+   rundgereisten Absatz für DOCX→DOCX **und** ODT→ODT über echten Upload/Download. Die
+   **echte** Lücke ist nicht „keine E2E-Tests", sondern „**kein** E2E-Test klickt je einen
+   `AlignButton` und **kein** Test weist den Wert `left` über die UI nach" (siehe
+   Abschnitt 2, letzte Zeilen, und Anforderung 6.2). Korrigiert.
+
+3. **Ungenaue Querverweise auf `specs/fett-code.md`.** Die vorherige Fassung schrieb, der
+   `onMouseDown`-only-Defekt sei „in `fett-code.md` … gefunden **und dort behoben**".
+   `fett-code.md` ist selbst ein **Plan** (der Fix „`onClick` statt `onMouseDown`" ist dort
+   in Abschnitt 4 nur *vorgesehen*, `fett-code.md:115`), und im aktuellen Working Tree nutzt
+   `MarkButton` weiterhin ausschließlich `onMouseDown` (`Toolbar.tsx:76`). Korrekt ist:
+   „in `fett-code.md` als Fix **vorgesehen**, im Code **noch nicht** umgesetzt — beide
+   Button-Familien teilen den Defekt aktuell". Korrigiert (Abschnitt 3.9).
 
 ---
 
 ## 0. Kurzfassung
 
-Die in `ausrichtung-links-req.md` zitierten Fundstellen sind **fast überall exakt**
-(siehe Abschnitt 1). Die eigentliche Prüfung deckt aber einen **schwerwiegenden, in der
-Anforderung nicht benannten Fehler** auf, der den zentralen, in Abschnitt 1/3.2 der
-Anforderung beschriebenen Anwendungsfall komplett bricht:
+Die in `ausrichtung-links-req.md` genannten Symbol-Fundstellen sind **durchgehend korrekt**
+(siehe Abschnitt 2). Die eigentliche Prüfung deckt darüber hinaus einen **schwerwiegenden,
+in der Anforderung nicht benannten Fehler** auf, der den in Abschnitt 1/3.2 der Anforderung
+beschriebenen Kernanwendungsfall komplett bricht:
 
-1. **KRITISCH — `setAlign` wirft eine Exception und bricht ab, sobald die Selektion
-   mehr als einen alignierbaren Block (Absatz/Überschrift) umfasst.** Verifiziert
-   nicht nur durch Codelektüre, sondern durch **tatsächliche Ausführung** des
-   Produktivcodes (`commands.ts`, `schema.ts`) gegen eine echte `EditorView` mit
-   `jsdom` (siehe Abschnitt 2 für Reproduktionsschritte und Fehlermeldung). Das
-   betrifft exakt den in Abschnitt 3.2 der Anforderung als „Ziel" beschriebenen
-   Kernfall („Selektion über mehrere Absätze/Überschriften hinweg") sowie Testfall 4,
-   Grenzfall 4.4, Testfall 13 (Strg+A über ein mehrabsätziges Dokument) und — indirekt
-   — Grenzfall 4.14 (Selection-Sync-Regression mit „Links" als Auslöser). Kein
-   bestehender Test (weder Unit- noch E2E-Test) deckt diesen Fall ab, weil alle
-   vorhandenen Tests Ausrichtung nur an **einem einzigen** Absatz/einer einzigen
-   Überschrift prüfen (Reader/Writer isoliert) bzw. den `setAlign`-Befehl nie über
-   mehr als einen Block hinweg aufrufen.
-2. **Tabellen-Zellauswahl (Grenzfall 4.8): tatsächliches Verhalten ist das
-   Gegenteil der in der Anforderung geäußerten Vermutung.** Verifiziert durch
-   ausführbare Reproduktion gegen `prosemirror-tables`: `state.selection.from`/`.to`
-   kollabiert bei einer `CellSelection` auf **nur die zuletzt beim Ziehen berührte
-   Zelle** (nicht auf die gesamte Selektionsfläche) — „Links" auf eine 3×3-Tabelle
-   mit nur der mittleren Spalte markiert wirkt daher nicht (wie vermutet) versehentlich
-   auf Spalten 1/3, sondern **unvollständig nur auf eine der drei markierten
-   Zellen der mittleren Spalte** — die anderen zwei bleiben unverändert stehen.
-3. **DOCX-Reader ignoriert Ausrichtung, die nur auf Formatvorlagen-Ebene
-   (`w:pStyle`/`w:basedOn`) deklariert ist**, nicht direkt im Absatz (`w:pPr/w:jc`).
-   Mit einer echten Fremddatei aus dem Testkorpus nachgestellt (`bug-paragraph-alignment.docx`
-   — der Dateiname deutet bereits darauf hin, dass diese Datei exakt zu diesem Zweck
-   existiert): ein per Formatvorlage zentrierter Absatz ohne eigenes `w:jc` wird
-   fälschlich als „links" importiert.
-4. **DOCX-Reader bildet `w:jc="end"` auf „links" statt auf „rechts" ab** (nicht nur
-   `"start"`, wie die Anforderung in Grenzfall 4.11 nur für `distribute` andeutet) —
-   `JC_TO_ALIGN` kennt weder `start` noch `end`, beide fallen über denselben
-   `?? 'left'`-Fallback, wodurch aus rechtsbündigem Text stillschweigend linksbündiger
-   wird. Das ist eine inhaltsverändernde Fehlinterpretation, kein reines
-   Rundreise-Detail.
+1. **KRITISCH — `setAlign` wirft eine Exception und bricht ab, sobald die Selektion mehr als
+   einen alignierbaren Block (Absatz/Überschrift) umfasst.** Verifiziert **durch tatsächliche
+   Ausführung** des Produktivcodes (`setAlign` aus `commands.ts` + echtes `wordSchema` aus
+   `schema.ts`) gegen eine echte `EditorView` unter `jsdom`, mit exakt der
+   `dispatchTransaction`-Verdrahtung aus `WordEditor.tsx` (Z. 125–133). Ergebnis (assertiert,
+   grün): `RangeError: Applying a mismatched transaction`; der **erste** Absatz wird noch auf
+   `left` gesetzt, der **zweite bleibt** `center` (`['left','center']`). Betrifft Abschnitt
+   3.2 der Anforderung („Selektion über mehrere Absätze"), Testfall 4 / Grenzfall 4.4,
+   Testfall 13 (Strg+A) und Grenzfall 4.14. Kein bestehender Test (Unit oder E2E) deckt das
+   ab, weil alle vorhandenen Tests Ausrichtung nur an **einem** Block prüfen bzw. `setAlign`
+   nie über mehr als einen Block aufrufen.
+2. **Tabellen-Zellauswahl (Grenzfall 4.8): tatsächliches Verhalten ist das Gegenteil der in
+   der Anforderung geäußerten Vermutung.** Ebenfalls durch Ausführung gegen
+   `prosemirror-tables` verifiziert (assertiert, grün): bei einer `CellSelection` über die
+   mittlere Spalte einer 3×3-Tabelle ist `selection.ranges.length === 3` (alle drei Zellen),
+   aber `selection.from`/`.to` (und damit `nodesBetween(from, to)`) überspannen **nur die
+   Kopf-Zelle** — es wird **exakt 1 von 3** markierten Zellen ausgerichtet, die anderen zwei
+   bleiben stehen; die nicht markierten Spalten 1/3 bleiben unberührt. Das tatsächliche
+   Problem ist **Unter-**, nicht (wie in 4.8 vermutet) **Überanwendung**.
+3. **DOCX-Reader ignoriert Ausrichtung, die nur auf Formatvorlagen-Ebene (`w:pStyle`)
+   deklariert ist.** Mit der echten Fremddatei `bug-paragraph-alignment.docx` belegt
+   (XML-Inhalt in Abschnitt 3.3 direkt geprüft): ein per Stil `Title` (dessen `w:pPr` ein
+   `<w:jc w:val="center"/>` trägt) zentrierter Absatz ohne eigenes `w:jc` wird fälschlich als
+   `left` importiert.
+4. **DOCX-Reader bildet `w:jc="end"` auf `left` statt `right` ab** (nicht nur `start`) —
+   `JC_TO_ALIGN` kennt weder `start` noch `end`; beide fallen über `?? 'left'`, wodurch aus
+   rechtsbündigem Text stillschweigend linksbündiger wird. Inhaltsverändernde
+   Fehlinterpretation, kein reines Rundreise-Detail.
 5. **ODT-Reader normalisiert `fo:text-align` überhaupt nicht** (bestätigt exakt wie
-   in der Anforderung beschrieben) — mit mehreren echten Fremddateien aus dem
-   ODF-Toolkit-Korpus belegt (`EasyList.odt`, `FruitDepot-SeasonalFruits4.odt` u. a.,
-   siehe Abschnitt 1).
-6. **Formatvorlagen-Wechsel (`setHeading`) setzt Ausrichtung hart auf `'left'`** —
-   bestätigt exakt wie in der Anforderung beschrieben (Grenzfall 4.9). Dieser Plan
-   trifft die in Abnahmekriterium 4 geforderte Entscheidung: **das ist ein zu
-   behebender Fehler**, kein gewolltes Verhalten (Begründung in Abschnitt 7).
-7. **Fehlende Tastenkombinationen und `aria-label`** — bestätigt exakt wie in der
-   Anforderung beschrieben; dieser Plan trifft auch hier die in Abnahmekriterium 7
-   geforderte Entscheidung (Abschnitt 7): beides wird nachgerüstet, nicht offen gelassen.
-8. **`AlignButton` ist wie `MarkButton` (siehe `fett-code.md` Fehler 1) nur per
-   Maus, nicht per Tastatur (Tab + Enter/Space) auslösbar** — derselbe Bug-Pfad wie
-   in `fett-code.md` Abschnitt 2.1 bereits für Fett/Kursiv/Unterstrichen/
-   Durchgestrichen gefunden, hier zusätzlich für alle vier Ausrichtungs-Buttons
-   bestätigt (gleicher Komponenten-Code, `Toolbar.tsx`).
+   beschrieben) — mit echten Fremddateien belegt (`EasyList.odt` → `end`,
+   `FruitDepot-SeasonalFruits4.odt` → `start`, `feature_attributes_paragraph_MSO2013.odt` →
+   gemischt `center`/`end`/`justify`; Werte in Abschnitt 3.5 direkt aus den Dateien
+   ausgelesen).
+6. **Formatvorlagen-Wechsel (`setHeading`) setzt Ausrichtung hart auf `left`** — bestätigt
+   (Grenzfall 4.9). Dieser Plan trifft die von Abnahmekriterium 4 geforderte Entscheidung:
+   **zu behebender Fehler**, kein gewolltes Verhalten (Begründung Abschnitt 7).
+7. **Fehlende Tastenkombinationen und `aria-label`** — bestätigt; dieser Plan trifft die von
+   Abnahmekriterium 8 geforderte Entscheidung (Abschnitt 7): beides wird nachgerüstet.
+8. **`AlignButton` ist wie `MarkButton` nur per Maus (`onMouseDown`), nicht per Tastatur
+   (Tab + Enter/Space) auslösbar** — im Code bestätigt; in `fett-code.md` bereits als Fix
+   vorgesehen, dort aber ebenfalls noch nicht umgesetzt (siehe Abschnitt 0.0 Punkt 3).
 
-Alle acht Punkte sind unten mit Fundstelle, Reproduktionsschritten und konkretem Fix
-belegt. Da alle vier Ausrichtungen (`links/zentriert/rechts/blocksatz`) über exakt
-denselben Code laufen (`setAlign`/`isAlignActive`/`setHeading`, dieselbe
-Schema-Attribut-Definition, dieselben DOCX-/ODT-Mapping-Stellen), **beheben die
-Fixes in diesem Plan alle vier Ausrichtungs-Anforderungen gleichzeitig** — das ist
-kein Bug, der nur „links" betrifft, sondern die gemeinsame Grundlage aller vier
-Backlog-Einträge aus Abschnitt 1 der Anforderung.
+Da alle vier Ausrichtungen (`links/zentriert/rechts/blocksatz`) über exakt denselben Code
+laufen (`setAlign`/`isAlignActive`/`setHeading`, dieselbe Schema-Attribut-Definition,
+dieselben DOCX-/ODT-Mapping-Stellen), **beheben die Fixes in diesem Plan alle vier
+Ausrichtungs-Anforderungen gleichzeitig** — es ist kein nur „links" betreffender Bug,
+sondern die gemeinsame Grundlage aller vier Backlog-Einträge.
 
 ---
 
 ## 1. Methodik
 
-Neben Codelektüre aller in der Anforderungstabelle genannten Dateien wurden zur
-Verifikation der als „zu prüfen" markierten Punkte **ausführbare Reproduktionen**
-gegen den echten Produktivcode erstellt (nicht Teil des Repos, nur zur Verifikation
-in dieser Prüfung verwendet, mit `jiti` direkt gegen `src/formats/shared/editor/commands.ts`
-und `src/formats/shared/schema.ts` sowie den echten `prosemirror-*`-Paketen aus
-`node_modules` ausgeführt):
+Neben Codelektüre **aller** in der Anforderungstabelle genannten Dateien wurden die als „zu
+prüfen" markierten Kernpunkte gegen den echten Produktivcode **ausgeführt** — bewusst mit
+der bereits im Repo vorhandenen Toolchain (`vitest` v4 mit `jsdom`-Environment), damit die
+Reproduktion jederzeit nachstellbar ist und nicht auf externen Skripten beruht:
 
-- Ein `EditorView` mit derselben `dispatchTransaction`-Verdrahtung wie
-  `WordEditor.tsx` (Zeile 91–98) gegen ein Zwei-Absatz-Dokument, Selektion über
-  beide Absätze, `setAlign('left')` aufgerufen — reproduziert Fehler 1 exakt
-  (`RangeError: Applying a mismatched transaction`).
-- Eine `CellSelection` (aus `prosemirror-tables`) über die mittlere Spalte einer
-  3×3-Tabelle konstruiert, `state.selection.from`/`.to` sowie
-  `doc.nodesBetween(from, to)` ausgewertet und mit `CellSelection.forEachCell`
-  (der von `prosemirror-tables` selbst für `setCellAttr` verwendeten, korrekten
-  Iteration) verglichen — reproduziert Fehler 2.
-- Alle 330 ODT- und ~50 DOCX-Fixtures unter `tests/fixtures/external/` per Skript
-  auf `fo:text-align`- bzw. `w:jc`-Werte durchsucht, um reale (nicht selbst
-  konstruierte) Belegdateien für die Grenzfälle 4.10–4.12 zu identifizieren
-  (Ergebnisse in Abschnitt 3).
+- **Fehler 1 & 2:** Ein temporärer `vitest`-Test importierte den **echten** `setAlign` aus
+  `src/formats/shared/editor/commands.ts` und das **echte** `wordSchema` aus
+  `src/formats/shared/schema.ts`, baute eine echte `EditorView` mit der `dispatchTransaction`
+  aus `WordEditor.tsx` (Z. 125–133) und prüfte per Assertion:
+  - Zwei-Absatz-Dokument, `TextSelection` über beide → `setAlign('left')` **wirft**
+    `RangeError: Applying a mismatched transaction`; Doc-Zustand danach `['left','center']`.
+  - 3×3-Tabelle, `CellSelection.create(doc, B1, B3)` über die mittlere Spalte →
+    `selection.ranges.length === 3`, aber `nodesBetween(from, to)` besucht **1** Absatz;
+    nach `setAlign('left')` ist genau **1** der drei B-Zellen `left`, A/C unverändert.
+  Beide Tests liefen grün (Hypothese = beobachtetes Verhalten), womit die Aussagen aus
+  Abschnitt 0 Punkt 1/2 belegt sind. Der Test war ein Wegwerf-Artefakt und ist **nicht** Teil
+  des Repos; der dauerhafte Regressionstest ist in Abschnitt 6.1 spezifiziert.
+- **Fehler 3/4/5 (echte Fremddateien):** Die Zip-Container der zitierten Fixtures wurden
+  ausgepackt und ihr XML direkt gelesen:
+  - `tests/fixtures/external/docx/bug-paragraph-alignment.docx`: Absatz 1 trägt
+    `<w:pStyle w:val="Title"/>` **ohne** eigenes `<w:jc>`; `word/styles.xml` deklariert für
+    `styleId="Title"` ein `<w:jc w:val="center"/>`; Absatz 2 trägt direkt
+    `<w:jc w:val="left"/>`. → Beleg für Fehler 3.
+  - `EasyList.odt` → `fo:text-align="end"`, `FruitDepot-SeasonalFruits4.odt` →
+    `fo:text-align="start"`, `feature_attributes_paragraph_MSO2013.odt` → `center`/`end`/
+    `justify` gemischt. → Beleg für Fehler 4/5.
 
 Zusätzlich wurden `FEATURE-BACKLOG.md` Abschnitt 2.3 und `FEATURE-SPEC-DOCX-ODT.md`
-Abschnitte 2, 4, 17 und 20 gegengelesen — alle in `ausrichtung-links-req.md` daraus
-zitierten Aussagen sind wortgetreu bestätigt (Abschnitt 2 „Selection-Sync-Bug" Zeile
-63–71, Abschnitt 4 Testfall 1 Zeile 119, Abschnitt 17 Zeile 357, Abschnitt 20 Punkt 1
-Zeile 440–442).
+Abschnitte 2/4/17/20 gegengelesen; alle in der Anforderung daraus zitierten Aussagen sind
+bestätigt.
 
 ---
 
 ## 2. Verifikation der Ist-Stand-Tabelle aus `ausrichtung-links-req.md`
 
-| Fundstelle laut Anforderung | Ergebnis der Prüfung |
-|---|---|
-| `schema.ts:4` `alignAttr`, Default `'left'` | Bestätigt, Zeile exakt. |
-| `schema.ts:14-16`/`:28-30` `toDOM` | Bestätigt, Zeilen exakt (`paragraph.toDOM` Zeile 14–16, `heading.toDOM` Zeile 28–30). |
-| `schema.ts:13,26` `getAttrs`, Fallback `'left'` | Bestätigt, Zeilen exakt. **Zusätzlich gefunden:** Fallback ist `dom.style.textAlign \|\| 'left'` — ein per Paste eingefügtes `text-align: start`/`end` (z. B. aus Word-Web/Google-Docs-HTML) würde unverändert als `'start'`/`'end'` übernommen, **nicht** normalisiert. Gleiche Fehlerklasse wie Fehler 5 unten, siehe Abschnitt 5.5. |
-| `commands.ts:13-27` `setAlign`, kein Toggle | Bestätigt, Zeilen exakt. **Aber:** siehe Fehler 1 — die Funktion ist nicht nur „reines Setzen ohne Toggle", sie ist bei mehr als einem betroffenen Block **nicht funktionsfähig**. |
-| `commands.ts:29-38` `isAlignActive`, nur `$from` | Bestätigt, Zeilen exakt. |
-| `Toolbar.tsx:64-84` `AlignButton`, `:185` Einbindung | Bestätigt, Zeilen exakt. `title="Ausrichtung: left"`, kein `aria-label` — bestätigt. **Zusätzlich gefunden:** nur `onMouseDown`, kein `onClick` — siehe Fehler 8. |
-| Keine Tastenkombination | Bestätigt — `WordEditor.tsx` Zeile 71–79 enthält keinen `Mod-l`/`Mod-e`/`Mod-r`/`Mod-j`-Eintrag. |
-| `docx/reader.ts:13` `JC_TO_ALIGN`, `:150-152` | Bestätigt, Zeilen exakt. **Zusätzlich gefunden:** siehe Fehler 4 (`end`→„links" statt „rechts") und Fehler 3 (Formatvorlagen-Ausrichtung ignoriert). |
-| `docx/writer.ts:16` `JC_BY_ALIGN`, `:67-69`, `:100-104`/`:106-110` | Bestätigt, alle Zeilen exakt. |
-| `odt/reader.ts:36-77`, `:126,173`, kein Mapping | Bestätigt, Zeilen exakt — mit vier realen Fremddateien konkret belegt (Abschnitt 3.3). |
-| `odt/styleRegistry.ts:61-66,68-75,77-92` | Bestätigt, alle Zeilen exakt. |
-| `commands.ts:40-55` `setHeading`, setzt `align:'left'` implizit | Bestätigt, Zeilen exakt. |
-| `docx/__tests__/roundtrip.test.ts:41-45,48-53`, `odt/…` analog | Bestätigt, Zeilen exakt — beide testen nur Reader/Writer isoliert an genau **einem** Absatz/einer Überschrift pro Testfall, nie mehrere gleichzeitig über den `setAlign`-Befehl. Das ist exakt die Lücke, durch die Fehler 1 unentdeckt blieb. |
-| Keine E2E-Tests für Ausrichtung | Bestätigt — kein Treffer für „align"/„Ausrichtung" in `tests/e2e/*.spec.ts`. |
-| `FEATURE-SPEC-DOCX-ODT.md` Abschnitt 2 (Selection-Sync-Bug), Abschnitt 4 Testfall 1, Abschnitt 17 Zeile 4, Abschnitt 20.1 | Alle vier Zitate wortgetreu bestätigt (Datei liegt im Repo-Root, nicht unter `specs/`). |
+Zeilen unten sind die **tatsächlichen** aktuellen Zeilen (Working Tree, 2026-07-04).
 
-Keine der in der Anforderung zitierten Zeilenangaben ist falsch — die Referenztabelle
-der Anforderung ist zuverlässig. Die acht in Abschnitt 0 gelisteten Fehler liegen
-**zusätzlich** zu den dort bereits als „zu verifizieren" markierten Punkten.
+| Fundstelle (Symbol) | tatsächliche Zeile | Ergebnis |
+|---|---|---|
+| `schema.ts` `alignAttr`, Default `'left'` | 4 | Bestätigt. |
+| `schema.ts` `paragraph.toDOM` / `heading.toDOM` (`text-align`) | 21–23 / 35–37 | Bestätigt. |
+| `schema.ts` `paragraph`/`heading` `parseDOM.getAttrs` (`style.textAlign \|\| 'left'`) | 20 / 33 | Bestätigt. **Zusatzbefund:** kein Normalisieren — per Paste eingefügtes `text-align:start/end` bliebe wörtlich stehen (gleiche Klasse wie Fehler 5, siehe 5.5). |
+| `commands.ts` `type Align` / `alignableTypes` | 8 / 10 | Bestätigt. |
+| `commands.ts` `setAlign` (kein Toggle, `nodesBetween` Z. 17, `dispatch` in Schleife Z. 21) | 13–27 | Bestätigt — **und** nicht funktionsfähig bei > 1 Block (Fehler 1). |
+| `commands.ts` `isAlignActive` (nur `$from`, Vergleich Z. 34) | 29–38 | Bestätigt. |
+| `commands.ts` `setHeading` (`align:'left'` Z. 43, `sameParent`-Guard Z. 45) | 40–55 | Bestätigt (Fehler 6). |
+| `Toolbar.tsx` `run` (führt Command aus, dann `view.focus()` Z. 30) | 28–31 | Bestätigt. |
+| `Toolbar.tsx` `MarkButton` (`aria-label={title}` Z. 74, nur `onMouseDown` Z. 76) | 55–89 | Bestätigt. |
+| `Toolbar.tsx` `AlignButton` (`title="Ausrichtung: ${align}"` Z. 96, `aria-pressed` Z. 97, `onMouseDown`+`preventDefault` Z. 98–99, `run(setAlign)` Z. 100, **kein** `aria-label`, **kein** `onClick`) | 91–111 | Bestätigt (Fehler 7/8). |
+| `Toolbar.tsx` `AlignButton`-Instanzen (`align="left" label="⇤"` Z. 234) | 234–237 | Bestätigt. |
+| `Toolbar.tsx` Absatzformat-`<select>` (`setHeading`) | 165–180 | Bestätigt. |
+| `WordEditor.tsx` `reconcileSelectionOnClick` (+ `mouseup`-Handler `onMouseUp` Z. 146–153) | 43–50 | Bestätigt. |
+| `WordEditor.tsx` Keymap (`Mod-b/i/u` Z. 98–100, **kein** Ausrichtungskürzel) | 85–107 | Bestätigt (Fehler 7). |
+| `WordEditor.tsx` `dispatchTransaction` (`onChange` je `docChanged` Z. 128–130) | 125–133 | Bestätigt (relevant für Fehler 1: `view.state.apply(tr)` gegen den bereits aktualisierten `view.state`). |
+| `docx/reader.ts` `JC_TO_ALIGN` (`{left,center,right,both→justify}`) | 14 | Bestätigt — kein `start`/`end`/`distribute` (Fehler 4). |
+| `docx/reader.ts` `HeadingInfo` (nur `outlineLvlByStyleId`) / `parseStylesXml` (liest nur `outlineLvl`) | 49–51 / 53–67 | Bestätigt — **keine** Auswertung von Stil-`w:jc` (Fehler 3). |
+| `docx/reader.ts` `paragraphToBlocks` (`pStyle` Z. 236, `jc` Z. 238–239, `align = JC_TO_ALIGN[jcVal] ?? 'left'` Z. 240) | 229–280 | Bestätigt. |
+| `docx/reader.ts` `emptyParagraph` (`align:'left'`) | 224–226 | Bestätigt. |
+| `docx/writer.ts` `JC_BY_ALIGN` (`{…, justify→both}`) | 18 | Bestätigt. |
+| `docx/writer.ts` `paragraphPropsXml` (schreibt **immer** `<w:jc>`, `jc` Z. 70, Element Z. 71) | 69–72 | Bestätigt. |
+| `docx/writer.ts` Absatz-/Überschrift-`align` (`?? 'left'`) | 113 / 121 | Bestätigt. |
+| `odt/reader.ts` `parseAutomaticStyles` (liest `fo:text-align` Z. 65, setzt Map **ohne** Normalisierung Z. 66, nur `office:automatic-styles`) | 37–78 | Bestätigt (Fehler 5). |
+| `odt/reader.ts` Absatz-/Überschrift-Konsumstelle (`(styleName && …get(styleName)) \|\| 'left'`) | 178 / 259 | Bestätigt. |
+| `odt/styleRegistry.ts` `PARAGRAPH_ALIGN_STYLE_NAME` / `paragraphAlignStyleDefs` | 61–66 / 68–75 | Bestätigt. |
+| `odt/styleRegistry.ts` `headingStyleName` / `headingStyleDefs` (pro Ebene × 4 Ausrichtungen) | 80–82 / 84–93 | Bestätigt. |
+| `odt/writer.ts` Absatz-Align-Stilwahl (`PARAGRAPH_ALIGN_STYLE_NAME[align] ?? …left` Z. 89) / Überschrift (`headingStyleName` Z. 97) | 87–92 / 93–98 | Bestätigt. |
+| `documentModel.ts` `emptyDocJSON` (`{type:'paragraph', attrs:{align:'left'}}`) | 11 | Bestätigt (deckt Grenzfall 4.1 im Modell ab). |
+| Unit-Rundreise `docx/__tests__/roundtrip.test.ts` (Heading-Align `center` Z. 47–51; `it.each(['left','center','right','justify'])` Z. 54–59) | — | Bestätigt — nur **ein** Block je Fall, `setAlign` nie aufgerufen. Genau die Lücke, durch die Fehler 1 unentdeckt blieb. |
+| Unit-Rundreise `odt/__tests__/roundtrip.test.ts` (Heading-Align Z. 49–53; `it.each` Z. 56–61) | — | Bestätigt, analog. |
+| E2E-Abdeckung Ausrichtung: `tests/e2e/roundtrip-fidelity.spec.ts` „Criterion 4" (`text-align: center`) | 56–58 (Re-Verify 128–129/178–179/242–243) | **Existiert** (für `center`, ohne je einen `AlignButton` zu klicken). Siehe Abschnitt 0.0 Punkt 2. |
+
+Keine Symbol-Fundstelle der Anforderung ist falsch. Die acht Fehler in Abschnitt 3 liegen
+**zusätzlich** zu den dort als „zu verifizieren" markierten Punkten.
 
 ---
 
@@ -149,7 +268,7 @@ export function setAlign(align: Align): Command {
       if (alignableTypes.has(node.type.name)) {
         applicable = true
         if (dispatch) {
-          dispatch(state.tr.setNodeAttribute(pos, 'align', align))
+          dispatch(state.tr.setNodeAttribute(pos, 'align', align)) // Z. 21
         }
       }
     })
@@ -158,55 +277,40 @@ export function setAlign(align: Align): Command {
 }
 ```
 
-**Ursache:** `dispatch()` wird **innerhalb** der `nodesBetween`-Schleife pro
-gefundenem Block aufgerufen — bei zwei oder mehr Absätzen also **mehrfach**. Jeder
-Aufruf baut die Transaktion aus `state.tr`, wobei `state` der beim Command-Aufruf
-**einmalig** übergebene, unveränderliche Parameter ist (`EditorState.tr` ist ein
-Getter, der laut `prosemirror-state`-Quelltext (`get tr() { return new
-Transaction(this) }`) immer eine neue Transaktion **auf Basis desselben,
-ursprünglichen Dokuments** liefert). `WordEditor.tsx`s `dispatchTransaction` (Zeile
-91–98) ruft dagegen bei jedem Aufruf `view.state.apply(tr)` auf `view.state` auf —
-und `view.state` wurde durch den **ersten** Dispatch bereits synchron aktualisiert
-(`view.updateState(newState)`, Zeile 92–93). Beim **zweiten** Dispatch prüft
-`EditorState.apply` intern `tr.before.eq(this.doc)` — das schlägt fehl, weil `tr`
-(gebaut aus dem alten `state`) noch das **ursprüngliche** Dokument als „before"
-trägt, `view.state.doc` aber bereits das nach dem ersten Dispatch veränderte
-Dokument ist.
+**Ursache:** `dispatch()` wird **innerhalb** der `nodesBetween`-Schleife pro gefundenem Block
+aufgerufen — bei zwei Absätzen also **zweimal**. `state` ist der beim Command-Aufruf einmalig
+übergebene, unveränderliche Parameter; `state.tr` ist ein Getter, der jedes Mal eine **neue
+Transaktion auf Basis desselben ursprünglichen Dokuments** liefert (`tr.before` = das
+Original-Doc). `WordEditor.tsx`s `dispatchTransaction` (Z. 125–133) ruft dagegen bei jedem
+Dispatch `view.state.apply(tr)` und `view.updateState(newState)` auf — nach dem **ersten**
+Dispatch ist `view.state.doc` bereits verändert. Beim **zweiten** Dispatch prüft
+`EditorState.applyInner` intern `tr.before.eq(this.doc)`; das schlägt fehl, weil `tr.before`
+noch das Original-Doc trägt, `view.state.doc` aber das nach dem ersten Dispatch geänderte —
+`RangeError: Applying a mismatched transaction`.
 
-**Reproduktion (gegen den echten Code ausgeführt, nicht nur gelesen):**
+**Reproduktion (ausgeführt gegen den echten Code, assertiert grün):**
 
 ```
-Vorher:  [ 'center', 'center' ]   // Zwei-Absatz-Dokument, Selektion über beide
-setAlign('left')(view.state, view.dispatch) aufgerufen
-*** CRASHED *** RangeError: Applying a mismatched transaction
+Vorher:  ['center','center']   // Zwei-Absatz-Dokument, TextSelection über beide
+setAlign('left')(view.state, view.dispatch)
+=> wirft RangeError: Applying a mismatched transaction
+Doc danach: ['left','center']  // erster Absatz gesetzt, zweiter verloren
 ```
 
-Der **erste** betroffene Absatz wird noch korrekt auf „links" gesetzt (der erste
-Dispatch gelingt), der **zweite und jeder weitere** bleiben unverändert stehen, weil
-die Exception die Schleife durchschlägt. Zusätzlich: `run()` in `Toolbar.tsx` ruft
-nach `command(view.state, view.dispatch)` unbedingt `view.focus()` auf (Zeile 24–26)
-— bei einer geworfenen Exception wird dieser Aufruf **nie erreicht**, der Fokus geht
-zusätzlich verloren (verstärkt Grenzfall 4.15 in genau dem Szenario, in dem er
-geprüft werden soll).
+Zusätzlich: `run()` in `Toolbar.tsx` (Z. 28–31) ruft `view.focus()` **nach** dem
+Command auf — bei geworfener Exception wird das nie erreicht, der Fokus geht zusätzlich
+verloren (verschärft Grenzfall 4.15 genau im zu prüfenden Szenario).
 
-**Reichweite:** Betrifft **jede** Selektion, die zwei oder mehr alignierbare Blöcke
-berührt — der in Abschnitt 3.2 der Anforderung als Kernszenario beschriebene Fall,
-Testfall 4/Grenzfall 4.4 (gemischte Selektion), Testfall 13 (Strg+A über ein
-mehrabsätziges Dokument — praktisch **jedes** reale Dokument mit mehr als einem
-Absatz) sowie — da `AllSelection` (Strg+A) ebenfalls nur eine einzige `SelectionRange`
-über das gesamte Dokument bildet — der alltäglichste denkbare Anwendungsfall
-überhaupt: „Alles auswählen, linksbündig ausrichten" auf einem Dokument mit mehr als
-einem Absatz. Das erklärt auch, warum das bisher nie auffiel: Jeder bestehende Test
-(Unit wie E2E) prüft Ausrichtung ausschließlich an **einem** Absatz/einer
-Überschrift; `setAlign` selbst wird in keinem Test mit mehr als einem passenden
-Block aufgerufen.
+**Reichweite:** Jede Selektion über ≥ 2 alignierbare Blöcke — der Kernfall aus Abschnitt 3.2
+der Anforderung, Testfall 4/Grenzfall 4.4, Testfall 13 (Strg+A/`AllSelection` bildet **eine**
+`SelectionRange` über das ganze Dokument), Grenzfall 4.14. „Alles auswählen → linksbündig"
+auf einem Dokument mit > 1 Absatz — der alltäglichste denkbare Fall — ist betroffen.
 
-**Fix:** `setAlign` so umbauen, dass **eine einzige** Transaktion akkumuliert und
-**höchstens einmal** dispatcht wird — analog zu `toggleMark` aus
-`prosemirror-commands`, das (verifiziert im dortigen Quelltext) grundsätzlich über
-`state.selection.ranges` iteriert, nicht über `.from`/`.to`. Das behebt gleichzeitig
-Fehler 2 (siehe unten) und die in Abschnitt 3.9 der Anforderung offene Frage zum
-unnötigen Undo-Schritt bei einem no-op-Klick:
+**Fix:** `setAlign` akkumuliert **eine einzige** Transaktion und dispatcht **höchstens einmal**
+— analog zu `toggleMark` aus `prosemirror-commands`, das über `state.selection.ranges`
+iteriert statt über `.from`/`.to`. Das behebt gleichzeitig Fehler 2 **und** die in Abschnitt
+3.10 der Anforderung offene Frage zum wirkungslosen Undo-Schritt (kein Dispatch, wenn nichts
+geändert):
 
 ```ts
 export function setAlign(align: Align): Command {
@@ -227,209 +331,169 @@ export function setAlign(align: Align): Command {
 }
 ```
 
-### 3.2 Fehler 2 (hoch): Tabellen-Zellauswahl — tatsächliches Verhalten ist das Gegenteil der Vermutung in Grenzfall 4.8
+Positions-Sicherheit: Attribut-Steps verändern keine Positionen/Größen, daher bleiben die aus
+dem Original-Doc gesammelten `pos` über alle akkumulierten Steps hinweg gültig — dieselbe
+Eigenschaft, auf der auch `toggleMark`s Sammel-Transaktion beruht.
 
-**Datei:** dieselbe Funktion, betrifft `state.selection.from`/`.to` bei einer
-`CellSelection` aus `prosemirror-tables`.
+### 3.2 Fehler 2 (hoch): Tabellen-Zellauswahl — Verhalten ist das Gegenteil der Vermutung in Grenzfall 4.8
 
-Grenzfall 4.8 der Anforderung vermutet, `nodesBetween(from, to)` könne
-„versehentlich auch dazwischenliegende, nicht markierte Zellen" erfassen. Die
-tatsächliche Prüfung (Quelltext von `prosemirror-state`, `class Selection`: `get
-from() { return this.$from.pos }`, `get $from() { return this.ranges[0].$from }`,
-sowie `prosemirror-tables`, `class CellSelection`: die `ranges`-Liste wird mit
-`cells.unshift($headCell...)` aufgebaut, sodass `ranges[0]` **immer die zuletzt beim
-Ziehen berührte Zelle** ist) zeigt das **Gegenteil**:
+**Datei:** dieselbe Funktion; betrifft `state.selection.from`/`.to` bei einer `CellSelection`.
 
-Reproduktion (3×3-Tabelle, `CellSelection` von B1 nach B3 in der mittleren Spalte,
-also drei Zellen markiert):
+Grenzfall 4.8 vermutet, `nodesBetween(from, to)` erfasse „versehentlich auch
+dazwischenliegende, nicht markierte Zellen". Die **Ausführung** zeigt das Gegenteil: In
+`prosemirror-state` liefert `Selection.from`/`.to` ausschließlich `ranges[0]`; bei einer
+`CellSelection` (`prosemirror-tables`) ist `ranges[0]` per Konstruktor die **Kopf-Zelle** des
+Auswahlvorgangs (`cells.unshift($headCell…)`). `from`/`.to` überspannen daher nur deren
+Inhalt.
+
+Reproduktion (3×3-Tabelle, `CellSelection.create(doc, B1, B3)` über die mittlere Spalte,
+assertiert grün):
 
 ```
-selection.from: 49  selection.to: 53
-ranges: [ [49,53], [9,13], [29,33] ]   // ranges[0] = Kopf-Zelle (B3), nicht sortiert
-Von setAlign erfasste Absätze (nodesBetween(from, to)): [ { pos: 49, text: 'B3' } ]
-Von CellSelection.forEachCell erfasste Zellen (korrekte Iteration): [ B1, B2, B3 ]
+selection.ranges.length          === 3      // B1, B2, B3 sind alle in ranges
+nodesBetween(from, to) besucht    === 1 Absatz   // nur die Kopf-Zelle
+nach setAlign('left'): B-Zellen mit align==='left' === 1  (von 3)
+Spalten A und C                   unverändert 'center'
 ```
 
-`setAlign` erfasst also **nur die einzelne Zelle, auf der die Auswahlbewegung
-endete** (B3 bei einem Drag von oben nach unten; bei umgekehrter Zugrichtung
-entsprechend B1) — **nicht** alle drei markierten Zellen der mittleren Spalte, und
-insbesondere **nicht** die Zellen der nicht markierten Spalten 1/3 (die
-Grenzfall 4.8 als Risiko benennt). Das tatsächliche Problem ist also
-**Unter-**, nicht **Überanwendung**: zwei der drei sichtbar markierten Zellen bleiben
-bei „Links" unverändert stehen — ein sichtbar inkonsistentes Ergebnis, das
-Nutzer:innen als „Button tut nichts/nur teilweise etwas" wahrnehmen.
+`setAlign` erfasst also **nur die Zelle, auf der die Auswahlbewegung endete** — **nicht** alle
+drei markierten Zellen und **nicht** die nicht markierten Spalten 1/3 (die 4.8 als Risiko
+benennt). Es ist **Unter-**, nicht **Überanwendung**: zwei sichtbar markierte Zellen bleiben
+bei „Links" stehen — ein sichtbar inkonsistentes Ergebnis („Button tut nur teilweise etwas").
 
-Der oben in 3.1 gezeigte Fix behebt dies ebenfalls: `for (const range of
-state.selection.ranges)` iteriert bei einer `CellSelection` über **alle** Zellen der
-Selektionsfläche (jede Zelle liefert eine eigene `SelectionRange`, siehe
-`CellSelection`-Konstruktor), exakt wie es `CellSelection.forEachCell` (von
-`prosemirror-tables` selbst z. B. für `setCellAttr` verwendet) tut — ohne dass
-`setAlign` `CellSelection` als Spezialfall kennen oder importieren müsste.
+Der Fix aus 3.1 behebt dies mit: `for (const range of state.selection.ranges)` iteriert bei
+einer `CellSelection` über **alle** Zellen der Selektionsfläche (jede Zelle liefert eine eigene
+`SelectionRange`), exakt wie `CellSelection.forEachCell` (das `prosemirror-tables` selbst für
+`setCellAttr` nutzt) — ohne dass `setAlign` `CellSelection` als Spezialfall kennen muss.
 
-**Hinweis zu Testfall 7/Grenzfall 4.8 der Anforderung:** Der dort vorgeschlagene
-Test (3×3-Tabelle, mittlere Spalte markieren, „Links" anwenden, Spalten 1 und 3
-müssen unverändert bleiben) bleibt richtig, deckt nach dem Fix aber **zusätzlich**
-ab, dass jetzt auch **alle drei** Zellen der mittleren Spalte tatsächlich geändert
-werden (vor dem Fix wurden nur 1 von 3 geändert — ein bloßer „Spalten 1/3
-unverändert"-Test hätte das nicht bemerkt, da er nicht auch Spalte 2 vollständig
-prüft). Testfall in Abschnitt 6 entsprechend geschärft.
+**Schärfung des Testfalls (Testfall 6.4-7/Grenzfall 4.8):** Der Test muss **Spalte 2
+vollständig** prüfen (alle drei Zellen `left`), nicht nur „Spalten 1/3 unverändert" — sonst
+bemerkt er die Vor-Fix-Unteranwendung (1 von 3) gar nicht.
 
 ### 3.3 Fehler 3 (hoch): DOCX-Reader ignoriert Formatvorlagen-Ausrichtung
 
-**Datei:** `src/formats/docx/reader.ts`, `parseStylesXml` (Zeile 52–66) und
-`paragraphToBlocks` (Zeile 146–183, `jc`-Auswertung Zeile 150–152).
+**Datei:** `src/formats/docx/reader.ts`, `parseStylesXml` (Z. 53–67) und `paragraphToBlocks`
+(Z. 229–280, `jc`-Auswertung Z. 238–240).
 
-`parseStylesXml` liest aus `styles.xml` ausschließlich `w:outlineLvl` (für
-Überschriften-Erkennung) — **nicht** `w:jc` innerhalb der Formatvorlage selbst.
-`paragraphToBlocks` liest **ausschließlich** `w:pPr/w:jc` direkt am Absatz; fehlt
-das (weil die Ausrichtung nur über die referenzierte Formatvorlage, ggf. über eine
-`w:basedOn`-Kette, kommt), fällt der Code über `jcVal ?? 'left'` handelt (Zeile
-151–152) auf „links" zurück — unabhängig davon, was die Formatvorlage tatsächlich
+`parseStylesXml` liest aus `styles.xml` **ausschließlich** `w:outlineLvl` (Z. 59–64, für die
+Überschriften-Ebene) — **nicht** das `w:jc` innerhalb der Formatvorlage. `paragraphToBlocks`
+liest **ausschließlich** `w:pPr/w:jc` direkt am Absatz (Z. 238–239); fehlt es (Ausrichtung nur
+über die referenzierte Vorlage, ggf. über eine `w:basedOn`-Kette), greift `jcVal = … ?? 'left'`
+(Z. 239) und `align = JC_TO_ALIGN[jcVal] ?? 'left'` (Z. 240) — unabhängig davon, was die Vorlage
 festlegt.
 
-**Belegt mit einer echten Fremddatei**, nicht nur konstruiert:
-`tests/fixtures/external/docx/bug-paragraph-alignment.docx` enthält genau zwei
-Absätze, beide referenzieren die Formatvorlage `Title`:
+**Belegt mit echter Fremddatei** (XML direkt geprüft):
+`tests/fixtures/external/docx/bug-paragraph-alignment.docx`:
 
 ```
-Absatz 1: kein direktes <w:jc>, Text: "This paragraph does not have explicit
-          alignment, it's centered per the paragraph style."
-Absatz 2: <w:jc w:val="left"/> direkt am Absatz, Text: "This paragraph has explicit
-          left alignment, overriding the alignment in the paragraph style."
+Absatz 1: <w:pStyle w:val="Title"/>, KEIN direktes <w:jc>,
+          Text: "This paragraph does not have explicit alignment, it's centered per the paragraph style."
+Absatz 2: <w:jc w:val="left"/> direkt am Absatz.
+styles.xml: <w:style w:styleId="Title"> … <w:pPr><w:jc w:val="center"/></w:pPr> …
 ```
 
-`styles.xml` deklariert `<w:style w:styleId="Title">` mit `<w:jc w:val="center"/>` in
-dessen `w:pPr`. Der aktuelle Reader importiert **beide** Absätze als `align: 'left'`
-— Absatz 1 verliert seine (laut eigenem Dateiinhalt!) zentrierte Darstellung
-vollständig und ununterscheidbar von echtem linksbündigem Text. Diese Datei ist
-bereits Teil von `tests/fixtures/external/docx/__tests__/external-fixtures.test.ts`s
-generischem „importiert ohne Absturz"-Test (nicht in einer der
-`KNOWN_*`-Ausschlusslisten) — sie besteht also bereits heute unbemerkt, weil dieser
-Test nur „stürzt nicht ab" prüft, nicht den tatsächlichen Ausrichtungswert.
+Der aktuelle Reader importiert **beide** Absätze als `align:'left'` — Absatz 1 verliert seine
+(laut eigenem Dateitext!) zentrierte Darstellung ununterscheidbar von echtem linksbündigem
+Text. Die Datei ist bereits Teil des generischen „importiert ohne Absturz"-Tests
+(`docx/__tests__/external-fixtures.test.ts`) und besteht dort heute unbemerkt, weil er nur
+„crasht nicht" prüft, nicht den Ausrichtungswert.
 
-**Fix:** `parseStylesXml` um eine `alignByStyleId: Map<string, string>` erweitern,
-die pro Formatvorlage deren **direkt** deklariertes `w:jc` sowie — über eine
-`w:basedOn`-Kette mit Tiefenbegrenzung, analog zum bestehenden
-`MAX_TABLE_NESTING_DEPTH`-Muster in dieser Datei — das **geerbte** `w:jc` auflöst.
-`paragraphToBlocks` verwendet diese Map als zusätzlichen Fallback **zwischen**
-direktem `w:jc` und dem endgültigen `'left'`-Default:
+**Fix:** `parseStylesXml` um eine `alignByStyleId: Map<string, Align>` erweitern, die pro
+Formatvorlage deren **direkt** deklariertes `w:jc` sowie — über eine `w:basedOn`-Kette mit
+Tiefenbegrenzung nach dem Muster `MAX_TABLE_NESTING_DEPTH` (`reader.ts:309`) — das **geerbte**
+`w:jc` auflöst. `paragraphToBlocks` verwendet diese Map als Fallback **zwischen** direktem
+`w:jc` und dem `'left'`-Default:
 
 ```ts
-const jcVal =
-  jcEl?.getAttributeNS(OOXML_NAMESPACES.w, 'val') ??
-  (styleId ? headingInfo.alignByStyleId.get(styleId) : undefined)
-const align = normalizeAlign(jcVal)
+const directJc = jcEl?.getAttributeNS(OOXML_NAMESPACES.w, 'val')
+const styleJc = styleId ? headingInfo.alignByStyleId.get(styleId) : undefined
+const align = normalizeAlign(directJc ?? styleJc)   // direkt gewinnt gegen Vorlage (Word-Semantik)
 ```
 
-(`normalizeAlign` siehe Fehler 4/5 unten — direkte Absatzformatierung gewinnt
-weiterhin gegen Formatvorlage, das entspricht Word-Semantik und dem bereits
-korrekten Verhalten für Absatz 2 der Beispieldatei.)
+`normalizeAlign` siehe Fehler 4/5 (Abschnitt 5.1). Direkte Absatzformatierung gewinnt
+weiterhin gegen die Vorlage — das entspricht Word-Semantik und dem bereits korrekten
+Verhalten für Absatz 2 der Beispieldatei.
 
 ### 3.4 Fehler 4 (hoch): `w:jc="end"` wird als „links" statt „rechts" importiert
 
-**Datei:** `src/formats/docx/reader.ts:13`, `JC_TO_ALIGN`.
+**Datei:** `src/formats/docx/reader.ts:14`, `JC_TO_ALIGN`.
 
 ```ts
 const JC_TO_ALIGN: Record<string, string> = { left: 'left', center: 'center', right: 'right', both: 'justify' }
 ```
 
-Weder `start` noch `end` sind enthalten. Grenzfall 4.11 der Anforderung benennt nur
-`distribute` als Beispiel für einen unbekannten Wert und fragt nach einer
-„sinnvolleren Näherung" — sie übersieht dabei, dass **derselbe** Fallback-Pfad
-(`JC_TO_ALIGN[jcVal] ?? 'left'`, Zeile 152) auch `end` trifft: Nach ECMA-376 (und
-in der Praxis von neueren Word-/LibreOffice-Exporten zunehmend verwendet) bedeutet
-`w:jc="end"` in einem LTR-Dokument „rechtsbündig" — der aktuelle Code bildet das
-auf „links" ab, das **exakte Gegenteil** der ursprünglichen Ausrichtung, nicht nur
-eine unscharfe Näherung. Das ist eine inhaltsverändernde Fehlinterpretation, kein
-reines Rundreise-Detail: Ein rechtsbündiger Absatz aus einer solchen Fremddatei
-erscheint nach Import **und** nach jedem weiteren Export weiterhin als „links".
+Weder `start` noch `end` sind enthalten. Grenzfall 4.11 benennt nur `distribute` und übersieht,
+dass **derselbe** Fallback (`JC_TO_ALIGN[jcVal] ?? 'left'`, Z. 240) auch `end` trifft: Nach
+ECMA-376 bedeutet `w:jc="end"` in einem LTR-Dokument „rechtsbündig"; der aktuelle Code bildet
+es auf `left` ab — das **exakte Gegenteil**, nicht nur eine unscharfe Näherung. Ein
+rechtsbündiger Absatz aus einer solchen Datei erscheint nach Import **und** jedem weiteren
+Export als „links".
 
-Reale Werte im vorhandenen Testkorpus (`tests/fixtures/external/docx`, nur
-`w:pPr/w:jc`, **nicht** `w:tblPr/w:jc` — siehe Warnhinweis in Abschnitt 3.6):
-`rtl.docx`, `table-indent.docx`, `unicode-path.docx` verwenden durchgehend
-`w:jc="start"`; kein Fixture im vorhandenen Korpus verwendet `w:pPr/w:jc="end"` —
-dafür ist ein handgebauter Test nötig (siehe Abschnitt 6.2).
+Reale Werte im Korpus (nur `w:pPr/w:jc`, **nicht** `w:tblPr/w:jc` — siehe Abschnitt 3.6):
+`rtl.docx`, `table-indent.docx`, `unicode-path.docx` nutzen `w:jc="start"`; kein Fixture nutzt
+`w:pPr/w:jc="end"` — dafür ist ein handgebauter Test nötig (Abschnitt 6.2).
 
-**Fix:** Gemeinsame `normalizeAlign`-Funktion (siehe Abschnitt 5.3, neue Datei
-`src/formats/shared/align.ts`) ersetzt `JC_TO_ALIGN`, mit `end` → `right`
-(statt `left`) als zentraler Korrektur.
+**Fix:** Gemeinsame `normalizeAlign`-Funktion (Abschnitt 5.1, neue Datei
+`src/formats/shared/align.ts`) ersetzt `JC_TO_ALIGN`, mit `end` → `right` als zentraler
+Korrektur.
 
 ### 3.5 Fehler 5 (hoch): ODT-Reader normalisiert `fo:text-align` überhaupt nicht
 
-**Datei:** `src/formats/odt/reader.ts:36-77` (`parseAutomaticStyles`), `:126`
-(Absatz), `:173` (Überschrift). Bestätigt exakt wie in der Anforderung beschrieben
-(Grenzfall 4.10) — hier zusätzlich mit **vier** echten Fremddateien aus dem
-ODF-Toolkit-Korpus belegt (per Skript über alle 330 ODT-Fixtures nach
-`fo:text-align`-Werten durchsucht):
+**Datei:** `src/formats/odt/reader.ts`, `parseAutomaticStyles` (Z. 37–78; `fo:text-align`
+gelesen Z. 65, ungeprüft in die Map gesetzt Z. 66), Konsum in `paragraphToBlocks` (Z. 178) und
+`elementToBlocks`-Heading (Z. 259). Bestätigt wie in Grenzfall 4.10 beschrieben; mit echten
+Fremddateien belegt (Werte direkt ausgelesen):
 
-| Datei | gefundene `fo:text-align`-Werte |
+| Datei | `fo:text-align`-Werte |
 |---|---|
-| `EasyList.odt`, `feature_bullets_numbering.odt`, `tableRowDeletionTest.odt` | `end` |
-| `FruitDepot-SeasonalFruits4.odt`, `FruitDepot-SeasonalFruits5.odt`, `fields.odt`, `HeaderFooter.odt`, `_annotation.odt` | `start` |
-| `feature_attributes_paragraph_MSO2013.odt` | `center`, `end`, `justify` (gemischt, gut geeignet für einen kombinierten Testfall) |
+| `EasyList.odt` | `end` (3×) |
+| `FruitDepot-SeasonalFruits4.odt` | `start` (2×) |
+| `feature_attributes_paragraph_MSO2013.odt` | `center`, `end`, `justify` (gemischt — ideal für einen kombinierten Testfall) |
 
-Import einer dieser Dateien lässt `align: 'start'` bzw. `align: 'end'` **wörtlich**
-im internen ProseMirror-Dokument stehen. Auswirkungen exakt wie in Grenzfall 4.10
-beschrieben (Editor zeigt via CSS `text-align: start` optisch korrekt links-/
-rechtsbündig an, `isAlignActive` vergleicht aber strikt `=== 'left'`/`'right'` und
-zeigt daher **keinen** aktiven Button-Zustand; Export normalisiert erst an dieser
-späten Stelle über die bereits vorhandenen `?? PARAGRAPH_ALIGN_STYLE_NAME.left`-
-bzw. `JC_BY_ALIGN[align] ?? 'left'`-Fallbacks in den Writern).
+Import lässt `align:'start'`/`'end'` **wörtlich** im internen Dokument stehen: Editor zeigt via
+CSS `text-align:start` optisch korrekt an, aber `isAlignActive` vergleicht strikt `=== 'left'`
+(`commands.ts:34`) und zeigt **keinen** aktiven Button; erst der Export normalisiert spät über
+den `?? …left`-Fallback der Writer.
 
-**Fix:** `parseAutomaticStyles` wendet `normalizeAlign` auf den gelesenen
-`fo:text-align`-Wert an, **bevor** er in die `paragraphAligns`-Map geschrieben wird
-(Zeile 64–65), sodass ab dem Zeitpunkt des Imports ausschließlich kanonische Werte
-im Dokumentmodell existieren — nicht erst beim (möglicherweise erst viel später,
-nach mehreren Zwischenschritten stattfindenden) Export.
+**Fix:** `parseAutomaticStyles` wendet `normalizeAlign` **beim Einlesen** auf den Wert an
+(Z. 65–66), sodass ab dem Import ausschließlich kanonische Werte im Dokumentmodell existieren:
 
-**Verwandte, geringere Lücke (Parität zu Fehler 3, kein mit einer echten Datei
-belegter sichtbarer Bug, aber dieselbe Fehlerklasse):** `parseAutomaticStyles` liest
-nur `office:automatic-styles`, nicht `office:styles` (gemeinsame/benannte Stile) und
-löst `style:parent-style-name`-Vererbungsketten nicht auf — analog zu „Lücke B" in
-`unterstrichen-einfach-code.md` Abschnitt 3.2, dort für Zeichenstile beschrieben,
-hier für Absatz-Ausrichtung. `HelloWorld.odt` referenziert z. B. durchgehend
-`text:style-name="Standard"`, was mangels Eintrag korrekt auf `'left'` zurückfällt
-(zufällig richtig, nicht weil die Vererbung aufgelöst wird) — ein Beleg, dass diese
-Lücke mit dem vorhandenen Korpus nicht als sichtbarer Fehler nachweisbar war, aber
-strukturell identisch zu Fehler 3 ist. Empfehlung: bei Gelegenheit (z. B. wenn
-Lücke B aus `unterstrichen-einfach-code.md` umgesetzt wird) im selben Zug mit
-beheben, siehe Abschnitt 5.5.
+```ts
+const align = props?.getAttributeNS(ODF_NAMESPACES.fo, 'text-align')
+if (align) paragraphAligns.set(name, normalizeAlign(align))
+```
 
-### 3.6 Verifikations-Hinweis (kein Fehler): `w:jc` existiert in zwei unabhängigen Bedeutungen
+**Verwandte, geringere Lücke (Parität zu Fehler 3, kein mit einer echten Datei belegter
+sichtbarer Bug):** `parseAutomaticStyles` liest nur `office:automatic-styles`, nicht
+`office:styles`, und löst `style:parent-style-name`-Ketten nicht auf — analog „Lücke B" in
+`unterstrichen-einfach-code.md` Abschnitt 3.2 (dort für Zeichenstile). `HelloWorld.odt`
+referenziert `text:style-name="Standard"`, was mangels Eintrag auf `'left'` zurückfällt
+(zufällig richtig). Empfehlung: gemeinsam mit „Lücke B" in einem eigenen, formatübergreifenden
+Umbau angehen (Abschnitt 5.8).
 
-Beim Aufbau der Fixture-Übersicht für Fehler 4 fiel auf, dass
-`tests/fixtures/external/docx/table-alignment.docx` trotz seines Namens **keine**
-brauchbare Fixture für Absatz-Ausrichtung ist: alle dort enthaltenen `w:jc`-Werte
-(`left`, `start`, `center`, `right`, `end`) stehen ausschließlich in `w:tblPr`
-(Ausrichtung der **Tabelle als Ganzes** auf der Seite), nicht in `w:pPr`
-(Absatz-Textausrichtung) — zwei nach OOXML unabhängige Verwendungen desselben
-Elementnamens. Der bestehende Reader-Code ist davon **nicht** betroffen (er liest
-`w:jc` ausschließlich über `firstChildNS(pPr, ...)`, also strikt aus `w:pPr`
-heraus, Zeile 150) — dies ist also **kein Fund, der einen Fix erfordert**, aber ein
-Hinweis für zukünftige Testfixture-Auswahl aus diesem Korpus: ein reines
-`grep`/`w:jc`-basiertes Screening (wie initial für diese Prüfung verwendet) kann
-ohne Kontext-Prüfung fälschlich table-level Treffer als Absatz-Ausrichtung
-interpretieren.
+### 3.6 Verifikations-Hinweis (kein Fehler): `w:jc` existiert in zwei Bedeutungen
+
+`tests/fixtures/external/docx/table-alignment.docx` ist trotz Namens **keine** brauchbare
+Absatz-Fixture: alle `w:jc`-Werte stehen dort in `w:tblPr` (Ausrichtung der **Tabelle** auf der
+Seite), nicht in `w:pPr` (Absatztext). Der Reader liest `w:jc` strikt aus `w:pPr`
+(`firstChildNS(pPr, …)`, Z. 238) und ist davon **nicht** betroffen. Kein Fix nötig — aber ein
+Hinweis für die Fixture-Auswahl: ein reines `grep w:jc` ohne Kontext-Prüfung interpretiert
+table-level Treffer fälschlich als Absatz-Ausrichtung.
 
 ### 3.7 Fehler 6 (mittel): Formatvorlagen-Wechsel setzt Ausrichtung hart zurück
 
-**Datei:** `src/formats/shared/editor/commands.ts:40-55`, `setHeading`. Bestätigt
-exakt wie in der Anforderung beschrieben (Grenzfall 4.9):
+**Datei:** `src/formats/shared/editor/commands.ts:40-55`, `setHeading`. Bestätigt (Grenzfall 4.9):
 
 ```ts
-const attrs = level === null ? undefined : { level, align: 'left' }
+const attrs = level === null ? undefined : { level, align: 'left' }   // Z. 43
 ```
 
-Standard→Überschrift setzt `align: 'left'` **hart**, unabhängig vom vorherigen Wert;
-Überschrift→Standard übergibt `attrs: undefined`, wodurch ProseMirror den
-Schema-Default (`'left'`) einsetzt. Beide Richtungen verwerfen eine zuvor gesetzte
-andere Ausrichtung stillschweigend.
+Standard→Überschrift setzt `align:'left'` **hart**; Überschrift→Standard übergibt
+`attrs:undefined` ⇒ Schema-Default `'left'`. Beide Richtungen verwerfen eine zuvor gesetzte
+Ausrichtung stillschweigend.
 
-**Entscheidung (siehe Abschnitt 7 für Begründung):** Das ist ein zu behebender
-Fehler, **kein** gewolltes Verhalten. Word/LibreOffice setzen beim Wechsel der
-Formatvorlage (Standard ↔ Überschriftenebene) die Absatzausrichtung nicht zurück —
-Nutzer:innen erwarten, dass eine bewusst gewählte Ausrichtung formatvorlagen-
-übergreifend erhalten bleibt.
+**Entscheidung (Abschnitt 7):** zu behebender Fehler, **kein** gewolltes Verhalten.
+Word/LibreOffice setzen die Absatzausrichtung beim Formatvorlagen-Wechsel nicht zurück.
 
 **Fix:**
 
@@ -440,7 +504,7 @@ export function setHeading(level: number | null): Command {
     if (!$from.sameParent($to)) return false
     const parent = $from.parent
     if (!alignableTypes.has(parent.type.name)) return false
-    const align = parent.attrs.align ?? 'left'
+    const align = parent.attrs.align ?? 'left'   // bestehende Ausrichtung bewahren
     const type = level === null ? wordSchema.nodes.paragraph : wordSchema.nodes.heading
     const attrs = level === null ? { align } : { level, align }
     if (dispatch) {
@@ -452,57 +516,51 @@ export function setHeading(level: number | null): Command {
 }
 ```
 
-### 3.8 Fehler 7 (niedrig, UX/Barrierefreiheit): fehlende Tastenkombinationen, `aria-label`, unlokalisierter Titel
+### 3.8 Fehler 7 (niedrig, UX/Barrierefreiheit): fehlende Tastenkürzel, `aria-label`, unlokalisierter Titel
 
-Bestätigt exakt wie in der Anforderung beschrieben (Abschnitt 2, Zeilen 2/4;
-Grenzfall 4.16). Entscheidung (Abschnitt 7): beides wird nachgerüstet.
+Bestätigt (Anforderung Abschnitt 2 Zeilen 2/4; Grenzfall 4.16). Keymap `WordEditor.tsx:85-107`
+bindet **kein** `Mod-l/e/r/j`; `AlignButton` (`Toolbar.tsx:91-111`) hat `title="Ausrichtung:
+${align}"` (Z. 96, zeigt den internen Bezeichner „left") und **kein** `aria-label`.
+Entscheidung (Abschnitt 7): alles nachrüsten.
 
 ### 3.9 Fehler 8 (mittel, konsistent mit `fett-code.md`): `AlignButton` nur per Maus auslösbar
 
-**Datei:** `Toolbar.tsx`, `AlignButton` (Zeile 64–84), verwendet ausschließlich
-`onMouseDown`. Identischer Fehlerpfad wie in `fett-code.md` Abschnitt 2.1 für
-`MarkButton` gefunden und dort behoben (`onClick` statt `onMouseDown` für die
-eigentliche Aktion, `onMouseDown` bleibt nur für `preventDefault()`). Da
-`ausrichtung-links-req.md` (im Unterschied zu `fett-req.md` Abschnitt 1 Zeile 1)
-keine explizite Tastatur-Bedienbarkeits-Anforderung für den Button selbst formuliert
-(nur für die Ausrichtungs-**Tastenkombination** Strg+L, siehe Fehler 7), wird dieser
-Fix hier als Konsistenz-/Barrierefreiheits-Verbesserung mit niedrigerer Priorität
-als Fehler 1–6 eingestuft, aber im selben Umbau von `Toolbar.tsx` miterledigt (siehe
-Abschnitt 5.2), da sonst zwei Button-Familien in derselben Datei mit demselben Bug
-unterschiedlich behandelt würden.
+**Datei:** `Toolbar.tsx` `AlignButton` (Z. 91–111), verwendet ausschließlich `onMouseDown`
+(Z. 98). Tastatur-Aktivierung eines `<button>` (Tab + Enter/Space) feuert **`click`**, nicht
+`mousedown` — die Aktion bleibt daher per Tastatur unerreichbar. Identischer Defekt wie bei
+`MarkButton` (`Toolbar.tsx:76`); in `specs/fett-code.md` (Abschnitt 4, `:115`) als Fix
+**vorgesehen** (`onClick` für die Aktion, `onMouseDown` nur noch für `preventDefault`), im Code
+aber **noch nicht** umgesetzt — beide Button-Familien teilen den Defekt aktuell. Da
+`ausrichtung-links-req.md` keine explizite Tastatur-Bedienbarkeit **des Buttons** fordert (nur
+das Ausrichtungs-Kürzel Strg+L, Fehler 7), niedrigere Priorität als Fehler 1–6, aber im selben
+`Toolbar.tsx`-Umbau miterledigt (Abschnitt 5.3), damit nicht zwei Button-Familien in derselben
+Datei denselben Bug unterschiedlich behandeln.
 
 ---
 
 ## 4. Zusätzliche Klarstellungen (keine Fehler, aber zu dokumentieren)
 
-- **`isAlignActive` bei `CellSelection`:** `$from` einer `CellSelection` ist
-  `ranges[0].$from`, also die Kopf-Zelle des Auswahlvorgangs (siehe Fehler 2) — der
-  Button zeigt nach einem Fix von Fehler 2 weiterhin nur den Zustand **dieser einen**
-  Zelle, nicht einen kombinierten Zustand über die ganze Selektion. Das ist
-  konsistent mit dem bereits für normale Mehrfachselektion dokumentierten Verhalten
-  (Abschnitt 3.4/Grenzfall 4.4/4.5 der Anforderung: „Zustand des Absatzes am
-  Selektionsanfang") und wird nicht separat behoben — nur hier vermerkt, damit es
-  nicht als neuer, ungeprüfter Fund missverstanden wird.
-- **`normalizeAlign`, RTL/bidi:** `start`/`end` sind schreibrichtungs-relative
-  (logische) Werte — in einem RTL-Absatz bedeutet `start` „rechts". Diese
-  Anwendung hat **an keiner Stelle** ein RTL-/bidi-Konzept (kein `dir`-Attribut,
-  kein `w:bidi`, kein `style:writing-mode` — durchsucht, keine Treffer in `src/`).
-  `normalizeAlign` (Abschnitt 5.3) bildet `start`→`left`/`end`→`right`
-  **unbedingt** ab, also unter der (bereits an jeder anderen Stelle der Anwendung
-  impliziten) Annahme eines LTR-Dokuments. Für die reale Fixture `rtl.docx`
-  (arabischer, also RTL-Text mit `w:jc="start"`) bedeutet das: Der Text wird
-  weiterhin — wie schon vor diesem Fix, der bestehende `?? 'left'`-Fallback tut
-  dasselbe zufällig richtig — als „links" dargestellt, obwohl er in einem
-  RTL-Kontext eigentlich rechtsbündig wäre. Das ist **keine Regression** durch
-  diesen Plan (identisches Ergebnis wie vorher), aber eine bewusst dokumentierte
-  Grenze: echte RTL-Unterstützung ist nicht Teil dieser Anforderung und müsste,
-  falls je gefordert, an mehreren Stellen (Schema, CSS, Reader/Writer) neu
-  entworfen werden.
-- **`distribute` (Grenzfall 4.11):** Wird von `normalizeAlign` auf `'justify'`
-  abgebildet (nähere Näherung als „links", wie von der Anforderung selbst
-  vorgeschlagen). Keine perfekte Entsprechung (Word unterscheidet „verteilter
-  Blocksatz" von normalem Blocksatz auch optisch bei CJK-Text), aber deutlich
-  näher am Original als der aktuelle Zustand.
+- **`isAlignActive` bei `CellSelection`:** `$from` ist `ranges[0].$from`, also die Kopf-Zelle
+  (siehe Fehler 2). Der Button zeigt auch nach dem Fix von Fehler 2 nur den Zustand **dieser
+  einen** Zelle — konsistent mit dem für normale Mehrfachselektion dokumentierten Verhalten
+  (Anforderung 3.4/Grenzfall 4.4/4.5: „Zustand am Selektionsanfang"). Nicht separat behoben,
+  hier nur vermerkt, damit es nicht als neuer Fund missverstanden wird. Ein Kommentar an
+  `isAlignActive` verweist darauf (Abschnitt 5.2).
+- **`normalizeAlign`, RTL/bidi:** `start`/`end` sind schreibrichtungs-relativ. Diese Anwendung
+  hat **an keiner Stelle** ein RTL-/bidi-Konzept (kein `dir`, kein `w:bidi`, kein
+  `style:writing-mode` — in `src/` gesucht, keine Treffer). `normalizeAlign` bildet
+  `start`→`left`/`end`→`right` **unbedingt** ab (LTR-Annahme, die bereits überall implizit
+  gilt). Für `rtl.docx` (arabisch, `w:jc="start"`) bleibt das Ergebnis „links" — **identisch**
+  zum heutigen `?? 'left'`-Fallback, also **keine Regression**, aber eine bewusst dokumentierte
+  Grenze. Echte RTL-Unterstützung ist nicht Teil dieser Anforderung.
+- **`distribute` (Grenzfall 4.11):** `normalizeAlign` bildet auf `'justify'` ab (nähere Näherung
+  als „links", wie von der Anforderung vorgeschlagen). Keine perfekte Entsprechung, aber
+  deutlich näher am Original als der aktuelle Zustand.
+- **Wirkungsloser Undo-Schritt (Anforderung 3.10):** Der Fix aus 3.1 dispatcht bei einem
+  no-op-Klick (`node.attrs.align === align` für alle betroffenen Blöcke) **gar keine**
+  Transaktion (`tr.docChanged === false`) — es entsteht kein nutzloser Undo-Schritt. Der
+  Rückgabewert bleibt `applicable === true`, sodass `prosemirror-keymap` das Kürzel als
+  „behandelt" wertet und die Browser-Standardaktion unterdrückt.
 
 ---
 
@@ -510,31 +568,30 @@ unterschiedlich behandelt würden.
 
 ### 5.1 `src/formats/shared/align.ts` (neu)
 
-Zentrale, ProseMirror-unabhängige Normalisierung — bewusst **kein** Import von
-`prosemirror-*` hier, da diese Datei auch von `docx/reader.ts`/`odt/reader.ts`
-verwendet wird, die selbst keine ProseMirror-Abhängigkeit haben:
+Zentrale, ProseMirror-unabhängige Normalisierung — bewusst **kein** Import von `prosemirror-*`
+(diese Datei wird auch von `docx/reader.ts`/`odt/reader.ts` genutzt, die selbst keine
+ProseMirror-Abhängigkeit haben):
 
 ```ts
 export type Align = 'left' | 'center' | 'right' | 'justify'
 
 const ALIGN_ALIASES: Record<string, Align> = {
   left: 'left',
-  start: 'left', // LTR-only-Vereinfachung, siehe ausrichtung-links-code.md §4
+  start: 'left',        // LTR-only-Vereinfachung, siehe Abschnitt 4
   center: 'center',
   right: 'right',
   end: 'right',
   justify: 'justify',
-  both: 'justify', // OOXML w:jc-Wert für Blocksatz
-  distribute: 'justify', // nächstliegende Näherung, siehe ausrichtung-links-code.md §4
+  both: 'justify',      // OOXML w:jc-Wert für Blocksatz
+  distribute: 'justify',// nächstliegende Näherung, siehe Abschnitt 4
 }
 
 /**
  * Canonicalizes a raw alignment keyword from OOXML (`w:jc/@w:val`), ODF
  * (`fo:text-align`), or pasted HTML (`style.textAlign`) into one of the four
- * values the schema/commands/writers understand. Missing or unrecognized
- * values fall back to 'left' (the schema default). Single source of truth so
- * the DOCX reader, ODT reader, and the paste-import path in schema.ts can
- * never disagree about how a given raw value is interpreted.
+ * values the schema/commands/writers understand. Missing/unrecognized values
+ * fall back to 'left' (the schema default). Single source of truth so DOCX
+ * reader, ODT reader, and the paste-import path in schema.ts can never disagree.
  */
 export function normalizeAlign(raw: string | null | undefined): Align {
   if (!raw) return 'left'
@@ -544,22 +601,19 @@ export function normalizeAlign(raw: string | null | undefined): Align {
 
 ### 5.2 `src/formats/shared/editor/commands.ts` (geändert)
 
-- `export type Align = ...` (Zeile 8) ersetzen durch
-  `export type { Align } from '../align'` (behält bestehende Importe wie
-  `Toolbar.tsx`s `import { ..., type Align } from './commands'` kompatibel).
-- `setAlign` (Zeile 13–27) ersetzt durch die in Abschnitt 3.1 gezeigte Fassung
-  (Fix für Fehler 1 und 2 gleichzeitig).
-- `setHeading` (Zeile 40–55) ersetzt durch die in Abschnitt 3.7 gezeigte Fassung
-  (Fix für Fehler 6).
-- `isAlignActive` (Zeile 29–38): keine funktionale Änderung, nur ein Kommentar
-  ergänzt, der auf Abschnitt 4 dieses Plans (Verhalten bei `CellSelection`)
-  verweist.
+- `export type Align = …` (Z. 8) ersetzen durch `export type { Align } from '../align'`
+  (bestehende Importe wie `Toolbar.tsx`s `import { …, type Align } from './commands'` bleiben
+  kompatibel).
+- `setAlign` (Z. 13–27) → Fassung aus Abschnitt 3.1 (behebt Fehler 1 **und** 2).
+- `setHeading` (Z. 40–55) → Fassung aus Abschnitt 3.7 (behebt Fehler 6).
+- `isAlignActive` (Z. 29–38): keine funktionale Änderung, nur Kommentar mit Verweis auf
+  Abschnitt 4 (Verhalten bei `CellSelection`).
 
 ### 5.3 `src/formats/shared/editor/Toolbar.tsx` (geändert)
 
-`AlignButton` (Zeile 64–84):
+`AlignButton` (Z. 91–111):
 
-- Lokalisierte, konsistente Titel/`aria-label` (Fix für Fehler 7):
+- Lokalisierte, konsistente `title`/`aria-label` (Fehler 7) und `onClick`-Trennung (Fehler 8):
 
 ```tsx
 const ALIGN_LABELS: Record<Align, string> = {
@@ -578,9 +632,9 @@ function AlignButton({ view, align, icon }: { view: EditorView; align: Align; ic
       title={title}
       aria-label={title}
       aria-pressed={active}
-      onMouseDown={(e) => e.preventDefault()}
-      onClick={() => run(view, setAlign(align))}
-      className={/* unverändert */}
+      onMouseDown={(e) => e.preventDefault()}   // nur Fokus-/Selektionserhalt
+      onClick={() => run(view, setAlign(align))} // funktioniert auch per Tastatur
+      className={/* unverändert, Z. 102–106 */}
     >
       {icon}
     </button>
@@ -588,18 +642,16 @@ function AlignButton({ view, align, icon }: { view: EditorView; align: Align; ic
 }
 ```
 
-  (`onMouseDown`/`onClick`-Trennung behebt Fehler 8, identisches Muster wie
-  `fett-code.md` Abschnitt 4.2 für `MarkButton`.)
+  (Identisches Muster wie `fett-code.md` Abschnitt 4 für `MarkButton`; da dieser Umbau auch
+  `MarkButton` in derselben Datei berührt, `MarkButton` bei der Gelegenheit gleich mit
+  umstellen — sonst blieben zwei Button-Familien in einer Datei uneinheitlich.)
 
-- Vier neue kleine inline-SVG-Icon-Komponenten (`AlignLeftIcon`,
-  `AlignCenterIcon`, `AlignRightIcon`, `AlignJustifyIcon`; Material-Icons-Pfade
-  `format_align_left`/`_center`/`_right`/`_justify`, Apache-2.0, gleiche
-  Begründung/Lizenzlage wie `BoldIcon` in `fett-code.md` Abschnitt 4.2), ersetzen
-  die reinen Unicode-Pfeil-/Linien-Labels — behebt den in Abschnitt 2, Zeile 4 der
-  Anforderung sowie in `FEATURE-SPEC-DOCX-ODT.md` Abschnitt 17 Zeile 357/Abschnitt
-  20.1 dokumentierten Icon-Rendering-Risiko konsistent mit der bereits für Fett
-  getroffenen Entscheidung.
-- Aufrufstellen (Zeile 185–188):
+- Vier kleine inline-SVG-Icon-Komponenten (`AlignLeftIcon`/`Center`/`Right`/`Justify`;
+  Material-Symbols-Pfade `format_align_*`, Apache-2.0 — gleiche Lizenz-/Begründungslage wie
+  `ScissorsIcon`, `Toolbar.tsx:33-53`, und `BoldIcon` in `fett-code.md`) ersetzen die reinen
+  Unicode-Zeichen-Labels (`⇤ ↔ ⇥ ≡`) — behebt das Icon-Rendering-Risiko aus Anforderung
+  Abschnitt 2 Zeile 4 sowie `FEATURE-SPEC-DOCX-ODT.md` Abschnitt 17/20.1.
+- Aufrufstellen (Z. 234–237):
 
 ```tsx
 <AlignButton view={view} align="left" icon={<AlignLeftIcon />} />
@@ -610,15 +662,14 @@ function AlignButton({ view, align, icon }: { view: EditorView; align: Align; ic
 
 ### 5.4 `src/formats/shared/editor/WordEditor.tsx` (geändert)
 
-Keymap (Zeile 71–79) um die vier Standard-Tastenkombinationen ergänzen (Fix für
-Fehler 7, Teil 1; deckt gleichzeitig die drei Schwester-Anforderungen
-`ausrichtung-zentriert`/`-rechts`/`-blocksatz` ab, siehe Kurzfassung):
+Keymap (Z. 85–107) um vier Standard-Tastenkombinationen ergänzen (Fehler 7, Teil 1; deckt
+zugleich die drei Schwester-Anforderungen `ausrichtung-zentriert/-rechts/-blocksatz` ab):
 
 ```ts
-import { setAlign } from './commands'
+import { cutSelection, insertHardBreak, setAlign } from './commands'
 // ...
 keymap({
-  // ... bestehende Einträge unverändert ...
+  // ... bestehende Einträge (Z. 93–106) unverändert ...
   'Mod-l': setAlign('left'),
   'Mod-e': setAlign('center'),
   'Mod-r': setAlign('right'),
@@ -626,248 +677,205 @@ keymap({
 }),
 ```
 
-`setAlign(align)` hat bereits die Signatur `Command` (`(state, dispatch?) =>
-boolean`), passt also unverändert in `keymap()`'s Erwartung. Kein Konflikt mit
-bestehenden Einträgen (`Mod-z/y/b/i/u`, `Shift-z`) oder mit `baseKeymap`. Analog zu
-`fett-code.md` Abschnitt 4.3: `prosemirror-keymap` ruft bei `true`-Rückgabe
-automatisch `event.preventDefault()` auf, wodurch eine kollidierende
-Browser-Aktion (Chrome „Downloads" auf Strg+J, Firefox/Chrome „Adressleiste" auf
-Strg+L) unterdrückt wird, **solange der Fokus im Editor liegt** — kein
-Zusatz-Code nötig, aber ein E2E-Testfall muss das nachweisen (Abschnitt 6.4).
+`setAlign(align)` hat bereits die `Command`-Signatur `(state, dispatch?) => boolean`, passt
+also unverändert in `keymap()`. Kein Konflikt mit `Mod-z/y/b/i/u`, `Shift-Delete` oder
+`baseKeymap`. Bei `true`-Rückgabe ruft `prosemirror-keymap` automatisch `preventDefault()`
+auf, wodurch kollidierende Browser-Aktionen (Chrome „Downloads"/Strg+J, Adressleiste/Strg+L)
+unterdrückt werden, **solange der Fokus im Editor liegt** — ein E2E-Test muss das nachweisen
+(Abschnitt 6.4 Punkt 10).
 
 ### 5.5 `src/formats/shared/schema.ts` (geändert)
 
-`getAttrs` für `paragraph` (Zeile 13) und `heading` (Zeile 26) auf `normalizeAlign`
-umstellen (Fix für die in Abschnitt 2 zusätzlich gefundene Paste-Import-Lücke):
+`getAttrs` für `paragraph` (Z. 20) und die sechs `heading`-Level (Z. 33) auf `normalizeAlign`
+umstellen (schließt die in Abschnitt 2 zusätzlich gefundene Paste-Import-Lücke):
 
 ```ts
 import { normalizeAlign } from './align'
-// ...
+// paragraph (Z. 20):
 parseDOM: [{ tag: 'p', getAttrs: (dom) => ({ align: normalizeAlign((dom as HTMLElement).style.textAlign) }) }],
+// heading (Z. 31–34, analog für alle Level):
+getAttrs: (dom) => ({ level, align: normalizeAlign((dom as HTMLElement).style.textAlign) }),
 ```
 
-(analog für die sechs `heading`-Level-Einträge).
+`toDOM` (Z. 21–23 / 35–37) bleibt unverändert — `text-align:<kanonischer Wert>` ist gültiges CSS.
 
 ### 5.6 `src/formats/docx/reader.ts` (geändert)
 
-- `JC_TO_ALIGN`-Konstante (Zeile 13) entfernen, durch `normalizeAlign` aus
-  `../shared/align` ersetzen (Fix für Fehler 4).
-- `HeadingInfo` (Zeile 48–50) um `alignByStyleId: Map<string, string>` erweitern;
-  `parseStylesXml` (Zeile 52–66) um die in Abschnitt 3.3 gezeigte
-  `w:jc`/`w:basedOn`-Auflösung ergänzen (Fix für Fehler 3), Tiefenbegrenzung nach
-  demselben Muster wie `MAX_TABLE_NESTING_DEPTH` (Zeile 208).
-- `paragraphToBlocks` (Zeile 146–183): `jcVal`-Ermittlung (Zeile 150–152) wie in
-  Abschnitt 3.3 gezeigt um den Formatvorlagen-Fallback erweitern, `align` über
-  `normalizeAlign(jcVal)` statt der bisherigen Lookup-Tabelle bestimmen.
+- `JC_TO_ALIGN` (Z. 14) entfernen, durch `normalizeAlign` aus `../shared/align` ersetzen
+  (Fehler 4).
+- `HeadingInfo` (Z. 49–51) um `alignByStyleId: Map<string, Align>` erweitern; `parseStylesXml`
+  (Z. 53–67) um die `w:jc`/`w:basedOn`-Auflösung aus Abschnitt 3.3 ergänzen (Fehler 3),
+  Tiefenbegrenzung nach dem Muster `MAX_TABLE_NESTING_DEPTH` (Z. 309).
+- `paragraphToBlocks` (Z. 229–280): `jc`-Ermittlung (Z. 238–240) wie in Abschnitt 3.3 um den
+  Formatvorlagen-Fallback erweitern, `align` über `normalizeAlign(directJc ?? styleJc)` statt
+  der Lookup-Tabelle bestimmen. `emptyParagraph` (Z. 224–226) bleibt (`align:'left'`).
 
 ### 5.7 `src/formats/docx/writer.ts` (keine funktionale Änderung)
 
-`JC_BY_ALIGN` (Zeile 16) bleibt unverändert — nach den Fixes in 5.5/5.6/5.8 enthält
-das Dokumentmodell an dieser Stelle nur noch kanonische `Align`-Werte, die
-Lookup-Tabelle deckt bereits alle vier ab. `paragraphPropsXml` (Zeile 67–70)
-schreibt weiterhin immer ein explizites `<w:jc w:val="left"/>` auch für den
-Default — das ist laut Rundreise-Testfall 5.1.3 der Anforderung bereits als
-korrekt (von Word/LibreOffice gleichbedeutend mit fehlendem Element interpretiert)
-zu bestätigen, siehe Testfall in Abschnitt 6.5.
+`JC_BY_ALIGN` (Z. 18) bleibt — nach den Fixes 5.5/5.6/5.8 enthält das Dokumentmodell hier nur
+noch kanonische `Align`-Werte, die Tabelle deckt alle vier ab. `paragraphPropsXml` (Z. 69–72)
+schreibt weiterhin **immer** ein explizites `<w:jc w:val="left"/>` auch für den Default — laut
+Rundreise-Testfall 5.1.3 der Anforderung als korrekt (von Word/LibreOffice gleichbedeutend mit
+fehlendem Element) zu bestätigen (Testfall Abschnitt 6.2/6.5).
 
 ### 5.8 `src/formats/odt/reader.ts` (geändert)
 
-`parseAutomaticStyles` (Zeile 36–77): `fo:text-align`-Wert (Zeile 64–65) vor dem
-Eintragen in `paragraphAligns` durch `normalizeAlign` schicken (Fix für Fehler 5):
+`parseAutomaticStyles` (Z. 37–78): `fo:text-align`-Wert (Z. 65) vor dem Eintragen in
+`paragraphAligns` (Z. 66) durch `normalizeAlign` schicken (Fehler 5):
 
 ```ts
 import { normalizeAlign } from '../shared/align'
-// ...
+// Z. 65–66:
 const align = props?.getAttributeNS(ODF_NAMESPACES.fo, 'text-align')
 if (align) paragraphAligns.set(name, normalizeAlign(align))
 ```
 
-Die beiden Konsumstellen (Zeile 126, 173) ändern sich nicht (der Fallback `|| 'left'`
-bleibt bestehen, greift jetzt nur noch, wenn wirklich **kein** Stil referenziert
-bzw. kein `fo:text-align` gefunden wurde — der Normalisierungsschritt selbst
-passiert bereits beim Einlesen der Stile, nicht erst beim Verbrauch).
+Die Konsumstellen (Z. 178, 259) ändern sich nicht (`|| 'left'` bleibt, greift jetzt nur noch,
+wenn wirklich **kein** Stil referenziert bzw. kein `fo:text-align` gefunden wurde).
 
-**Nicht Teil des Mindestumfangs** (siehe Abschnitt 3.5, „verwandte, geringere
-Lücke"): Auflösung von `office:styles`/`style:parent-style-name` für
-Absatzausrichtung. Empfehlung: gemeinsam mit „Lücke B" aus
-`unterstrichen-einfach-code.md` in einem eigenen, formatübergreifenden Umbau
-angehen, da beide denselben Stil-Kaskaden-Mechanismus beträfen.
+**Nicht Teil des Mindestumfangs** (Abschnitt 3.5, „verwandte Lücke"): Auflösung von
+`office:styles`/`style:parent-style-name` für Absatzausrichtung. Empfehlung: gemeinsam mit
+„Lücke B" aus `unterstrichen-einfach-code.md` in einem eigenen, formatübergreifenden Umbau.
 
-### 5.9 `src/formats/odt/writer.ts` / `src/formats/odt/styleRegistry.ts` (keine Änderung)
+### 5.9 `src/formats/odt/writer.ts` / `styleRegistry.ts` (keine Änderung)
 
-`PARAGRAPH_ALIGN_STYLE_NAME`/`headingStyleName` (Zeile 61–92) decken bereits alle
-vier kanonischen `Align`-Werte ab; nach dem Fix in 5.8 kommen beim Export nur noch
-kanonische Werte an, der bestehende `?? PARAGRAPH_ALIGN_STYLE_NAME.left`-Fallback
-(`writer.ts:65`) wird dadurch zu unerreichbarem Verteidigungscode, aber bewusst
-nicht entfernt (Robustheit gegen künftige, nicht über `normalizeAlign` laufende
-Aufrufer, z. B. direkt konstruierte Test-Dokumente).
+`PARAGRAPH_ALIGN_STYLE_NAME`/`headingStyleName` (`styleRegistry.ts:61-66` / `80-82`) decken
+bereits alle vier kanonischen Werte ab; nach Fix 5.8 kommen beim Export nur noch kanonische
+Werte an. Der `?? PARAGRAPH_ALIGN_STYLE_NAME.left`-Fallback (`writer.ts:89`) wird dadurch
+unerreichbarer Verteidigungscode, bleibt aber bewusst stehen (Robustheit gegen künftige, nicht
+über `normalizeAlign` laufende Aufrufer, z. B. direkt konstruierte Test-Dokumente).
 
 ### 5.10 `src/formats/shared/documentModel.ts` (keine Änderung)
 
-Bestätigt bereits korrekt: neues Dokument enthält explizit `{ type: 'paragraph',
-attrs: { align: 'left' } }` (Zeile 11), nicht nur einen leeren Attribut-Satz, der
-sich auf den Schema-Default verlässt — deckt Grenzfall 4.1 bereits ab, nur der Test
-fehlt (siehe Abschnitt 6.1).
+Bereits korrekt: `emptyDocJSON` (Z. 11) enthält explizit `{ type:'paragraph', attrs:{ align:
+'left' } }` statt eines leeren Attribut-Satzes — deckt Grenzfall 4.1 im Modell ab, nur der Test
+fehlt (Abschnitt 6.4 Punkt 1).
 
 ---
 
 ## 6. Testplan
 
-### 6.1 Neu: `src/formats/shared/editor/__tests__/commands.test.ts`
+### 6.1 Erweiterung: `src/formats/shared/editor/__tests__/commands.test.ts`
 
-Kernstück — das ist die einzige Test-Ebene, die Fehler 1/2/6 überhaupt fangen kann,
-da Reader/Writer-Rundreisetests `setAlign`/`setHeading` nie aufrufen (siehe
-Abschnitt 2, letzte Zeile der Tabelle). Verwendet eine echte `EditorView` mit
-`jsdom` (im Projekt bereits als Dev-Dependency vorhanden, `vitest` läuft mit
-`jsdom`-Environment, siehe `external-fixtures.test.ts`s `Blob`-Nutzung), mit
-derselben `dispatchTransaction`-Verdrahtung wie `WordEditor.tsx`:
+**Korrektur gegenüber der vorherigen Fassung dieses Abschnitts:** Diese Datei existiert
+bereits (angelegt durch das „Ausschneiden"-Feature, Commit `9f8fa03`) und enthält aktuell
+ausschließlich `describe('canCut', …)`/`describe('cutSelection', …)` — keine Zeile zu
+`setAlign`/`isAlignActive`/`setHeading`. Die vorherige Fassung dieses Plans behauptete
+„Neu: …/commands.test.ts" und lieferte einen kompletten Datei-Header (`import …`,
+`makeView`) so, als würde die Datei frisch angelegt — das hätte den bestehenden
+`canCut`/`cutSelection`-Import (`import { canCut, cutSelection } from '../commands'`, Z. 3
+der bestehenden Datei) und dessen Tests überschrieben. Richtig ist: **ergänzen**, nicht
+anlegen — ein neuer `import`-Eintrag (`setAlign, isAlignActive, setHeading` zusätzlich zu
+`canCut, cutSelection`) und zwei neue `describe`-Blöcke (`setAlign`/`setHeading`) werden an
+die bestehende Datei angehängt; `stateWithDoc()` (bestehende Datei, Z. 5–11) baut ein
+Doc **ohne** mehrere Absätze und ist für die Align-Tests ungeeignet — die neuen Tests
+brauchen einen eigenen Doc-Aufbau (`makeView`, unten) mit mind. zwei Absätzen bzw. einer
+3×3-Tabelle.
+
+Kernstück — die einzige Ebene, die Fehler 1/2/6 fangen kann, da Reader/Writer-Rundreisetests
+`setAlign`/`setHeading` nie aufrufen. Echte `EditorView` unter `jsdom` (bereits Dev-Dependency,
+`vitest` läuft mit `jsdom`-Environment) mit der `dispatchTransaction`-Verdrahtung aus
+`WordEditor.tsx`. Der in Abschnitt 1 verwendete Wegwerf-Test (in dieser Prüfrunde am
+2026-07-05 unverändert erneut ausgeführt und identisch reproduziert, siehe Kasten unten) wird
+hier zum dauerhaften Regressionstest verstetigt — als **zusätzliche** `describe`-Blöcke in der
+bestehenden Datei, mit einem eigenen, lokalen `makeView`-Helfer (Namenskollision mit der
+bestehenden `fakeView`-Hilfsfunktion, Z. 41, vermeiden):
 
 ```ts
-import { EditorState, TextSelection } from 'prosemirror-state'
+// Bestehende Zeile 1 wird um EditorView-Bedarf ergänzt (EditorState/TextSelection sind
+// bereits importiert); bestehende Zeile 3 wird um die drei neuen Symbole erweitert:
+import { EditorState, TextSelection, NodeSelection, AllSelection } from 'prosemirror-state'
 import { EditorView } from 'prosemirror-view'
-import { wordSchema } from '../../schema'
-import { setAlign, isAlignActive, setHeading } from '../commands'
+import { CellSelection } from 'prosemirror-tables'
+import { history, undo } from 'prosemirror-history'
+import { wordSchema } from '../../schema'                                    // bereits vorhanden (Z. 2)
+import { canCut, cutSelection, setAlign, isAlignActive, setHeading } from '../commands' // erweitert (Z. 3)
 
-function makeView(json: unknown) {
+function makeView(json: unknown, plugins: any[] = []) {
   const doc = wordSchema.nodeFromJSON(json)
-  let state = EditorState.create({ doc, schema: wordSchema })
+  const state = EditorState.create({ doc, schema: wordSchema, plugins })
   const view = new EditorView(document.createElement('div'), {
     state,
-    dispatchTransaction(tr) {
-      view.updateState(view.state.apply(tr))
-    },
+    dispatchTransaction(tr) { view.updateState(view.state.apply(tr)) },
   })
   return view
 }
-
-describe('setAlign', () => {
-  it('regression: does not throw and aligns every paragraph when the selection spans multiple blocks (Fehler 1)', () => {
-    const view = makeView({
-      type: 'doc',
-      content: [
-        { type: 'paragraph', attrs: { align: 'center' }, content: [{ type: 'text', text: 'Eins' }] },
-        { type: 'paragraph', attrs: { align: 'center' }, content: [{ type: 'text', text: 'Zwei' }] },
-      ],
-    })
-    view.dispatch(view.state.tr.setSelection(TextSelection.create(view.state.doc, 1, view.state.doc.content.size - 1)))
-    expect(() => setAlign('left')(view.state, view.dispatch)).not.toThrow()
-    const aligns = view.state.doc.toJSON().content.map((n: any) => n.attrs.align)
-    expect(aligns).toEqual(['left', 'left'])
-    view.destroy()
-  })
-
-  it('does not dispatch a transaction when every matching block already has the target alignment (Abschnitt 3.9 der Anforderung)', () => {
-    const view = makeView({
-      type: 'doc',
-      content: [{ type: 'paragraph', attrs: { align: 'left' }, content: [{ type: 'text', text: 'Text' }] }],
-    })
-    const before = view.state
-    const applicable = setAlign('left')(view.state, view.dispatch)
-    expect(applicable).toBe(true)
-    expect(view.state).toBe(before) // keine neue Transaktion angewendet
-    view.destroy()
-  })
-
-  it('a genuine alignment change produces exactly one undo step', async () => {
-    const { history, undo } = await import('prosemirror-history')
-    const doc = wordSchema.nodeFromJSON({
-      type: 'doc',
-      content: [
-        { type: 'paragraph', attrs: { align: 'center' }, content: [{ type: 'text', text: 'Eins' }] },
-        { type: 'paragraph', attrs: { align: 'center' }, content: [{ type: 'text', text: 'Zwei' }] },
-      ],
-    })
-    let state = EditorState.create({ doc, schema: wordSchema, plugins: [history()] })
-    const dispatch = (tr: any) => { state = state.apply(tr) }
-    state = state.apply(state.tr.setSelection(TextSelection.create(state.doc, 1, state.doc.content.size - 1)))
-    setAlign('left')(state, dispatch)
-    expect(state.doc.toJSON().content.map((n: any) => n.attrs.align)).toEqual(['left', 'left'])
-    undo(state, dispatch)
-    expect(state.doc.toJSON().content.map((n: any) => n.attrs.align)).toEqual(['center', 'center']) // EIN Undo, beide Absätze zurück
-  })
-})
-
-describe('setAlign with CellSelection (Grenzfall 4.8)', () => {
-  it('aligns every selected cell, not just the one the drag ended on, and leaves unselected columns untouched', () => {
-    // Tabelle 3x3 aufbauen (wordSchema.nodes.table/table_row/table_cell),
-    // CellSelection über die mittlere Spalte via cellAround()+CellSelection
-    // konstruieren (siehe Reproduktionsskript in Abschnitt 3.2), setAlign('left')
-    // aufrufen, prüfen: alle drei Zellen der mittleren Spalte sind 'left',
-    // Spalten 1 und 3 unverändert.
-  })
-})
-
-describe('setHeading preserves alignment (Fehler 6 / Grenzfall 4.9)', () => {
-  it('Standard -> Überschrift 1 keeps a previously centered paragraph centered', () => { /* ... */ })
-  it('Überschrift 1 -> Standard keeps a previously right-aligned heading right-aligned', () => { /* ... */ })
-})
 ```
+
+Tests (mind.):
+1. **Regression Fehler 1:** Zwei zentrierte Absätze, `TextSelection` über beide →
+   `setAlign('left')` wirft **nicht** und ergibt `['left','left']` (vor dem Fix:
+   `RangeError`, `['left','center']`).
+2. **No-op-Klick (Anforderung 3.10):** ein bereits linksbündiger Absatz → `setAlign('left')`
+   liefert `applicable === true`, aber `view.state` bleibt **identisch** (keine Transaktion).
+3. **Ein echter Wechsel = ein Undo-Schritt:** mit `history()`-Plugin; zwei zentrierte Absätze,
+   Selektion über beide, `setAlign('left')`, dann **ein** `undo` → wieder `['center','center']`.
+4. **Regression Fehler 2 (CellSelection, Grenzfall 4.8):** 3×3-Tabelle, `CellSelection.create`
+   über die mittlere Spalte → nach `setAlign('left')` sind **alle drei** Zellen der mittleren
+   Spalte `left`, Spalten 1/3 unverändert `center` (prüft Spalte 2 **vollständig**, siehe 3.2).
+5. **Fehler 6 (`setHeading`):** Standard→Überschrift 1 erhält eine zuvor gesetzte Zentrierung;
+   Überschrift 1→Standard erhält eine zuvor gesetzte Rechtsbündigkeit.
+6. **`isAlignActive`:** neuer Default-Absatz → `isAlignActive(state,'left') === true` ohne
+   jeden Befehl (Grenzfall 4.1 auf Kommando-Ebene).
 
 ### 6.2 Neu: `src/formats/docx/__tests__/alignment.test.ts`
 
-- `w:jc` = `start`/`end`/`distribute`/`both`/Groß-/Kleinschreibung (`LEFT`) → über
-  handgebautes XML (Muster wie `buildSampleDocx` in `tests/e2e/docx.spec.ts`)
-  gegen `readDocx` geprüft; `end` → `'right'` ist der zentrale Regressionstest für
-  Fehler 4.
-- Fixture-Test gegen die echte Datei `tests/fixtures/external/docx/bug-paragraph-alignment.docx`
-  (Muster wie `external-fixtures.test.ts`): Absatz 1 → `align: 'center'` (Fix für
-  Fehler 3), Absatz 2 → `align: 'left'` (direkte Formatierung gewinnt weiterhin).
-- Fixtures `rtl.docx`/`table-indent.docx`/`unicode-path.docx` (`w:jc="start"`) →
-  `align: 'left'`.
-- Fehlendes `w:jc` ganz allgemein (Grenzfall 4.12) → `align: 'left'`.
+- `w:jc` = `start`/`end`/`distribute`/`both`/`LEFT` (Groß-/Kleinschreibung) über handgebautes
+  XML (Muster wie `buildSampleDocx` in `tests/e2e/docx.spec.ts`) gegen `readDocx`; `end` →
+  `'right'` ist der zentrale Regressionstest für Fehler 4.
+- Fixture `tests/fixtures/external/docx/bug-paragraph-alignment.docx` (Muster wie
+  `external-fixtures.test.ts`): Absatz 1 → `align:'center'` (Fix Fehler 3), Absatz 2 →
+  `align:'left'` (direkte Formatierung gewinnt).
+- Fixtures `rtl.docx`/`table-indent.docx`/`unicode-path.docx` (`w:jc="start"`) → `align:'left'`.
+- Fehlendes `w:jc` (Grenzfall 4.12) → `align:'left'`.
 
 ### 6.3 Neu: `src/formats/odt/__tests__/alignment.test.ts`
 
-- Fixtures `EasyList.odt`/`feature_bullets_numbering.odt` (`end`) → `align: 'right'`.
-- Fixtures `FruitDepot-SeasonalFruits4.odt`/`fields.odt` (`start`) → `align: 'left'`.
-- Fixture `feature_attributes_paragraph_MSO2013.odt` (gemischt `center`/`end`/
-  `justify` im selben Dokument) → je Absatz korrekt unterschieden.
-- Fixture `HelloWorld.odt` (Style „Standard", kein `fo:text-align`) → `align:
-  'left'` (Testfall 5.2.7).
+- `EasyList.odt` (`end`) → `align:'right'`.
+- `FruitDepot-SeasonalFruits4.odt` (`start`) → `align:'left'`.
+- `feature_attributes_paragraph_MSO2013.odt` (gemischt `center`/`end`/`justify`) → je Absatz
+  korrekt unterschieden.
+- `HelloWorld.odt` (Stil „Standard", kein `fo:text-align`) → `align:'left'` (Testfall 5.2.7).
 
 ### 6.4 Neu: `tests/e2e/align-left.spec.ts`
 
-Struktur analog `tests/e2e/docx.spec.ts`/`odt.spec.ts`/
-`selection-regression.spec.ts` (gleiche `docxCard`/`odtCard`-Helfer). Deckt
-Abschnitt 6 der Anforderung Punkt für Punkt ab, insbesondere:
+Struktur analog `tests/e2e/docx.spec.ts`/`odt.spec.ts`/`selection-regression.spec.ts` (gleiche
+Karten-Helfer). Deckt Anforderung Abschnitt 6.4 Punkt für Punkt:
 
-1. Neues Dokument → „Links"-Button zeigt `aria-pressed="true"` ohne Klick
-   (Grenzfall 4.1).
-2. **Kernregressionstest für Fehler 1**: zwei Absätze eingeben, Strg+A, „Zentriert"
-   klicken, dann Strg+A erneut, „Links" klicken → **kein** Konsolenfehler, **beide**
-   Absätze sichtbar linksbündig (`style="text-align: left"` im DOM), Button-Zustand
-   für „Links" `true`, für „Zentriert" `false`.
-3. Testfall 2/3 der Anforderung (Toolbar-Klick, idempotenter Klick).
+1. Neues Dokument → „Linksbündig ausrichten" hat `aria-pressed="true"` **ohne** Klick (4.1).
+2. **Kernregression Fehler 1:** zwei Absätze eingeben, Strg+A, „Zentriert" klicken, erneut
+   Strg+A, „Linksbündig" klicken → **kein** Konsolenfehler, **beide** Absätze
+   `style="text-align: left"`, `aria-pressed` „Links"→true / „Zentriert"→false.
+3. Toolbar-Klick + idempotenter Zweitklick (Testfälle 2/3 der Anforderung).
 4. Gemischte Selektion (Testfall 4/Grenzfall 4.4).
 5. Absatzgrenze (Grenzfall 4.5).
-6. Liste zentrieren → links → Liste aufheben (Grenzfall 4.7).
-7. **3×3-Tabelle, nur mittlere Spalte markieren (Shift-Klick/Drag über
-   `td`-Elemente), „Links"** → alle drei Zellen der mittleren Spalte linksbündig,
-   Spalten 1/3 unverändert (Testfall 7/Grenzfall 4.8, nach Fix in 3.2 — vor dem Fix
-   hätte dieser Test bereits am „alle drei Zellen der mittleren Spalte"-Teil
-   scheitern müssen, nicht erst am „Spalten 1/3"-Teil).
-8. Formatvorlagen-Wechsel (Testfall 8/Grenzfall 4.9) — Erwartung nach Fix in 3.7:
-   Ausrichtung bleibt über den Wechsel erhalten (nicht mehr „wird auf links
-   zurückgesetzt").
+6. Listenpunkt zentrieren → links → Liste aufheben, Ausrichtung bleibt (Grenzfall 4.7).
+7. **3×3-Tabelle, mittlere Spalte per Drag über `td` markieren, „Linksbündig"** → alle drei
+   Zellen der Spalte links, Spalten 1/3 unverändert (Grenzfall 4.8; siehe Schärfung in 3.2).
+8. Formatvorlagen-Wechsel (Testfall 8/Grenzfall 4.9) — Erwartung nach Fix 3.7: Ausrichtung
+   **bleibt** über den Wechsel erhalten.
 9. Undo/Redo (Testfall 9).
-10. Tastenkombinationen Strg+L/E/R/J je einmal per `page.keyboard.press`, inkl.
-    Tab-Fokus + Enter/Space auf den Button selbst (deckt Fehler 7 **und** 8).
-11. Vollständige Rundreisen je Format (Abschnitt 5.1/5.2 der Anforderung, echter
-    Upload/Download).
-12. Cross-Format- und Doppel-Rundreise (Abschnitt 5.3).
-13. Fremddatei-Import: `bug-paragraph-alignment.docx`, `EasyList.odt` — Ergebnis
-    gemäß Abschnitt 3.3/3.5 dieses Plans im Browser nachvollzogen.
+10. Tastenkürzel Strg+L/E/R/J je `page.keyboard.press`, plus Tab-Fokus + Enter/Space auf den
+    Button (deckt Fehler 7 **und** 8; prüft zusätzlich, dass die Browser-Standardaktion
+    unterdrückt bleibt, solange der Editor fokussiert ist).
+11. Vollständige Rundreisen je Format (Anforderung 5.1/5.2) über echten `setInputFiles`-Upload
+    und `waitForEvent('download')` — für „links" mit **aktivem Rückweg** (zentrieren → links).
+12. Cross-Format- und Doppel-Rundreise (Anforderung 5.3).
+13. Fremddatei-Import `bug-paragraph-alignment.docx` / `EasyList.odt` im Browser nachvollzogen
+    (Abschnitt 3.3/3.5).
 14. Sichtprüfung/Screenshot (Testfall 15).
+
+Selektor-Hinweis: Der Titel lautet nach Fix 5.3 „Linksbündig ausrichten" — E2E-Selektoren
+nutzen `page.getByTitle('Linksbündig ausrichten')` (nicht mehr „Ausrichtung: left").
 
 ### 6.5 Erweiterung: `tests/e2e/selection-regression.spec.ts`
 
-Neuer Test, Muster identisch zu den bestehenden Fett-Tests, aber mit „Links" (nach
-vorherigem Zentrieren) als auslösender Aktion **über zwei Absätze hinweg** (deckt
-Grenzfall 4.14 — und hätte, wäre er schon vor diesem Plan geschrieben worden,
-Fehler 1 sofort sichtbar gemacht):
+Neuer Test, Muster wie die bestehenden Fett-Regressionstests, aber mit „Linksbündig" (nach
+vorherigem Zentrieren) **über zwei Absätze** als auslösender Aktion (Grenzfall 4.14 — und
+hätte, früher geschrieben, Fehler 1 sofort sichtbar gemacht):
 
 ```ts
-test('same regression with a multi-paragraph "Links"-alignment as the triggering action (Grenzfall 4.14)', async ({ page }) => {
+test('same regression with a multi-paragraph "Links" alignment as trigger (Grenzfall 4.14)', async ({ page }) => {
   const editor = page.locator('.ProseMirror')
   await editor.click()
   await page.keyboard.type('Erster Absatz.')
@@ -876,7 +884,7 @@ test('same regression with a multi-paragraph "Links"-alignment as the triggering
   await page.keyboard.press('ControlOrMeta+a')
   await page.getByTitle('Zentriert ausrichten').click()
   await page.keyboard.press('ControlOrMeta+a')
-  await page.getByTitle('Linksbündig ausrichten').click() // vor dem Fix: Exception, zweiter Absatz bleibt zentriert
+  await page.getByTitle('Linksbündig ausrichten').click() // vor Fix: Exception, 2. Absatz bleibt zentriert
   await editor.click()
   await page.keyboard.press('End')
   await page.keyboard.press('Enter')
@@ -888,74 +896,77 @@ test('same regression with a multi-paragraph "Links"-alignment as the triggering
 
 ### 6.6 Erweiterung: `roundtrip.test.ts` (beide Formate)
 
-Neuer Fall je Datei: Dokument mit **zwei** unterschiedlich ausgerichteten Absätzen
-in einem Schreib-/Lesevorgang (reine Reader/Writer-Prüfung, deckt **nicht** Fehler
-1 — das ist nur über 6.1/6.4 möglich, hier nur zur Absicherung, dass der Writer bei
-mehreren Blöcken pro Aufruf korrekt bleibt, was er bereits war, da `blocksToDocx`/
-`blocksToOdt` ohnehin über ein Array iterieren, unabhängig vom Editor-Befehl).
+Je Datei ein Fall mit **zwei** unterschiedlich ausgerichteten Absätzen in **einem**
+Schreib-/Lesevorgang (reine Reader/Writer-Prüfung; deckt **nicht** Fehler 1 — das nur über
+6.1/6.4 — sondern sichert ab, dass Writer/Reader bei mehreren Blöcken korrekt bleiben, was sie
+bereits sind, da `blocksToDocx`/`blocksToOdt` über ein Array iterieren, unabhängig vom
+Editor-Befehl).
 
-### 6.7 Erweiterung: `external-fixtures.test.ts` (beide Formate, optional)
+### 6.7 `external-fixtures.test.ts` (beide Formate, Kenntnisnahme)
 
-Keine neue Assertion nötig (6.2/6.3 decken die konkreten Fixtures bereits gezielt
-ab) — nur zur Kenntnisnahme: `bug-paragraph-alignment.docx` bleibt in der
-generischen „importiert ohne Absturz"-Suite, jetzt zusätzlich mit einer inhaltlich
-korrekten (nicht nur „crasht nicht") Prüfung in `alignment.test.ts` abgesichert.
-
----
-
-## 7. Entscheidungen zu den offenen Fragen (Abnahmekriterien 4 und 7)
-
-1. **Formatvorlagen-Wechsel (Grenzfall 4.9, DoD 4):** Entschieden als **Fehler**,
-   siehe Fehler 6/Fix in Abschnitt 3.7/5.2. Begründung: Word/LibreOffice bewahren
-   die Absatzausrichtung beim Wechsel der Formatvorlage; ein stillschweigender
-   Reset widerspricht außerdem dem in Abschnitt 1 der Anforderung formulierten Ziel
-   „die Ausrichtung bleibt … vollständig erhalten" und wäre der naheliegendste Weg,
-   wie ein Absatz **ungewollt** linksbündig wird — was die Anforderung selbst als
-   Risiko benennt.
-2. **Tastenkombination (Abschnitt 2 Zeile 2, DoD 7):** Entschieden als
-   **nachzuliefernde Funktion**, nicht „bewusst nicht im Scope". Begründung:
-   Fett/Kursiv/Unterstrichen haben bereits Tastenkombinationen; das Fehlen bei
-   Ausrichtung ist eine Inkonsistenz ohne erkennbaren Grund, Word/LibreOffice-
-   Konvention (Strg+L/E/R/J) ist eindeutig, keine Kollision mit bestehender Keymap
-   (siehe Abschnitt 5.4). Umsetzung siehe dort.
-3. **`aria-label` (Grenzfall 4.16, DoD 7):** Entschieden als **zu schließende
-   Lücke**, nicht „title reicht aus". Begründung: Konsistenz mit `MarkButton`
-   (bereits `aria-label` gesetzt), kein Mehraufwand, kein Nachteil.
+Keine neue Assertion nötig — 6.2/6.3 decken die konkreten Fixtures gezielt ab.
+`bug-paragraph-alignment.docx` bleibt in der generischen „importiert ohne Absturz"-Suite,
+jetzt zusätzlich inhaltlich (nicht nur „crasht nicht") in `alignment.test.ts` abgesichert.
 
 ---
 
-## 8. Zuordnung zu den Abnahmekriterien (Abschnitt 8 der Anforderung)
+## 7. Entscheidungen zu den offenen Fragen (Abnahmekriterien 4/5/8)
+
+1. **Formatvorlagen-Wechsel (Grenzfall 4.9, DoD 4):** **Fehler** (Fehler 6/Fix 3.7).
+   Begründung: Word/LibreOffice bewahren die Absatzausrichtung beim Formatvorlagen-Wechsel; ein
+   stiller Reset widerspricht dem Anforderungsziel „die Ausrichtung bleibt … erhalten" und ist
+   der naheliegendste Weg, wie ein Absatz **ungewollt** linksbündig wird (Risiko R1 der
+   Anforderung).
+2. **Tabellen-Zellauswahl (Grenzfall 4.8, DoD 5):** geprüft; tatsächliches Verhalten
+   (Unteranwendung, 1 von 3) dokumentiert (Fehler 2) und behoben (Fix 3.1).
+3. **`start`/`end`/`distribute`, Stilvererbung (DoD 6):** je echte Fremddatei geprüft (Fehler
+   3/4/5); `end`→rechts, `start`→links, `distribute`→justify, Stil-`w:jc` wird aufgelöst.
+4. **Tastenkombination (Anforderung Abschnitt 2 Zeile 2, DoD 8):** **nachzuliefernde Funktion**
+   (Fix 5.4). Begründung: Fett/Kursiv/Unterstrichen haben bereits Kürzel; das Fehlen bei
+   Ausrichtung ist eine grundlose Inkonsistenz, Word/LibreOffice-Konvention (Strg+L/E/R/J) ist
+   eindeutig, keine Keymap-Kollision.
+5. **`aria-label` (Grenzfall 4.16, DoD 8):** **zu schließende Lücke** (Fix 5.3). Begründung:
+   Konsistenz mit `MarkButton`, kein Mehraufwand, kein Nachteil.
+
+---
+
+## 8. Zuordnung zu den Abnahmekriterien (Abschnitt 9 der Anforderung)
 
 | DoD-Punkt | Abdeckung durch diesen Plan |
 |---|---|
-| 1. Alle Testfälle aus Abschnitt 6 real im Browser | Abschnitt 6.4 (`align-left.spec.ts`) |
-| 2. Rundreise-Testfälle 5.1/1,2,6 und 5.2/1,2,6 mit echten Werkzeugen | Abschnitt 6.2/6.3 (echte Fixtures) + Abschnitt 6.4 Punkt 11 (echter Upload/Download) |
-| 3. Tabellen-Zellauswahl-Grenzfall (4.8) geprüft, Verhalten dokumentiert | Abschnitt 3.2 (tatsächliches Verhalten verifiziert und korrigiert, Gegenteil der Vermutung) |
-| 4. Formatvorlagen-Wechsel-Grenzfall (4.9) entschieden | Abschnitt 7 Punkt 1 (Fehler, behoben) |
-| 5. ODF-/OOXML-Wertevarianten (4.10/4.11) mit echten Testdateien geprüft | Abschnitt 3.5/3.4 (vier bzw. drei echte Fixtures je Format) |
-| 6. Regressionstest Selection-Sync mit Ausrichtung dauerhaft in Suite | Abschnitt 6.5 |
-| 7. Tastenkombination/`aria-label` entschieden | Abschnitt 7 Punkte 2/3 |
-| 8. Kein Fund ohne Ticket/Vermerk | Abschnitt 3 (Fehler 1–8) + Abschnitt 4 (Klarstellungen) — nichts offen gelassen |
+| 1. Alle Testfälle 6.4 automatisiert + ≥ 1 E2E-Klick auf `AlignButton`, Wert `left` über UI | Abschnitt 6.4 (`align-left.spec.ts`, insb. Punkt 2/10) |
+| 2. Rundreise 5.1/1,2,6 und 5.2/1,2,6, aktiver Rückweg, je echte Fremddatei | 6.2/6.3 (echte Fixtures) + 6.4 Punkt 11 (echter Upload/Download) |
+| 3. Direkter Export-Wert-Check (`w:jc="left"` bzw. Stil `fo:text-align="left"`) zusätzlich zu mammoth/RelaxNG | 6.2/6.3 (direkter `word/document.xml`- bzw. Stil-XML-Check) |
+| 4. R1 (Formatvorlagen-Reset) entschieden | Abschnitt 7 Punkt 1 (Fehler, behoben) |
+| 5. R6 (Tabellen-Zellauswahl) geprüft/dokumentiert | Abschnitt 3.2 (Verhalten verifiziert, korrigiert) |
+| 6. R2/R3 (`start`/`end`/`distribute`, Stilvererbung) je echte Datei je Format | Abschnitt 3.3/3.4/3.5 |
+| 7. Selection-Sync-Regressionstest mit Ausrichtung dauerhaft in Suite | Abschnitt 6.5 |
+| 8. Tastenkombination (R7) / `aria-label` (R8) entschieden | Abschnitt 7 Punkte 4/5 |
+| 9. Jeder Risikopunkt „behoben"/„dokumentiert"/„widerlegt" | Abschnitt 3 (Fehler 1–8, inkl. R4 no-op-Undo widerlegt in 4) + Abschnitt 4 |
+
+Risiko-Abgleich (Anforderung Abschnitt 7): R1→Fehler 6 (behoben) · R2→Fehler 3/5 (behoben) ·
+R3→Fehler 4 (behoben) · R4→Abschnitt 4 (behoben: 1 Transaktion, kein no-op-Dispatch) · R5→
+Abschnitt 4 (bewusst dokumentiert: `$from`-Zustand) · R6→Fehler 2 (behoben) · R7→Fehler 7
+(behoben, Kürzel) · R8→Fehler 7 (behoben, `aria-label`) · R9→Fehler 7 (behoben, lokalisierter
+Titel) · R10→Fix 5.3 (SVG-Icons).
 
 ---
 
 ## 9. Reihenfolge der Umsetzung (Vorschlag)
 
-1. `src/formats/shared/align.ts` (5.1) — unabhängig, Grundlage für alle weiteren
-   Schritte.
-2. `commands.ts` (5.2) — behebt Fehler 1, 2, 6, die schwerwiegendsten Funde
-   zuerst, da Fehler 1 den zentralen Anwendungsfall der gesamten Anforderung
-   bricht.
-3. `src/formats/shared/editor/__tests__/commands.test.ts` (6.1) sofort im Anschluss,
-   um Fehler 1/2/6 dauerhaft als Regressionstest zu verankern, bevor an der
-   Oberfläche weitergearbeitet wird.
-4. `Toolbar.tsx` + `WordEditor.tsx` (5.3/5.4) — Tastenkombinationen, `aria-label`,
-   Icons, Tastatur-Auslösbarkeit.
+1. `src/formats/shared/align.ts` (5.1) — Grundlage für alle weiteren Schritte.
+2. `commands.ts` (5.2) — behebt Fehler 1, 2, 6; der schwerwiegendste Fund zuerst, da Fehler 1
+   den zentralen Anwendungsfall bricht.
+3. `commands.test.ts` (6.1) sofort danach — Fehler 1/2/6 als Regressionstest verankern, bevor
+   an der Oberfläche weitergearbeitet wird.
+4. `Toolbar.tsx` + `WordEditor.tsx` (5.3/5.4) — Tastenkürzel, `aria-label`, Icons, Tastatur-
+   Auslösbarkeit.
 5. `schema.ts` (5.5) — Paste-Import-Normalisierung.
 6. `docx/reader.ts` (5.6) — Formatvorlagen-Ausrichtung + `normalizeAlign`.
 7. `odt/reader.ts` (5.8) — `normalizeAlign`.
-8. Testergänzungen 6.2–6.7, um 5.5–5.8 gezielt mit den bereits identifizierten
-   echten Fixtures abzusichern.
-9. `tests/e2e/align-left.spec.ts` (6.4) + Erweiterung `selection-regression.spec.ts`
-   (6.5) als Abschluss — verifiziert alle vorherigen Schritte end-to-end im
-   echten Browser, wie von Abschnitt 7 der Anforderung gefordert.
+8. Testergänzungen 6.2/6.3/6.6 gegen die identifizierten echten Fixtures.
+9. `tests/e2e/align-left.spec.ts` (6.4) + Erweiterung `selection-regression.spec.ts` (6.5) —
+   verifiziert alle vorherigen Schritte end-to-end im echten Browser.
+
+Nach jedem abgeschlossenen Schritt committen/pushen und den GitHub-Actions-Lauf selbst prüfen
+(nicht auf „grün" vertrauen), bevor der nächste Schritt beginnt.

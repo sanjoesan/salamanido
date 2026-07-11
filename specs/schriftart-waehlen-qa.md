@@ -58,6 +58,104 @@ Abschnitt 7 als „vollständig verifiziert" gilt. Reihenfolge:
 
 ---
 
+## 0.1 Determinismus-Regeln für die E2E-Ebene (verbindlich, nicht optional)
+
+Die Playwright-Tests dieses Plans laufen laut `playwright.config.ts` in **allen
+projekten ohne `testMatch`-Filter**, d. h. `font-family.spec.ts` und die
+Erweiterung von `selection-regression.spec.ts` werden je einmal unter **Desktop
+Chrome**, **Mobile (Pixel 7)** und **Tablet (iPad Mini)** ausgeführt. Genau in
+den nicht-Desktop-Projekten sind zuletzt mehrere Tests durch
+Selektions-Sync-Races geflakt (siehe Git-Historie: „Fix flaky Mobile-project …:
+same async-selection-sync race", „give async selection sync time before the
+next keystroke"). Die folgenden Regeln sind deshalb **Teil der
+Testspezifikation** — ein Test, der sie verletzt, gilt als nicht abgenommen,
+auch wenn er auf Desktop Chrome zufällig grün ist.
+
+**R1 — Selektions-Sync nach tastaturgetriebener Cursor-/Selektionsänderung
+abwarten.** ProseMirror lernt eine native, tastaturgetriebene Caret-Beweg
+(`ArrowLeft/Right/Up/Down`, `Home`, `End`, Klick-Neupositionierung) erst über
+das **asynchrone** `selectionchange`-Event des Browsers. Eine unmittelbar
+folgende `press()`/`type()` — die in Playwright ohne menschliche Reaktionszeit
+feuert — kann diesem Nachziehen vorauslaufen und noch auf der alten Position
+wirken. Nach jeder solchen Bewegung, die einer weiteren Tasteneingabe
+vorausgeht, ist **`await page.waitForTimeout(50)`** einzufügen — exakt das
+bereits in `tests/e2e/selection-regression.spec.ts` (Zeile 34, 72) etablierte
+und dort ausführlich kommentierte Muster. Das betrifft in diesem Plan
+insbesondere: §2.1 #3–#5 (Stored Mark → Cursorbewegung → Tippen; Enter →
+Tippen), §2.9 Zeile 3.7 (Undo/Redo nach mehreren Tippschritten), §2.9 Zeile 3.8
+(leeres Dokument → Schriftart → Tippen), §2.10 (Schnellwechsel-Stresstest).
+
+**R2 — Keine Selektions-Sync-freien Schnellwiederholungen.** Ein `for`-Loop, der
+`fill()` + `press('Enter')` auf derselben (evtl. veralteten) Selektion mehrfach
+in Folge feuert, ist die klassische Race-Quelle. In jeder Iteration ist die
+Selektion **frisch neu zu setzen** (z. B. erneutes `ControlOrMeta+a`) und nach
+einem selektionsverändernden Schritt R1 anzuwenden. Assertions am Ende prüfen
+nicht nur `toContainText`, sondern zusätzlich die **Absatz-/Knotenstruktur**
+(`.ProseMirror p` → `toHaveCount(...)`), damit ein stiller Inhalts-/
+Strukturverlust nicht durchrutscht (analog zu den bestehenden
+`selection-regression`-Assertions).
+
+**R3 — Nur web-first, automatisch wiederholende Assertions für Combobox-Zustand.**
+Der Anzeigewert der Combobox stammt aus `getActiveFontFamily(view.state)` und
+wird über den `forceRender`-Mechanismus der Toolbar **nach** der Transaktion neu
+gerendert (React-async). Der Combobox-Zustand ist deshalb **ausschließlich** über
+retrying Matcher zu prüfen — `await expect(fontInput(page)).toHaveValue('Georgia')`,
+`await expect(fontInput(page)).toHaveJSProperty('placeholder', 'Gemischt')` bzw.
+`toHaveAttribute('placeholder', 'Standard')`, `await expect(editorSpan).toHaveCSS(...)` —
+**niemals** über ein synchrones `inputHandle.inputValue()`/`evaluate(...)`
+unmittelbar nach der Aktion (das liest evtl. den Zustand vor dem Re-Render). Die
+`fill(...)`/`.press('Enter')`-Eingabe selbst bleibt erlaubt; nur die **Prüfung**
+muss retrying sein.
+
+**R4 — Fokus-Rückkehr in den Editor vor Stored-Mark-Tippen bestätigen.** Die
+Combobox ruft nach `commit()` `view.focus()` auf, während `setOpen(false)`/
+`setQuery('')` React-async nachlaufen. Vor einem anschließenden
+`keyboard.type(...)` (Stored-Mark-Fälle §2.1 #3, §2.9 Zeile 3.8) wird die
+Fokus-Rückkehr über `await expect(editor).toBeFocused()` abgesichert, statt
+blind sofort zu tippen.
+
+**R5 — Vor jedem Re-Import zurück zum Datei-Picker navigieren.** Der
+`input[type="file"]` existiert **nur** auf dem Auswahl-Bildschirm, nicht im
+geöffneten `DocumentWorkspace`. Jeder Rundreise-Test (§2.12) klickt vor dem
+zweiten `setInputFiles(...)` erst
+`await page.getByRole('button', { name: /formate/i }).click()` (Button „←
+Formate", verifiziert in `DocumentWorkspace.tsx` Zeile 113) — sonst schlägt das
+Re-Import-`setInputFiles` fehl. Genau dieses Muster nutzt bereits `docx.spec.ts`
+(Zeile 241/331).
+
+**R6 — Konkretes Dirty-Signal.** Der einzige UI-Ausdruck von `dirty` ist der
+amberfarbene Text **„● ungespeichert"** (`DocumentWorkspace.tsx` Zeile 118–120),
+der nur bei `document.dirty === true` gerendert wird. „Kein unnötiges
+Dirty-Flag" (§2.12 #5, Kriterium 7) wird deshalb als
+`await expect(page.getByText('ungespeichert')).toHaveCount(0)` geprüft —
+**unmittelbar nach dem Upload und vor jeder Editor-Interaktion** (jede
+Tastatur-/Klickaktion im Editor setzt `dirty` über `onChange` bewusst auf
+`true`, und ein Export setzt es wieder auf `false`, `DocumentWorkspace.tsx`
+Zeile 84 — die Prüfung muss also vor beidem liegen).
+
+**R7 — Klick auf Options-Einträge statt Tastatur, wo Tastatur nicht Prüfgegenstand
+ist.** Optionsklicks sind durch `onMouseDown`+`preventDefault()` (unterdrückt den
+Input-Blur) deterministisch; `getByRole('option', { name: '…' }).click()` wartet
+web-first auf Sichtbarkeit/Aktionierbarkeit. Reine Tastaturpfade (Pfeile/Enter/
+Escape/Tab) werden separat und gezielt in §2.4/§2.8 #2 geprüft, nicht implizit in
+jedem anderen Test mitgetestet.
+
+**R8 — Combobox-Locator eindeutig halten (`{ exact: true }`), sonst Strict-Mode-Bruch.**
+Die Combobox-Eingabe trägt `aria-label="Schriftart"`, der Entfernen-Button
+`aria-label="Schriftart entfernen"` (`schriftart-waehlen-code.md` Abschnitt 7.1, 0.2
+Punkt 4). Playwrights `getByLabel('Schriftart')` matcht per Teilstring-Default **beide**
+Elemente — jede Aktion darauf (`.fill`/`.press`/`.click`/`expect`) scheitert dann sofort
+mit einem Strict-Mode-Verstoß, **auch auf Desktop Chrome** (das ist kein Flake, sondern
+ein harter, sofort reproduzierbarer Fehler). Das Eingabefeld wird deshalb **ausnahmslos**
+über `page.getByLabel('Schriftart', { exact: true })` (Helfer `fontInput`, §2.0)
+adressiert, der Entfernen-Button über `getByRole('button', { name: 'Schriftart
+entfernen' })` (Helfer `fontRemoveButton`, §2.0). Diese Regel gilt in **jeder**
+E2E-Datei dieses Plans, einschließlich der Schnellwechsel-Erweiterung von
+`selection-regression.spec.ts` (§2.10) — dort wurde `{ exact: true }` in einer früheren
+Fassung versehentlich weggelassen; der korrigierte Snippet unten führt es wieder.
+
+---
+
 ## 1. Unit-Tests: Reader/Writer-Rundreise (DOCX + ODT)
 
 Ziel: jede Reader-/Writer-Behauptung aus `schriftart-waehlen-code.md`
@@ -179,8 +277,9 @@ erzwingt.
 ## 2. Echte Playwright-Browser-Tests
 
 **Grundregel dieser Ebene:** Jeder Test bedient die Anwendung ausschließlich
-so, wie eine Person es täte — `page.getByLabel('Schriftart').fill(...)`/
-`.press(...)`, `page.getByRole('option', { name: ... }).click()`,
+so, wie eine Person es täte — `page.getByLabel('Schriftart', { exact: true }).fill(...)`/
+`.press(...)` (zum `{ exact: true }` siehe Regel R8),
+`page.getByRole('option', { name: ... }).click()`,
 `input.setInputFiles(...)` für Uploads, `page.waitForEvent('download')` +
 Lesen der heruntergeladenen Datei vom Datenträger für Exporte. **Kein Test in
 diesem Abschnitt darf** `readDocx`/`writeDocx`/`readOdt`/`writeOdt`/
@@ -204,7 +303,17 @@ function odtCard(page: Page) {
   return page.locator('div.rounded-lg', { has: page.getByRole('heading', { name: 'OpenDocument Text (.odt)' }) })
 }
 function fontInput(page: Page) {
-  return page.getByLabel('Schriftart')
+  // `{ exact: true }` ist PFLICHT (siehe schriftart-waehlen-code.md Abschnitt 0.2 Punkt 4):
+  // der Entfernen-Button trägt aria-label="Schriftart entfernen"; ohne `exact` matcht der
+  // Teilstring-Default von getByLabel BEIDE Elemente (Eingabefeld + Button) → Playwright-
+  // Strict-Mode-Verstoß, der jede Combobox-Aktion (.fill/.press/.click/expect) sofort
+  // scheitern lässt. Siehe verbindliche Regel R8 in Abschnitt 0.1.
+  return page.getByLabel('Schriftart', { exact: true })
+}
+function fontRemoveButton(page: Page) {
+  // Der Entfernen-Button wird umgekehrt gezielt über seinen vollständigen, eindeutigen
+  // Namen adressiert (enthält "Schriftart" nur als Teilstring des längeren Labels).
+  return page.getByRole('button', { name: 'Schriftart entfernen' })
 }
 ```
 
@@ -223,6 +332,18 @@ nach Testfall `odtCard`/`docxCard` „Neu erstellen" klicken (analog zu
 | 5 | Enter-Verhalten nach Schriftart an der Schreibmarke ist dokumentiert und konsistent mit Fett | Schriftart an Schreibmarke setzen, `keyboard.press('Enter')`, tippen; paralleler Vergleichstest: Fett an Schreibmarke setzen, Enter, tippen | Ergebnis (Übernahme in neuen Absatz oder Rückfall) ist für Schriftart und Fett **identisch** — kein Sonderfall nur für Schriftart (Anforderung 2.2 Absatz 3) |
 | 6 | Text außerhalb der Selektion bleibt unverändert | wie #1 | „Vorher"/„nachher" behalten exakt ihren vorherigen DOM-Zustand (kein zusätzliches `<span>`) |
 
+**Determinismus (R1/R3/R4):** In #3/#4 wird die Schriftart per Combobox gesetzt
+(`commit()` → `view.focus()`), danach **`await expect(editor).toBeFocused()`**
+(R4), erst dann `keyboard.type('NEU')`. Die anschließende Cursorbewegung in #4
+(`ArrowLeft`) ist eine tastaturgetriebene Selektionsänderung → **danach
+`await page.waitForTimeout(50)` vor dem nächsten Tippen** (R1). In #5 folgt
+`Enter` unmittelbar auf das Setzen der Stored Mark; der Vergleichszweig
+(Fett-Stored-Mark) muss dieselbe Warte-/Ablauf-Struktur verwenden, sonst
+vergleicht der Test zwei unterschiedlich getaktete Abläufe. Die Assertion, dass
+„NEU" die Schriftart trägt, ist eine web-first Locator-Assertion
+(`expect(page.locator('.ProseMirror span[style*="font-family"]', { hasText: 'NEU' })).toHaveCount(1)`),
+kein synchrones DOM-Auslesen (R3).
+
 ### 2.2 Anzeige der aktiven Schriftart (Anforderung 2.3, Grenzfall 3.1)
 
 | # | Testfall | Schritte | Assertion |
@@ -232,6 +353,21 @@ nach Testfall `odtCard`/`docxCard` „Neu erstellen" klicken (analog zu
 | 3 | Text ohne explizite Mark zeigt Platzhalter „Standard", kein leerer/verwirrender Zustand | Cursor in unformatierten Text | `fontInput(page)` hat leeren Wert, `placeholder` ist „Standard" |
 | 4 | Selektion über zwei unterschiedliche Schriftarten → „Gemischt" | beide Läufe aus #2 gemeinsam markieren | `fontInput(page)` hat leeren Wert, `placeholder` ist „Gemischt" (Grenzfall 3.1, Anforderung 1 Zeile 8) |
 | 5 | Anwenden einer neuen Schriftart auf die „gemischte" Selektion vereinheitlicht | Fortsetzung von #4: Schriftart „Tahoma" auswählen | beide vormals unterschiedlichen Läufe tragen jetzt einheitlich „Tahoma" |
+
+**Determinismus (R1/R3):** Der Cursor wird per **Klick** in den Ziellauf gesetzt
+(deterministisch positioniert), nicht per Pfeiltasten-Zählung. Klick-Neupositio
+nierung ist ebenfalls eine asynchrone Selektionsänderung → der Combobox-Wert
+wird **nur** über retrying Matcher geprüft:
+`await expect(fontInput(page)).toHaveValue('Georgia')` (#1),
+`await expect(fontInput(page)).toHaveAttribute('placeholder', 'Standard')` bei
+markenlosem Text (#3),
+`await expect(fontInput(page)).toHaveAttribute('placeholder', 'Gemischt')` bei
+gemischter Selektion (#4). Da diese Matcher automatisch wiederholen, wird das
+async `forceRender` der Toolbar korrekt abgewartet — kein manuelles Sleep nötig,
+aber auch **kein** synchrones `inputValue()` erlaubt (R3). Für #4 wird die
+Mehrlauf-Selektion deterministisch per `ControlOrMeta+a` (ganzes Dokument mit
+zwei verschieden formatierten Läufen) oder per klar definiertem
+Shift+Klick-Bereich erzeugt.
 
 ### 2.3 Live-Rendering im Editor (Anforderung 2.6)
 
@@ -251,7 +387,7 @@ nach Testfall `odtCard`/`docxCard` „Neu erstellen" klicken (analog zu
 | 4 | Pfeiltasten navigieren die gefilterte Liste | Combobox öffnen, `keyboard.press('ArrowDown')` zweimal | zweiter Eintrag ist optisch/`aria-selected` als markiert erkennbar |
 | 5 | Enter übernimmt den markierten Eintrag | Fortsetzung von #4: `keyboard.press('Enter')` | markierte Schriftart wird angewendet, nicht der zuerst getippte Text |
 | 6 | Escape schließt die Liste ohne Änderung, alter Wert bleibt | Combobox öffnen, tippen, `keyboard.press('Escape')` | Liste geschlossen, Dokument-Formatierung unverändert, Anzeigewert zeigt wieder die zuvor aktive Schriftart |
-| 7 | Tab erreicht die Combobox (reine Tastaturbedienung, kein Maus-only-Weg) | wiederholt `keyboard.press('Tab')` von einem bekannten Startpunkt (z. B. Absatzformat-Dropdown) | Fokus landet auf der Schriftart-Combobox, bestätigt durch `expect(fontInput(page)).toBeFocused()` |
+| 7 | Tab erreicht die Combobox (reine Tastaturbedienung, kein Maus-only-Weg) | von einem bekannten Startpunkt (das Absatzformat-`<select>` per Klick fokussieren, dann eine definierte Anzahl `keyboard.press('Tab')` — die Combobox folgt in der Tab-Reihenfolge direkt danach, siehe Anforderung 4.8/1 Zeile 1) | Fokus landet auf der Schriftart-Combobox, bestätigt durch die web-first Assertion `await expect(fontInput(page)).toBeFocused()` (retrying, kein synchrones `document.activeElement`-Lesen) |
 
 ### 2.5 Live-Vorschau je Listeneintrag (Anforderung 1 Zeile 5)
 
@@ -280,7 +416,7 @@ nach Testfall `odtCard`/`docxCard` „Neu erstellen" klicken (analog zu
 |---|---|---|---|---|
 | 1 | Nur eine Dropdown-Liste gleichzeitig offen | Absatzformat-Dropdown öffnen, dann Klick in Schriftart-Combobox | Absatzformat-Liste ist geschlossen/nicht mehr sichtbar, Schriftart-Liste offen, keine Überlappung | 4.1 |
 | 2 | Vollständige Tastaturbedienung ohne Maus | Tab zur Combobox, Pfeiltasten, Enter, Escape (siehe 2.4) — kein `click()` auf die Liste selbst in diesem Testfall | Auswahl funktioniert vollständig ohne Mausereignis | 4.2 |
-| 3 | Öffnen der Liste zerstört Editor-Selektion nicht vor Bestätigung | Text markieren, Combobox öffnen (fokussieren), **ohne** Auswahl zu bestätigen kurz warten, dann `keyboard.press('Escape')` | ursprüngliche Selektion/Formatierung im Dokument ist unverändert; kein Selection-Sync-Fehler analog zu `selection-regression.spec.ts` | 4.3 |
+| 3 | Öffnen der Liste zerstört Editor-Selektion nicht vor Bestätigung | Text markieren, Combobox öffnen (fokussieren), **ohne** Auswahl zu bestätigen `await page.waitForTimeout(50)`, dann `keyboard.press('Escape')` | ursprüngliche Selektion/Formatierung im Dokument ist unverändert (Gegenprobe: unmittelbar danach dieselbe Formatierungsaktion auf der noch stehenden Selektion greift auf denselben Bereich); kein Selection-Sync-Fehler analog zu `selection-regression.spec.ts` | 4.3 |
 | 4 | Blur durch Klick außerhalb ohne Auswahl → keine Änderung | Combobox öffnen, Text in Eingabefeld tippen, dann irgendwo außerhalb (z. B. auf den Editor) klicken, ohne Enter/Options-Klick | Dokument unverändert, Anzeigewert kehrt zur zuvor aktiven Schriftart zurück | 4.4 |
 | 5 | Wiederholtes schnelles Öffnen/Schließen verursacht keinen doppelten Berechtigungsdialog/kein Speicherleck | Combobox zehnmal hintereinander schnell fokussieren/blurren (`for`-Schleife mit `focus()`/`blur()` via Tastatur-Tab) | Anwendung bleibt reaktionsfähig, keine Konsolen-Fehler (`page.on('console')`/`page.on('pageerror')`-Assertion: keine Errors) | 4.5 |
 
@@ -301,6 +437,35 @@ nach Testfall `odtCard`/`docxCard` „Neu erstellen" klicken (analog zu
 | 3.17 | Track Changes | **kein Test** — nachrichtlich, da Track Changes selbst noch nicht existiert (Anforderung selbst markiert dies als nicht blockierend) | — | — |
 | 3.18 | Race Condition Doppelklick + Dropdown | Doppelklick auf ein Wort (Wort-Selektion) unmittelbar gefolgt von Klick in die Schriftart-Combobox und Auswahl eines Eintrags | deterministisches Ergebnis: die per Doppelklick selektierte Wortgrenze erhält die Schriftart, kein unklarer/vermischter Zustand |
 
+**Determinismus für diese Tabelle (R1/R4):**
+- Zeile 3.7 (Undo/Redo): Schriftart per Combobox setzen → `await expect(editor).toBeFocused()` (R4) →
+  `keyboard.type('weiterer Text')` → **`await page.waitForTimeout(50)` vor jedem `ControlOrMeta+z`/
+  `ControlOrMeta+y`**, weil Undo-Schritte den Selektionszustand ändern und der jeweils folgende
+  Tastendruck sonst vorauslaufen kann. Assertion nach jedem Schritt web-first (`toContainText`/
+  Span-Count), nicht synchron.
+- Zeile 3.8 (leeres Dokument): nach „Neu erstellen" `editor.click()`, Schriftart an der Schreibmarke
+  setzen, `await expect(editor).toBeFocused()` (R4), dann `keyboard.type('A')`. Erst danach prüfen,
+  dass das erste Zeichen die Schriftart trägt (`span[style*="font-family"]` mit `hasText: 'A'`).
+- Zeile 3.18 (Doppelklick + Dropdown): nach `dblclick()` auf das Wort **`await page.waitForTimeout(50)`**
+  (Selektions-Sync der Doppelklick-Wortselektion), erst dann `fontInput(page).click()` und
+  Options-Klick. Assertion: exakt das doppelt-angeklickte Wort trägt die Schriftart, Nachbartext nicht.
+- Zeile 3.16 (Bild/Tabelle direkt nach Schriftart): „Bild einfügen" ist nur als `input[type="file"]`
+  hinter dem Label „🖼 Bild" verfügbar (kein Klick-Button) — der belastbare, deterministische Pfad ist
+  **Tabelle einfügen** (`getByRole('button', { name: 'Tabelle einfügen' })`); der Bild-Zweig ist optional
+  und nur mit einem echten, per JSZip/Buffer bereitgestellten Bild über `setInputFiles` auszuführen.
+- Zeile 3.12 (Local Font Access API): `font-family.spec.ts` läuft auf Chromium (Desktop
+  Chrome, Mobile/Pixel 7) **und** WebKit (Tablet/iPad Mini). In Chromium ist
+  `window.queryLocalFonts` **vorhanden**, rejiziert aber ohne User-Aktivierung/Permission;
+  in WebKit fehlt es ganz. Um über alle drei Projekte **dasselbe, deterministische**
+  Verhalten zu erzwingen (und nicht von browser-spezifischer Permission-Ablehnung
+  abzuhängen), wird die API vor der Navigation gezielt entfernt:
+  `await page.addInitScript(() => { delete (window as unknown as { queryLocalFonts?: unknown }).queryLocalFonts })`
+  **vor** `page.goto('/')`. Damit liefert `getSystemFonts()` deterministisch `[]`, die
+  Assertion (kuratierte Liste voll bedienbar, kein `console`-`error`/`pageerror`, kein
+  blockierender Dialog) ist projekt-unabhängig stabil. Der Gegenfall „API vorhanden →
+  Systemschriften erscheinen" wird über den Mock in §2.11 abgedeckt (dort wird
+  `queryLocalFonts` per `addInitScript` gesetzt statt gelöscht).
+
 ### 2.10 Selektions-Sync-Regression mit Schriftart (Grenzfall 3.15, Pflicht)
 
 **Erweiterung der bestehenden Datei** `tests/e2e/selection-regression.spec.ts`
@@ -313,18 +478,44 @@ test('rapid font-family switching does not corrupt content (Grenzfall 3.15)', as
   const editor = page.locator('.ProseMirror')
   await editor.click()
   await page.keyboard.type('Test Absatz.')
-  await page.keyboard.press('ControlOrMeta+a')
-  const fontInput = page.getByLabel('Schriftart')
+  // R8: { exact: true } ist Pflicht — der Entfernen-Button trägt aria-label="Schriftart
+  // entfernen"; ein Teilstring-Match auf "Schriftart" träfe sonst beide Elemente
+  // (Strict-Mode-Verstoß). Siehe schriftart-waehlen-code.md Abschnitt 0.2 Punkt 4.
+  const fontInput = page.getByLabel('Schriftart', { exact: true })
+
   for (let i = 0; i < 6; i++) {
-    await fontInput.fill(i % 2 === 0 ? 'Arial' : 'Georgia')
+    // R2: Selektion in JEDER Iteration frisch setzen — nicht auf einer evtl. schon
+    // veränderten/veralteten Selektion aufsetzen. Select-all ist eine
+    // (tastaturgetriebene) Selektionsänderung → R1-Wartezeit, bevor die nächste
+    // Eingabe feuert, sonst rennt fill()/Enter der Selektions-Sync voraus.
+    await page.keyboard.press('ControlOrMeta+a')
+    await page.waitForTimeout(50)
+    const font = i % 2 === 0 ? 'Arial' : 'Georgia'
+    await fontInput.fill(font)
     await fontInput.press('Enter')
+    // R3: web-first abwarten, dass die Schriftart tatsächlich angewandt wurde,
+    // bevor die nächste Iteration erneut alles selektiert.
+    await expect(editor.locator('span[style*="font-family"]').first()).toBeVisible()
   }
+
+  // R2: Inhalt UND Struktur prüfen — nicht nur der Text, sondern genau ein Absatz,
+  // kein stiller Split/Verlust (dieselbe Klasse Assertion wie die Bold-Regressionstests).
   await expect(editor).toContainText('Test Absatz.')
+  await expect(page.locator('.ProseMirror p')).toHaveCount(1)
+
+  // Editor bleibt normal bedienbar: Anschluss-Tipptest.
+  await editor.click()
+  await page.keyboard.press('End')
+  await page.waitForTimeout(50) // R1: End ist tastaturgetrieben
+  await page.keyboard.type(' Weiter.')
+  await expect(editor).toContainText('Test Absatz. Weiter.')
 })
 ```
 
-Assertion: Dokumentinhalt bleibt vollständig erhalten (kein Verlust/keine
-Vermischung), Editor bleibt normal bedienbar (weiterer Tipptest im Anschluss).
+Assertion: Dokumentinhalt **und Absatzstruktur** bleiben vollständig erhalten
+(kein Verlust/keine Vermischung, genau ein `<p>`), Editor bleibt normal bedienbar
+(Anschluss-Tipptest grün). Der Test läuft auch im Mobile-/Tablet-Projekt grün,
+weil R1/R2/R3 die dort zuvor beobachteten Selektions-Sync-Races ausschließen.
 
 ### 2.11 Grenzfall 3.4 — Performance großer Listen (manuelle Ergänzung)
 
@@ -351,13 +542,39 @@ alle sieben Prüfkriterien aus Anforderung Abschnitt 6 abzuhaken, sofern in der
 Format-Matrix-Tabelle dort nicht enger gefasst (Kriterien 1–3, 6, 7 für „neu
 erstellt").
 
+**Ablauf-Skelett je Rundreise (verbindliche Reihenfolge, siehe R5/R6):**
+1. Upload via `docxCard(page).locator('input[type="file"]').setInputFiles({ name, mimeType, buffer })`.
+2. `await expect(editor).toContainText(<bekannter Text>)` — Import ist gelandet.
+3. **Kriterium 7 sofort hier:** `await expect(page.getByText('ungespeichert')).toHaveCount(0)`
+   (R6 — vor jeder Editor-Interaktion, weil jede Editor-Aktion `dirty:true` setzt und der
+   spätere Export es wieder auf `false` setzt).
+4. Export: `page.waitForEvent('download')` + Klick „Exportieren", Datei-Bytes von `download.path()` lesen.
+5. XML-Assertions an den heruntergeladenen Bytes (unten je Szenario).
+6. Re-Import: **erst `await page.getByRole('button', { name: /formate/i }).click()`** (R5 — zurück zum
+   Picker, sonst existiert der `input[type="file"]` nicht), dann zweites `setInputFiles(...)` mit den
+   **exakt heruntergeladenen** Bytes (nicht dem In-Memory-Objekt aus Schritt 1).
+7. Re-Import-Assertions (Text vorhanden, Combobox zeigt bei Cursor an der Stelle wieder die Schriftart).
+
+**Fixture-Strategie für die „Bestandsdatei"-Zeilen (1/2) — Determinismus vs. Realismus:**
+Der strikte Namens-/Zuordnungs-Vergleich (Kriterien 1/2) läuft primär gegen eine
+**unabhängig, von Hand per JSZip gebaute** Minimal-Datei, die die Schriftart genau so trägt,
+wie Word/LibreOffice sie setzt (`<w:rFonts w:ascii="…"/>` bzw. `style:font-name` +
+`office:font-face-decls`) — das isoliert die Schriftart-Rundreise von unabhängigen
+Voll-Fidelity-Themen großer Realdateien und macht den Test deterministisch. **Zusätzlich**
+werden die realen Korpus-Fixtures (`bug59058.docx`, `formen_Legende.odt`,
+`FruitDepot-SeasonalFruits4.odt`) als Import-/Robustheits- und „kein stiller Verlust"-Nachweis
+(Kriterium 5/6) importiert und exportiert; für diese Realdateien wird **gezielt auf die
+Schriftartnamen** assertiert (Vorhandensein/Erhalt der konkreten `w:ascii`/`svg:font-family`-Werte),
+nicht auf Byte-Gleichheit des Gesamtdokuments — die App normalisiert unabhängige Strukturen, was für
+die Schriftart-Abnahme irrelevant ist.
+
 | # | Szenario | Ablauf | Assertion an heruntergeladener Datei | Kriterien |
 |---|---|---|---|---|
 | 1 | DOCX-Bestandsdatei „unverändert" | `bug59058.docx` (oder `drawing.docx`) hochladen → **ohne Änderung** sofort exportieren → Re-Import in neuer Seite/`setInputFiles` | `word/document.xml`: jeder ursprünglich mit Schriftart versehene Lauf trägt exakt denselben `w:ascii`-Namen, exakt demselben Textteil zugeordnet; kombinierte Formate (Fett/Farbe) am selben Lauf erhalten; kein Crash während des gesamten Zyklus | 1–7 |
 | 2 | ODT-Bestandsdatei „unverändert" | `formen_Legende.odt` hochladen → unverändert exportieren → Re-Import | `content.xml`: `style:font-name` + `office:font-face-decls` weiterhin korrekt aufgelöst auf denselben Namen, demselben Lauf zugeordnet | 1–7 |
 | 3 | Neues Dokument → Schriftart über Toolbar → DOCX-Export → Re-Import | `docxCard` „Neu erstellen" → tippen → markieren → Schriftart „Georgia" über Combobox → Export → Re-Import | `word/document.xml` enthält `<w:rFonts w:ascii="Georgia" .../>` exakt am erwarteten Lauf; nach Re-Import zeigt Combobox bei Cursor an dieser Stelle wieder „Georgia" | 1–3, 6, 7 |
 | 4 | Neues Dokument → Schriftart über Toolbar → ODT-Export → Re-Import | analog, ODT-Karte | `content.xml` enthält `style:font-name` + passenden `office:font-face-decls`-Eintrag für „Georgia"; nach Re-Import korrekt angezeigt | 1–3, 6, 7 |
-| 5 | Kein unnötiges Dirty-Flag bei Bestandsdatei-Re-Import (Kriterium 7, Anforderung 2.4) | Szenario 1/2 unmittelbar nach Upload, **vor** jeder Editor-Interaktion | Anwendung zeigt keinen „ungespeicherte Änderungen"-Zustand (z. B. Exportieren-Button-Beschriftung/Titel-Stern o. Ä., je nach tatsächlichem UI-Signal für `dirty` — Signal am Beginn der Implementierung festlegen und hier präzisieren) | 7 |
+| 5 | Kein unnötiges Dirty-Flag bei Bestandsdatei-Re-Import (Kriterium 7, Anforderung 2.4) | Szenario 1/2 unmittelbar nach Upload, **vor** jeder Editor-Interaktion (R6) | `await expect(page.getByText('ungespeichert')).toHaveCount(0)` — das amberfarbene „● ungespeichert" (`DocumentWorkspace.tsx` Zeile 118–120) wird nicht angezeigt; Gegenprobe im selben Test: nach einer echten Tipp-Änderung erscheint es (`toHaveCount(1)`), damit der Test nicht nur zufällig grün ist | 7 |
 | 6 | Kein Absturz/keine Exception während des gesamten Zyklus | alle Szenarien 1–4 | `page.on('pageerror')`/`page.on('console', msg => msg.type() === 'error')`-Listener wirft in keinem Szenario einen Treffer | 6 |
 | 7 | Kein stiller Verlust bei Fremddatei-Schriftarten (Kriterium 5) | Szenario 1 mit `bug59058.docx` (`MinionPro-Regular`, nicht kuratiert) | exportierter Name exakt `MinionPro-Regular`, nicht ersetzt durch eine Listen-/Standardschriftart | 5 |
 | 8 | Unabhängige DOCX-Validierung | exportierte Datei aus Szenario 3, `word/document.xml` **per Regex/`DOMParser`, nicht per `readDocx`** geprüft | `<w:rFonts w:ascii="Georgia" w:hAnsi="Georgia" w:cs="Georgia" w:eastAsia="Georgia"\/>` vorhanden, alle vier Attribute identisch | 2, 8 (Anforderung 2.8) |
@@ -432,6 +649,25 @@ Punkt vermerkt (siehe Abschnitt 4 Checkliste).
       `selection-regression.spec.ts` ruft `readDocx`/`writeDocx`/`readOdt`/
       `writeOdt`/`applyFontFamily`/`clearFontFamily`/`getActiveFontFamily`
       direkt auf — stichprobenartig per Review bestätigt.
+- [ ] Die Determinismus-/Locator-Regeln R1–R8 (Abschnitt 0.1) sind in jedem
+      E2E-Testkörper eingehalten: (a) `waitForTimeout(50)` nach jeder
+      tastaturgetriebenen Caret-Bewegung/Klick-Neupositionierung vor der
+      nächsten Eingabe (R1), (b) frische Selektion je Iteration in
+      Schnellwiederholungen + Strukturassertion (R2), (c) ausschließlich
+      web-first/retrying Matcher für Combobox-/DOM-Zustand, kein synchrones
+      `inputValue()`/`evaluate()` unmittelbar nach einer Aktion (R3),
+      (d) `expect(editor).toBeFocused()` vor Stored-Mark-Tippen (R4),
+      (e) `←Formate`-Navigation vor jedem Re-Import (R5),
+      (f) `getByLabel('Schriftart', { exact: true })` für das Eingabefeld, damit
+      der gleichnamige Entfernen-Button keinen Strict-Mode-Verstoß auslöst (R8) —
+      per Review in jeder E2E-Datei (inkl. §2.10) stichprobenartig bestätigt.
+      **Explizit auf allen
+      drei Projekten grün**: Desktop Chrome, Mobile (Pixel 7), Tablet
+      (iPad Mini) — nicht nur Desktop (die zuletzt geflakten Selektions-Sync-
+      Fälle traten ausschließlich im Mobile-Projekt auf).
+- [ ] `font-family.spec.ts` wurde lokal **mehrfach hintereinander** (`--repeat-each=3`)
+      und mit `--project=Mobile` grün ausgeführt, um verbleibende Race-Flakes vor
+      dem Merge auszuschließen (nicht nur ein einzelner grüner CI-Lauf).
 - [ ] Die bewusste Abgrenzung aus Anforderung 5.2 (keine Font-Binärdaten-
       Einbettung) **und** die in `schriftart-waehlen-code.md` Abschnitt 13.1
       (Theme-Schriftarten `w:asciiTheme`) und 13.2 (Kopf-/Fußzeile nicht

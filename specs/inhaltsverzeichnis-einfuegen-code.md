@@ -12,6 +12,149 @@ hängen bleibt.
 
 ---
 
+## 0'. Nachtrag — Re-Verifikation gegen den Live-Code (Stand 2026-07-05)
+
+Dieser Plan wurde am 2026-07-05 **vollständig erneut** gegen das reale Repo gelesen (nicht nur
+gegen eine frühere Fassung). Ergebnis in zwei Sätzen:
+
+- **Alle substanziellen/architektonischen Befunde gelten unverändert.** Es gibt weiterhin
+  **keinen** `toc`/`toc_entry`-Node (`schema.ts` komplett gelesen), **keinen**
+  `insertTableOfContents`/`collectHeadings` in `commands.ts`, **keinen** ToC-Toolbar-Button, **kein**
+  `bookmark`/`fldChar`/`fldSimple`-Schreiben in `docx/writer.ts`, **keinen** `text:table-of-content`-
+  `case` in `odt/writer.ts`. Die beiden verifizierten Import-Totalverluste bestehen weiter:
+  `docx/reader.ts` `readBodyChildren` behandelt nur `w:p`/`w:tbl` (block-level `<w:sdt>`-ToC fällt
+  raus), `odt/reader.ts` `elementToBlocks` endet für `text:table-of-content` auf `return []`. Der
+  Inline-Fallback in `collectRuns` (`w:fldSimple`/`w:sdt`) und die `unsupported_block`-Hülle
+  existieren wie beschrieben. **Die gesamte Umsetzungsstrategie ab Abschnitt 1 bleibt gültig.**
+- **Aber: fast alle Zeilennummern und zwei Zähl-Fakten in diesem Plan sind veraltet.** Seit der
+  Erst-Fassung ist das Feature **„Ausschneiden" (cut)** eingezogen (`cutSelection`/`canCut`/
+  `CutHandlers` in `commands.ts`, `ScissorsIcon` + führender Cut-Button in `Toolbar.tsx`,
+  `Shift-Delete`-Keymap + `cutError`-State in `WordEditor.tsx`) und das Fixture-Korpus ist gewachsen.
+  Dadurch sind Dateien länger geworden. **Wo dieser Plan unten eine Zeilennummer nennt, gilt die
+  korrigierte Spalte dieser Tabelle, nicht die im Fließtext genannte Zahl.**
+
+### 0'.1 Korrigierte Fundstellen (Plan-Angabe → tatsächlich, 2026-07-05)
+
+| Datei / Symbol | Plan sagt | Tatsächlich | Anmerkung |
+|---|---|---|---|
+| `schema.ts` Gesamtlänge | 154 Zeilen | **202 Zeilen** | `unsupported_block`-Node (`schema.ts:87–113`) kam hinzu — genau der in Abschnitt 10 (Anforderung) genannte Fallback-Behälter, existiert bereits. |
+| `schema.ts` `heading`-Node | „aktuell Zeilen 19–31" (Abschn. 2) | **26–38** | Attribute/Struktur unverändert (`level`, `...alignAttr`, `defining:true`), nur verschoben. |
+| `Toolbar.tsx` Gesamtlänge | 247 Zeilen | **297 Zeilen** | |
+| `Toolbar.tsx` `currentHeadingLevel()` | 87–95 (Abschn. 0.1) | **114–122** | Logik identisch (nur `$from`-Vorfahrenpfad). |
+| `Toolbar.tsx` `insertTable(2,2)` direkt | „:234" (Abschn. 0.4) | **:284** | Tabellen-Dialog weiterhin **nicht** gebaut — Zusatzbefund C gilt. |
+| `Toolbar.tsx` Absatzformat-`<select>` | 165–181 | **165–180** | unverändert nutzbar als Überschriften-Erzeuger. |
+| `Toolbar.tsx` Bild-`<label>` (Anker für neue Gruppe) | „Zeile 241–244" (Abschn. 6) | **291–294** | Neue „Referenzen"-Gruppe wird **danach** angehängt. |
+| `Toolbar.tsx` `ToolbarProps` | `{ view }` | **`{ view, cutError, setCutError }`** | **Umsetzungsdelta:** die in Abschnitt 6 ergänzte Datei muss die neuen Props durchreichen bzw. unangetastet lassen; der neue `tocDialogOpen`-State kommt zusätzlich. Ein führender „Ausschneiden"-Button (`ScissorsIcon`, `143–156`) ist jetzt das **erste** Toolbar-Element. |
+| `Toolbar.tsx` `run(view, cmd)`-Helfer | (implizit) | **module-level, Zeile 28** | Abschnitt 6 nutzt `run(view, insertTableOfContents(maxLevel))` — Signatur passt unverändert. |
+| `commands.ts` Gesamtlänge | (n/a) | **168 Zeilen** | Neu: `canCut` (126), `CutHandlers` (130), `cutSelection` (149). Die in Abschnitt 3 geplanten Exporte werden an die **bestehende** Exportfläche angehängt. |
+| `WordEditor.tsx` Gesamtlänge | 134 Zeilen | **178 Zeilen** | |
+| `WordEditor.tsx` `reconcileSelectionOnClick` | 42–53 (Abschn. 0.1) | **43–50** | |
+| `WordEditor.tsx` `plugins: [...]`-Array | „Zeilen 69–86" (Abschn. 8) | **75–106** | Enthält jetzt zusätzlich `Shift-Delete: cutSelection(...)` (98) und `createPaginationPlugin()` (105). `createTocInteractionPlugin()` wird hier eingehängt (z. B. nach 105). |
+| `WordEditor.tsx` `new EditorView(...)` | „:89" (Abschn. 8-Analyse) | **:114** | Selection-Sync-Argumentation unverändert gültig. |
+| `WordEditor.tsx` `mouseup`-Listener-Registrierung | „103–104" (Abschn. 8-Analyse) | **146–147** | Die Reihenfolge-Analyse (PM-intern zuerst, dann `onMouseUp`) bleibt korrekt. |
+| `docx/reader.ts` `paragraphToBlocks()` | „aktuell Zeilen 146–183" (Abschn. 10.1) | **229–280** | |
+| `docx/reader.ts` `collectRuns` Inline-Fallback | 194–216 | **194–216** | stimmt (einziger unveränderter Treffer). |
+| `docx/reader.ts` `readBodyChildren()` | „aktuell Zeilen 307–328" (Abschn. 10.2) | **464–485** | Nur `w:p`/`w:tbl` — Befund 8 gilt. |
+| `docx/reader.ts` `readDocx`-Rückgabe (Verdrahtungspunkt) | „nach Zeile 346/363/372 vor Zeile 384" (Abschn. 11) | `bodyBlocks` **503**, `result` **547–554** | `resolveTocPlaceholders(...)` unmittelbar **vor** dem `result`-Aufbau (vor 547). |
+| `docx/writer.ts` `blockToDocx` `case 'heading'` | „aktuell Zeilen 106–111" (Abschn. 9.2) | **119–124** | |
+| `docx/writer.ts` `blockToDocx`-Signatur | „neuer Parameter `tocCtx`" | **`(node, images, rels, listContext=null)`** | **Umsetzungsdelta:** `tocCtx` muss **zusätzlich** durchgereicht werden — durch die rekursiven Aufrufe in `bullet_list`/`ordered_list` (137–139), `tableToDocx` (158–201), `unsupported_block` (152) **und** `blocksToDocx` (203–205). `paragraphPropsXml(align, extra)` (69–72) existiert wie angenommen. |
+| `docx/writer.ts` `writeDocx` bodyXml/header/footer | „Zeilen 226–243" (Abschn. 9.5) | **256–273** | |
+| `docx/styleDefs.ts` `headingStylesXml()` | „Zeile 22–29" (Abschn. 9.4) | **9–30**, `HEADING_STYLE_ID` **5–7** | `tocEntryStylesXml()` in die `styles`-Konkatenation (vor 27) aufnehmen. |
+| `odt/writer.ts` `blockToOdt()`-`switch` | „Zeilen 61–123" (Abschn. 0.1 Pkt. 10) | **85–195** | |
+| `odt/writer.ts` `case 'heading'` (bleibt unverändert) | „Zeile 69–74" (Abschn. 12.3) | **93–98** | |
+| `odt/writer.ts` `buildContentXml()` (automatic-styles) | „Zeile 129–137/133" (Abschn. 12.2) | **206–214**, Konkat. bei **210** | Liegt in `writer.ts` (nicht `styleRegistry.ts`); `tocEntryStyleDefs()` dort einfügen. |
+| `odt/styleRegistry.ts` `headingStyleName`/`headingStyleDefs` | (Anker) | **80 / 84** | `tocEntryStyleName`/`tocEntryStyleDefs` daneben ergänzen. |
+| `odt/reader.ts` `elementToBlocks()` | „aktuell Zeilen 164–206" (Abschn. 13.1) | **250–324** | Neuen `table-of-content`-Zweig **vor** der `depth >= MAX_NESTING_DEPTH`-Prüfung (264) einordnen, analog zum `text:section`-Unpack (276–278). |
+| `odt/reader.ts` `return []`-Default | „:323" (Abschn. 13.1) | **:323** | stimmt. |
+| `odt/reader.ts` `readOdt` `bodyBlocks` (Verdrahtungspunkt) | „Nach Zeile 248 … vor 279–284" (Abschn. 13.2) | `bodyBlocks` **366**, `result` **401–408** | `resolveTocPlaceholders(...)` vor 401. `EMPTY_REDLINE_MARKER_NAMES` **80–87**. |
+| `index.css` Gesamtlänge / letzter Block | „72 Zeilen, `.page-break-spacer` (69–71) letzter Block" (Abschn. 0.5) | **88 Zeilen** | Letzter Block ist jetzt das Dark-Mode-`@media`-`.unsupported-block` (**83–88**). Neue `.pm-toc`-Regeln (Abschn. 7) **nach Zeile 88** anhängen, **nicht** nach 71. |
+| ODT-Fixtures gesamt | „179 Dateien" (Abschn. 0.2) | **202** | (deckt sich mit der Anforderung.) Die drei ToC-Fixtures (`test1.odt`, `compdocfileformat.odt`, `excelfileformat.odt`) bestehen weiter. |
+| DOCX-Fixtures gesamt | „106 Dateien" (Abschn. 0.3) | **127** | Weiterhin **0** mit echtem `TOC`-Feld → synthetische Fixture bleibt Pflicht. |
+| `pagination.ts` (115) / `PrivacyModal.tsx` (38) / `documentModel.ts`-Shape | wie im Plan | **exakt gleich** | Keine Korrektur nötig. |
+
+### 0'.2 Zusätzliche, aus dem Live-Code abgeleitete Umsetzungshinweise (Ergänzung, kein Widerruf)
+
+1. **Dark-Mode-CSS für das Verzeichnis (Verbesserung an Abschnitt 7).** `index.css` hat seit der
+   Plan-Fassung ein etabliertes Dark-Mode-Muster (`@media (prefers-color-scheme: dark)` für
+   `.unsupported-block`, `83–88`). Die in Abschnitt 7 vorgeschlagenen `.pm-toc`-Regeln sind **rein
+   hell** gefärbt (`background:#f3f4f6`, `border:#d1d5db`, …) und würden im Dark-Mode als greller
+   Kasten erscheinen. **Ergänzung:** einen `@media (prefers-color-scheme: dark)`-Block mit
+   abgedunkelten Werten für `.pm-toc`/`.pm-toc-header`/`.pm-toc-refresh`/`.pm-toc-entry:hover`
+   hinzufügen (z. B. `background:#18181b; border-color:#52525b; color:#d4d4d8`), konsistent zum
+   `.unsupported-block`-Dark-Block.
+2. **Keine Interferenz mit dem `Shift-Delete`-Cut-Keybinding.** Der neue Keymap-Eintrag
+   `Shift-Delete: cutSelection(...)` (`WordEditor.tsx:98`) berührt den ToC-Klick-/Selection-Sync-Pfad
+   nicht; die Analyse in Abschnitt 8 bleibt gültig. Der Regressionstest (Testfall 10) sollte jedoch
+   **zusätzlich** einmal mit `Shift-Delete` als Cut-Trigger vor dem ToC-Klick laufen, um die
+   Wechselwirkung der beiden erst kürzlich stabilisierten Selection-Sync-Pfade
+   (`cut.spec.ts`/`selection-regression.spec.ts`) mit dem neuen ToC-Klick nicht zu übersehen.
+3. **Toolbar-Props sauber weiterreichen.** Weil `Toolbar` jetzt `{ view, cutError, setCutError }`
+   erhält, muss die Erweiterung aus Abschnitt 6 den lokalen `tocDialogOpen`-State **additiv**
+   einführen, ohne die Cut-Fehleranzeige (`cutError`-`<span role="alert">`, `157–161`) zu verdrängen —
+   die neue „Referenzen"-Gruppe wird strikt als letztes Kind **nach** dem Bild-`<label>` (291–294)
+   eingefügt.
+
+### 0'.3 Zweite Re-Verifikation gegen den Live-Code (Stand 2026-07-05, zweiter Durchgang)
+
+Alle in Abschnitt 0'.1 korrigierten Fundstellen wurden erneut Datei für Datei geöffnet.
+`schema.ts` (heading 26–38, unsupported_block 87–113), `commands.ts` (canCut 126 / CutHandlers 130
+/ cutSelection 149, 167 Zeilen), `Toolbar.tsx` (297 Zeilen, `run` @28, ScissorsIcon 33–53,
+Cut-Button 143–156, cutError-`<span>` 157–161, currentHeadingLevel 114–122, Absatzformat-`<select>`
+165–180, insertTable(2,2) @284, Bild-`<label>` 291–294), `docx/writer.ts` (blockToDocx-Signatur
+`(node, images, rels, listContext=null)` 105–110, `case 'heading'` 119–124, paragraphPropsXml 69–72,
+bullet/ordered-Rekursion 137–139, tableToDocx 158–201, unsupported_block 152, blocksToDocx 203–205,
+writeDocx-Body/Header/Footer 256–273), `docx/reader.ts` (paragraphToBlocks 229–280, collectRuns
+Inline-Fallback 194–216, readBodyChildren 464–485 **nur `w:p`/`w:tbl`**, readDocx bodyBlocks 503 /
+result 547–554), `docx/styleDefs.ts` (HEADING_STYLE_ID 5–7, headingStylesXml 9–30, `styles`-Konkat
+vor 27), `odt/writer.ts` (blockToOdt-`switch` 85–195, `case 'heading'` 93–98, buildContentXml
+206–214 / automatic-styles-Konkat @210), `odt/styleRegistry.ts` (headingStyleName 80–82,
+headingStyleDefs 84–93), `odt/reader.ts` (elementToBlocks 250–324, `return []`-Default @323,
+`text:section`-Unpack 276–278, MAX_NESTING_DEPTH-Prüfung @264, EMPTY_REDLINE_MARKER_NAMES 80–87,
+readOdt bodyBlocks 366 / result 401–408), `index.css` (88 Zeilen, letzter Block Dark-Mode-`@media`
+`.unsupported-block` 83–88) — **treffen unverändert zu.**
+
+**Genau eine Zeilennummern-Drift seit Abschnitt 0'.1** (kein architektonischer Belang):
+`WordEditor.tsx` ist um ~8 Zeilen gewachsen (neuer `useAutoDismiss`-Hook 52–63 + `cutError`-
+Auto-Dismiss). Korrigierte Anker:
+
+| Symbol | 0'.1 sagt | Tatsächlich (2. Durchgang) |
+|---|---|---|
+| `WordEditor.tsx` Gesamtlänge | 178 | **185** |
+| `reconcileSelectionOnClick` | 43–50 | **43–50** (unverändert korrekt) |
+| `plugins: [...]`-Array | 75–106 | **83–114** |
+| `Shift-Delete: cutSelection(...)` | 98 | **106** |
+| `createPaginationPlugin()` (Einhängepunkt für `createTocInteractionPlugin()`) | 105 | **113** |
+| `new EditorView(...)` | :114 | **:122** |
+| `mouseup`-Listener-Registrierung | 146–147 | **154–155** |
+
+→ In Abschnitt 8 gilt: `createTocInteractionPlugin()` wird ins `plugins`-Array **83–114**
+eingehängt (z. B. direkt nach `createPaginationPlugin()` @113). Die Selection-Sync-Analyse in
+Abschnitt 8 bleibt inhaltlich unberührt (nur die zitierten Zeilen `:89`/`103–104` lauten jetzt
+`:122`/`154–155`).
+
+**Vier substanzielle Verbesserungen in diesem zweiten Durchgang** (jeweils inline in den
+Fachabschnitten eingearbeitet, hier nur als Änderungsindex):
+
+1. **Block-level-`<w:sdt>`-Import war nicht abgedeckt (Kernlücke).** Die Erstfassung behandelte in
+   Abschnitt 10 nur die klassische Feld-Form; der von DoD-Punkt 9 / Grenzfall 16 / Befund 8
+   **ausdrücklich** geforderte block-level-`<w:sdt>`-Fall (moderne Word-Standardform) fehlte
+   komplett und wäre stiller Totalverlust geblieben. → **neuer Abschnitt 10.3** (rekursiver
+   `sdtContent`-Auspack in `readBodyChildren`), Fixture-Pflicht in **beiden** Formen.
+2. **`toc`-`toDOM` fehleranfällig** (Header + Content-Hole `0` als Geschwister direkt unter `.pm-toc`
+   → `.pm-toc` wäre `contentDOM`, ProseMirror könnte den statischen Header verwerfen/verdoppeln). →
+   Abschnitt 2 verbindlich auf `['div', {class:'pm-toc-body'}, 0]` umgestellt; Platzhalter-CSS in
+   Abschnitt 7 entsprechend auf `.pm-toc-body:empty::after` korrigiert (die alte `.pm-toc:empty`-
+   Regel hätte **nie** gematcht, weil `.pm-toc` immer den Header enthält → Grenzfall 2 wäre stumm
+   fehlgeschlagen).
+3. **`resolveTocPlaceholders` id-Kollision** (Abschnitt 11): `usedIds` wurde nicht mit bereits
+   vorhandenen `heading.tocId`-Werten (aus reimportierten `_Toc`-Bookmarks) vorbelegt → ein frisch
+   generiertes `h0` konnte mit einem importierten `h0` kollidieren (verletzt Grenzfall 21). →
+   PASS-0-Seeding ergänzt.
+4. **Kopieren einer Überschrift dupliziert `tocId`** (Abschnitt 16 Punkt 6): als dokumentierte
+   Einschränkung nachgetragen.
+
+---
+
 ## 0. Verifikation des in der Anforderung referenzierten Ist-Stands + Zusatzbefunde
 
 ### 0.1 Bestätigt
@@ -45,7 +188,8 @@ tatsächlichen Dateiinhalt gelesen. **Alle Angaben treffen zu:**
 
 Die Anforderung lässt in Grenzfall 17/Testfall 14 offen, „welche Fixtures tatsächlich ein TOC
 enthalten — vor der Umsetzung zu prüfen". Durchsucht (`unzip -p *.odt content.xml | grep
-table-of-content`, alle 179 Dateien in `tests/fixtures/external/odt`):
+table-of-content`, alle **202** Dateien in `tests/fixtures/external/odt` — 2026-07-05
+re-verifiziert, „179" der Erst-Fassung veraltet, siehe Abschnitt 0'.1):
 
 | Datei | Größe | Inhalt |
 |---|---|---|
@@ -74,7 +218,8 @@ Outline-Navigation für Hyperlinks).
 
 ### 0.3 Zusatzbefund B — kein einziges DOCX-Fixture mit echtem `TOC`-Feld im Korpus
 
-Vollständiger Sweep aller 106 Dateien in `tests/fixtures/external/docx`
+Vollständiger Sweep aller **127** Dateien in `tests/fixtures/external/docx` (2026-07-05
+re-verifiziert, „106" der Erst-Fassung veraltet, siehe Abschnitt 0'.1)
 (`unzip -p *.docx word/document.xml | grep -oE 'instrText[^<]*TOC[^<]*'`): **0 Treffer.**
 `FieldCodes.docx` enthält Felder (`AUTHOR`, `CREATEDATE`), `FldSimple.docx` enthält ein
 `fldSimple`-Feld (`FILENAME`) — **keines davon ist ein TOC-Feld**. Das bedeutet:
@@ -323,27 +468,36 @@ toc: {
     return [
       'div',
       { class: 'pm-toc', 'data-toc': 'true', 'data-max-level': String(node.attrs.maxLevel) },
-      ['div', { class: 'pm-toc-header', contenteditable: 'false' }, [
-        'span', { class: 'pm-toc-title' }, 'Inhaltsverzeichnis',
-      ], [
-        'button', { type: 'button', class: 'pm-toc-refresh', 'data-toc-refresh': 'true', title: 'Inhaltsverzeichnis aktualisieren' }, 'Aktualisieren',
-      ]],
-      0,
+      ['div', { class: 'pm-toc-header', contenteditable: 'false' },
+        ['span', { class: 'pm-toc-title' }, 'Inhaltsverzeichnis'],
+        ['button', { type: 'button', class: 'pm-toc-refresh', 'data-toc-refresh': 'true', title: 'Inhaltsverzeichnis aktualisieren' }, 'Aktualisieren'],
+      ],
+      ['div', { class: 'pm-toc-body' }, 0], // ← Content-Hole in EIGENEM Kind, siehe Hinweis unten
     ]
   },
 },
 ```
 
-**Wichtiger technischer Hinweis für die Umsetzung:** Das obige `toDOM` für `toc` mischt einen
-festen, nicht editierbaren Vorspann (`pm-toc-header`) **und** das Content-Hole (`0`) im selben
-`toDOM`-Rückgabewert — das ist mit ProseMirrors Array-`toDOM`-Syntax direkt zulässig (mehrere
-Kind-Spezifikationen, genau eine davon `0`), muss aber beim Implementieren gegen
-`node_modules/prosemirror-model`s tatsächliche `DOMOutputSpec`-Verarbeitung verifiziert werden
-(insbesondere: das Content-Hole `0` muss exakt einmal vorkommen, was hier der Fall ist). Falls
-sich diese Mischung als unpraktisch erweist, ist die Fallback-Alternative, den `pm-toc-header`-
-Vorspann **nicht** über `toDOM`, sondern rein per CSS `::before`-Pseudo-Element auf `.pm-toc` zu
-erzeugen (Titel-Text) und den „Aktualisieren"-Button separat als eigenes, `contenteditable=false`
-DOM-Kind **nach** dem Content-Hole zu platzieren — funktional gleichwertig, siehe Abschnitt 7.
+**Wichtiger technischer Hinweis für die Umsetzung (in 2. Re-Verifikation 2026-07-05 präzisiert und
+KORRIGIERT — die ursprüngliche „Header + `0` als Geschwister direkt unter `.pm-toc`"-Fassung war
+fehleranfällig):** In ProseMirror wird **dasjenige Element zum `contentDOM`, das das Content-Hole
+`0` unmittelbar enthält.** Läge `0` — wie in der Erstfassung — direkt als Geschwister des
+`pm-toc-header`-`<div>` im äußeren `.pm-toc`-Array, dann wäre `.pm-toc` **selbst** das `contentDOM`,
+und der statische Header-`<div>` läge damit **innerhalb** des von ProseMirror verwalteten
+Content-Bereichs. ProseMirrors `ViewTreeUpdater` gleicht die Kinder des `contentDOM` gegen die
+`toc_entry`-Knoten des Modells ab und würde den fremden Header dabei je nach Update-Pfad
+**entfernen oder verdoppeln**. Deshalb wird das Content-Hole hier verbindlich in ein **eigenes**
+Kind `['div', { class: 'pm-toc-body' }, 0]` gekapselt: `contentDOM` = `.pm-toc-body`, der Header
+sitzt als Geschwister **außerhalb** von `contentDOM` und wird von ProseMirror nicht angetastet.
+Das ist das idiomatische PM-Muster für „nicht editierbare Chrome um editierbaren Inhalt". (Robuste
+Alternative, falls sich der `<button>` im `toDOM` als schwer klickbar erweist: eine vollwertige
+`NodeView` mit explizitem `dom`/`contentDOM` — nur nötig, falls `handleClickOn` den Button-Klick
+nicht wie in Abschnitt 8 analysiert erreicht.)
+
+**Konsequenz für die Platzhalter-CSS (Abschnitt 7):** Weil `.pm-toc` jetzt IMMER den Header enthält,
+matcht `.pm-toc:empty` **nie** — der „Keine Überschriften gefunden"-Platzhalter (Grenzfall 2) muss
+auf das leere Content-Kind zielen: `.pm-toc-body:empty::after` (siehe korrigierte Regel in
+Abschnitt 7). Die Einrück-/Eintrags-Regeln bleiben unverändert.
 
 **Keine Änderung** an `doc`, `paragraph`, `text`, `hard_break`, `image`, Listen-/Tabellen-Nodes.
 
@@ -636,7 +790,9 @@ Verhalten (Anforderung Abschnitt 2.1/2.2, Grenzfall 1):
   margin: 0.6em 0;
 }
 
-.ProseMirror .pm-toc:empty::after {
+/* Zielt bewusst auf das leere Content-Kind `.pm-toc-body`, NICHT auf `.pm-toc`:
+   `.pm-toc` enthält immer den statischen Header (Abschnitt 2), matcht `:empty` also nie. */
+.ProseMirror .pm-toc-body:empty::after {
   content: 'Keine Überschriften gefunden';
   color: #6b7280;
   font-style: italic;
@@ -968,6 +1124,69 @@ keinem einzigen Entry führt (z. B. weil keine der referenzierten Bookmarks im D
 wurde), wird ersatzweise der **rohe Text der konsumierten Cache-Absätze** als Entries mit
 `tocId: null` verwendet (klickbar-inaktiv, aber sichtbar — siehe Abschnitt 11.3).
 
+### 10.3 Block-level-`<w:sdt>` im Body — PFLICHT für DoD-Punkt 9 / Grenzfall 16 (in 2. Re-Verifikation 2026-07-05 als **fehlende Kernbehandlung** nachgetragen)
+
+**Befund (Lücke der Erstfassung):** Abschnitt 10.2 oben behandelt **nur** die klassische Feld-Form,
+bei der die Eintrags-`<w:p>` **direkte** Body-Kinder sind. Die Anforderung verlangt aber in
+Befund 8 / Grenzfall 16 / DoD-Punkt 9 **ausdrücklich** auch die verlustfreie Behandlung der
+**modernen Word-Standardform**, bei der das gesamte Verzeichnis in einen **block-level `<w:sdt>`**
+gewickelt ist. Der bestätigte Ist-Stand (`reader.ts:472–481`, direkt gelesen 2026-07-05): die
+Schleife in `readBodyChildren` prüft `child.localName` nur auf `'p'` und `'tbl'` — ein
+block-level `<w:sdt>` (Kind von `<w:body>`) trifft **keinen** Zweig und wird **komplett
+übersprungen** → stiller Totalverlust. Der `w:sdt`-Fallback in `collectRuns` (`reader.ts:209–211`)
+greift **nur inline** innerhalb eines `<w:p>`, **nicht** für einen block-level-`<w:sdt>`-Rahmen um
+mehrere Absätze. **Die Erstfassung dieses Plans hat diesen Fall nirgends adressiert — er ist hier
+zwingend zu ergänzen, sonst bleibt DoD-Punkt 9 (DOCX-Teil) unerfüllt und Testfall 14 (block-level-
+`<w:sdt>`-Fixture) rot.**
+
+**Umsetzung:** In `readBodyChildren` einen dritten Zweig ergänzen, der einen block-level `<w:sdt>`
+**auspackt** und dessen `<w:sdtContent>`-Kinder **rekursiv wie Body-Kinder** weiterverarbeitet.
+Weil der Auspack-Schritt dieselbe Iterations-/Feld-Erkennungslogik (Abschnitt 10.2) auf die inneren
+`<w:p>` anwendet, wird ein in `<w:sdt>` gewickeltes TOC-Feld dabei **automatisch** als `toc`-
+Platzhalter erkannt; enthält der `<w:sdt>` beliebigen Nicht-TOC-Inhalt (irgendein Content-Control),
+bleibt dessen sichtbarer Text als gewöhnliche Blöcke erhalten — beides erfüllt „kein stiller
+Totalverlust" (Abschnitt 18 der Hauptspezifikation), nicht nur für Verzeichnisse.
+
+```ts
+// Refaktor: die eigentliche Iteration über eine Element-Kinderliste in eine
+// wiederverwendbare Funktion ziehen, die readBodyChildren UND der sdtContent-Auspack teilen.
+// (Der TOC-Feld-Zustand aus Abschnitt 10.2 wird als Parameter mitgereicht, damit ein Feld,
+//  das eine sdt-Grenze überspannt, nicht mittendrin abreißt — im Normalfall liegt es
+//  vollständig innerhalb genau eines sdtContent.)
+function appendBodyLikeChildren(parentEl: Element, /* …headingInfo, imageRels, fieldState… */): void {
+  for (const child of Array.from(parentEl.children)) {
+    if (child.namespaceURI !== OOXML_NAMESPACES.w) continue
+    if (child.localName === 'p') {
+      // …unveränderte w:p-Behandlung inkl. TOC-Feld-Zustandsmaschine aus Abschnitt 10.2…
+    } else if (child.localName === 'tbl') {
+      // …unveränderte w:tbl-Behandlung…
+    } else if (child.localName === 'sdt') {
+      // NEU: block-level Structured Document Tag — in seinen sdtContent absteigen und
+      // dessen Kinder so behandeln, als stünden sie direkt im Body (rekursiv, damit ein
+      // darin liegendes TOC-Feld regulär als toc-Platzhalter erkannt wird).
+      const sdtContent = firstChildNS(child, OOXML_NAMESPACES.w, 'sdtContent')
+      if (sdtContent) appendBodyLikeChildren(sdtContent, /* … */)
+      // Kein sdtContent → nichts sichtbar Verwertbares, überspringen (kein Crash).
+    }
+  }
+}
+```
+
+**Minimal-Alternative, falls die Refaktorierung zu invasiv erscheint:** statt des rekursiven
+Auspackens den block-level `<w:sdt>`-Inhalt in einen `unsupported_block` aufnehmen (dessen
+`sdtContent`-Absätze über `paragraphToBlocks` als dessen `content`) — erhält den sichtbaren Text
+(erfüllt DoD-Punkt 9 als Minimum), verliert aber die TOC-Wiedererkennung. **Bevorzugt wird das
+rekursive Auspacken**, weil es die Rundreise-Anforderung (Abschnitt 4.1 Punkt 4, Form (b): „muss
+grün werden") vollständiger erfüllt: das reimportierte Verzeichnis bleibt ein `toc`-Element, statt
+zu `unsupported_block` zu degradieren.
+
+**Synthetische Fixture (Abschnitt 15.3 erweitern):** die dort gebaute `buildDocxWithTocField()`-
+Hilfe muss **beide** Formen liefern — (a) Feld-Tripel mit Eintrags-`<w:p>` als direkte Body-Kinder
+**und** (b) denselben Inhalt zusätzlich in `<w:sdt><w:sdtContent>…</w:sdtContent></w:sdt>` gewickelt
+— exakt wie Anforderung 4.1 Punkt 4 / Testfall 14 fordert. Zusätzlicher dedizierter Testfall: ein
+block-level `<w:sdt>` **ohne** TOC-Feld (z. B. ein einfaches Content-Control um einen Absatz) →
+Text bleibt erhalten, es entsteht **kein** `toc`-Knoten (Baseline-Regressionsschutz, Testfall 19).
+
 ---
 
 ## 11. Gemeinsame Nachbearbeitung — neue Datei `src/formats/shared/tocJson.ts`
@@ -996,6 +1215,17 @@ export function resolveTocPlaceholders(blocks: JsonNodeLike[], fallbackCachedTex
   const headings: Array<{ level: number; text: string; node: JsonNodeLike }> = []
   let idCounter = 0
   const usedIds = new Set<string>()
+
+  // PASS 0 (in 2. Re-Verifikation 2026-07-05 als Bugfix ergänzt): usedIds ZUERST mit ALLEN
+  // bereits vorhandenen heading.tocId-Werten seeden. Beim DOCX-Reimport tragen Überschriften,
+  // deren Bookmark `_Toc<id>` erkannt wurde (Abschnitt 10.1), bereits eine tocId wie `h0`.
+  // Ohne dieses Seeding würde der Generator unten für eine id-lose Überschrift erneut `h0`
+  // erzeugen (Zähler startet bei 0, prüft nur frisch vergebene ids) → Kollision zweier
+  // Überschriften mit derselben tocId → Klick-/Bookmark-Ziel mehrdeutig (verletzt Grenzfall 21).
+  visit(blocks, (node) => {
+    if (node.type === 'heading' && node.attrs?.tocId) usedIds.add(String(node.attrs.tocId))
+  })
+
   visit(blocks, (node) => {
     if (node.type === 'heading') {
       if (!node.attrs) node.attrs = {}
@@ -1216,7 +1446,7 @@ if (footerBlocks) resolveTocPlaceholders(footerBlocks, [])
 | 13 | Klick auf Eintrag mit gelöschtem Ziel | `navigateToTocEntry` gibt `false` zurück → `tocPlugin.ts` zeigt `.pm-toc-entry--missing`-Flash (Abschnitt 7/8) |
 | 14 | Sonderzeichen/Umlaute/Emoji | Keine Sonderbehandlung nötig — JS-Strings + bestehende `escapeXml()` sind bereits unicode-sicher (identisch zur bestehenden Heading-Text-Behandlung) |
 | 15 | Seitenzahl-Anzeige | Entscheidung 1.3 — keine In-App-Anzeige, Export delegiert an Word/LibreOffice |
-| 16 | Import DOCX-Fremddatei mit TOC-Feld | Abschnitt 10.2 (Feld-Erkennung + Cache-Fallback); **kein reales Fixture im Korpus vorhanden** (Zusatzbefund B) — synthetische Fixture nötig, siehe Abschnitt 15.3 |
+| 16 | Import DOCX-Fremddatei mit TOC-Feld | **Klassische Feld-Form:** Abschnitt 10.2 (Feld-Erkennung + Cache-Fallback). **Block-level-`<w:sdt>`-Form (Befund 8, DoD-Punkt 9):** Abschnitt 10.3 (rekursiver `sdtContent`-Auspack) — **in Erstfassung fehlend, jetzt ergänzt.** **Kein reales Fixture im Korpus** (Zusatzbefund B) — synthetische Fixture in **beiden** Formen nötig, siehe Abschnitt 15.3/10.3 |
 | 17 | Import ODT-Fremddatei mit `text:table-of-content` | Abschnitt 13.1; reale Fixtures **vorhanden** (`test1.odt`, Zusatzbefund A) |
 | 18 | Selection-Sync-Bug-Verdachtsfall bei ToC-Klick | Abschnitt 8 (Analyse) + Pflicht-Regressionstest (Abschnitt 15.2) |
 | 19 | Verzeichnis in Kopf-/Fußzeile | Aktuell nicht erreichbar (keine Header/Footer-UI, siehe Anforderung Zeile 282–287) — Reader/Writer behandeln `header`/`footer` defensiv identisch zu `body` (Abschnitt 9.5/13.2), ohne dass dafür UI existiert; kein Blocker |
@@ -1302,9 +1532,21 @@ wie `FEATURE-SPEC-DOCX-ODT.md` Abschnitt 19).
    13.1), betrifft nur die Klickbarkeit **innerhalb von LibreOffice selbst** nach Export.
 4. **Volle „Aktualisieren"-Funktionstiefe** — bewusst Scope des Schwester-Slugs
    `inhaltsverzeichnis-aktualisieren` (Entscheidung 1.11).
-5. **`toDOM`-Mischung aus statischem Vorspann + Content-Hole für `toc`** (Abschnitt 2) — mit
-   Fallback-Alternative dokumentiert, finale Wahl während der Implementierung gegen die
-   tatsächliche `prosemirror-model`-Version zu verifizieren.
+5. **`toDOM`-Mischung aus statischem Vorspann + Content-Hole für `toc`** (Abschnitt 2) — in der
+   2. Re-Verifikation (2026-07-05) auf die verbindliche `.pm-toc-body`-Kapselung des Content-Holes
+   festgelegt (Header außerhalb `contentDOM`); `NodeView` bleibt robuste Rückfalloption, falls der
+   `Aktualisieren`-Button-Klick `handleClickOn` wider Erwarten nicht erreicht.
+6. **Kopieren/Einfügen einer Überschrift innerhalb des Editors dupliziert deren `tocId`** — weil
+   `heading.parseDOM` das `data-toc-id` mitliest (Abschnitt 2), trägt eine per Editor-Clipboard
+   duplizierte Überschrift dieselbe `tocId` wie das Original. `navigateToTocEntry` (Abschnitt 3.4)
+   springt dann bei beiden Einträgen zur **ersten** Fundstelle (Grenzfall-21-nahe Mehrdeutigkeit,
+   aber nur im Sonderfall „Heading kopiert"). Bewusst als **dokumentierte Einschränkung** geführt,
+   nicht behoben — eine spätere `updateTableOfContentsAt`-Ausführung würde den ToC ohnehin neu
+   berechnen; das eigentliche Duplikat-`tocId`-Problem gehört, wenn überhaupt, in einen
+   allgemeinen „paste-time id-remap"-Mechanismus (außerhalb dieses Feature-Scopes). Optionaler,
+   kleiner Härtungsschritt, falls gewünscht: `tocId` in `heading.parseDOM.getAttrs` bei einem
+   Paste-Kontext auf `null` setzen — bewusst **nicht** als Pflicht aufgenommen, da es die
+   Bookmark-Round-Trip-Erkennung (Abschnitt 10.1) nicht stören darf.
 
 ---
 

@@ -1,137 +1,146 @@
 # Umsetzungsplan: Feature „Zeile löschen“
 
 Gegenstück zu `specs/zeile-loeschen-req.md`. Dieser Plan ist das Ergebnis einer
-tatsächlichen Codeprüfung (nicht nur Übernahme der Anforderungsdatei) — Abschnitt 1
-bestätigt/korrigiert den Ist-Stand-Befund aus der Anforderungsdatei, alle weiteren
-Abschnitte sind der dateigenaue Bauplan.
+**tatsächlichen Codeprüfung am aktuellen Stand** (nicht Übernahme der Anforderungsdatei):
+Jede Ort-/Zeilenangabe unten wurde gegen den realen Quelltext verifiziert. Abschnitt 1
+bestätigt/korrigiert den Ist-Stand-Befund, alle weiteren Abschnitte sind der dateigenaue
+Bauplan.
 
 Geltungsbereich wie in der Anforderungsdatei: gemeinsamer Editor
 (`src/formats/shared/editor/*`, `src/formats/shared/schema.ts`) für DOCX und ODT;
 Import/Export bleibt formatspezifisch (`src/formats/docx/*`, `src/formats/odt/*`).
 
+> **Revisionshinweis (wichtig für Reviewer):** Eine frühere Fassung dieses Plans führte
+> einen ODT-Writer-Bug („kein `<table:covered-table-cell/>`“, „colCount = `rows[0].content.length`“)
+> als offenen Punkt und Voraussetzung für Abnahmekriterium 8. **Dieser Befund war
+> veraltet und ist FALSCH.** Der aktuelle `src/formats/odt/writer.ts` erzeugt
+> `covered-table-cell` bereits für horizontale **und** vertikale Überdeckung und summiert
+> `colCount` korrekt aus den `colspan`-Werten; es existieren dafür bereits **grüne** Tests
+> (`odt/__tests__/roundtrip.test.ts`, Zeilen 275 und 310). Das deckt sich exakt mit
+> `zeile-loeschen-req.md` Befund 8, der ausdrücklich warnt, diesen Punkt **nicht erneut**
+> als offenen Befund zu führen. Abschnitt 1 und 5.2 sind entsprechend korrigiert: **kein
+> ODT-Import/Export-Code muss für dieses Feature geändert werden.**
+>
+> **Revisionshinweis 2 (Zeilennummern nachgezogen):** Sämtliche `WordEditor.tsx`-Zeilenangaben
+> in Abschnitt 1/3.7/4 waren gegenüber dem aktuellen Stand um ~8 Zeilen veraltet (das Symptom,
+> vor dem `zeile-loeschen-req.md` Befund 9 warnt) und wurden erneut gegen den realen Quelltext
+> geprüft und korrigiert: `history()` = Z. 84, `Mod-z`-Keymap = Z. 93–95, `keymap(baseKeymap)`
+> = Z. 108, `columnResizing()`/`tableEditing()` = Z. 109–110, Kontextmenü-Kommentar = Z. 117–121,
+> `reconcileSelectionOnClick`-Registrierung = Z. 154–155, Toolbar-JSX-Zeile = Z. 170. Alle
+> übrigen Orte (`Toolbar.tsx`, `commands.ts`, `schema.ts:14`/`:154`, `docx/*`, `odt/*`,
+> `prosemirror-tables` `deleteRow`@1506/`removeRow`@1470/`selectedRect`@1303, Fixtures,
+> `selection-regression.spec.ts`) wurden verifiziert und stimmen.
+
 ---
 
-## 1. Bestätigung des Ist-Stands (eigene Codeprüfung)
+## 1. Bestätigung des Ist-Stands (eigene Codeprüfung, gegen realen Code verifiziert)
 
-Der Befund in `zeile-loeschen-req.md` Abschnitt 0 trifft zu, mit drei zusätzlichen,
-für die Umsetzung relevanten Präzisierungen, die die Anforderungsdatei nicht (oder nur
-implizit) benennt:
+Der Kernbefund in `zeile-loeschen-req.md` Abschnitt 0 trifft zu: es gibt weder UI-Weg noch
+verdrahteten Command noch Test für „Zeile löschen“. Verifizierte Präzisierungen:
 
-1. **`prosemirror-tables`s `deleteRow` ist für den Sonderfall „letzte Zeile“ nicht direkt
-   verwendbar.** Quelltext (`node_modules/prosemirror-tables/dist/index.js`, Funktion
-   `deleteRow`, ca. Zeile 1506–1522):
+1. **`prosemirror-tables`s `deleteRow` bricht bei „alle Zeilen selektiert“ still ab —
+   bestätigt.** Verifiziert in `node_modules/prosemirror-tables/dist/index.js`
+   (Version laut `package.json`: **1.8.5**), Funktion `deleteRow` ab **Zeile 1506**:
    ```js
    function deleteRow(state, dispatch) {
      if (!isInTable(state)) return false;
      if (dispatch) {
        const rect = selectedRect(state), tr = state.tr;
-       if (rect.top == 0 && rect.bottom == rect.map.height) return false;   // <-- No-Op!
-       ...
+       if (rect.top == 0 && rect.bottom == rect.map.height) return false;  // <-- Zeile 1510: No-Op
+       for (let i = rect.bottom - 1;; i--) { removeRow(tr, rect, i); if (i == rect.top) break; ... }
+       dispatch(tr);
+     }
+     return true;   // <-- ohne dispatch IMMER true, Guard wird nie ausgewertet
+   }
    ```
-   `deleteRow` verweigert jede Löschung, bei der die Selektion **alle** Zeilen der
-   Tabelle umfasst (das ist exakt der Fall „einzige verbleibende Zeile“, Abschnitt 2.4
-   der Anforderungsdatei, aber auch der allgemeinere Fall „per `CellSelection` wirklich
-   alle Zeilen markiert“). Der Aufruf tut in diesem Fall **gar nichts** und gibt `true`
-   zurück (Rückgabewert lügt nicht direkt, aber `dispatch` wird nie aufgerufen) — ein
-   naiver Wrapper um `deleteRow` würde Abschnitt 2.4/2.8 der Anforderungsdatei verletzen
-   (stiller Fehlschlag: Klick auf „Zeile löschen“ bei einzeiliger Tabelle täte nichts).
-   **Konsequenz:** `deleteTableRow` darf `deleteRow` nicht einfach aufrufen, sondern muss
-   diesen Fall selbst erkennen und auf Tabellen-Entfernung umleiten (Details Abschnitt 3).
+   Umfasst die Selektion **alle** Zeilen (einzeilige Tabelle **oder** `CellSelection` über
+   sämtliche Zeilen), dispatcht `deleteRow` **nicht** und gibt dennoch `true` zurück. Der
+   dispatch-lose Verfügbarkeits-Check meldet die Aktion also fälschlich als „geht“. Ein
+   naiver Wrapper um `deleteRow` verletzt damit Abschnitt 2.4/2.8 (stiller Fehlschlag).
+   **Konsequenz:** `deleteTableRow` muss diesen Fall selbst erkennen und auf
+   Tabellen-Entfernung umleiten (Abschnitt 3.1).
 
-2. **`removeRow` (die von `deleteRow` intern verwendete, ebenfalls öffentlich
-   exportierte Funktion) implementiert Rowspan-Migration und Rowspan-Dekrement bereits
-   korrekt** (dieselbe Datei, Funktion `removeRow`, Zeile 1470–1500): Wird die
-   Ankerzeile einer `rowspan`-Zelle gelöscht, kopiert `removeRow` die Zelle mit
-   `rowspan - 1` in die nächste Zeile (`tr.insert(..., copy)`); wird nur eine
-   „überdeckte“ Zeile gelöscht, wird lediglich `attrs.rowspan - 1` auf die Ankerzelle
-   gesetzt (`tr.setNodeMarkup`). Das deckt Grenzfall 5/6 der Anforderungsdatei bereits
-   auf Bibliotheksebene ab — **muss aber, wie die Anforderungsdatei selbst fordert,
-   durch einen eigenen Test bestätigt werden**, nicht nur durch dieses Code-Lesen.
+2. **`removeRow` erledigt Rowspan-Migration und -Dekrement bereits korrekt — bestätigt.**
+   Verifiziert, `dist/index.js` **Zeile 1470–1499**:
+   - überdeckte Zeile (`row > 0 && pos == map.map[index - map.width]`): setzt die Ankerzelle
+     per `setNodeMarkup` auf `rowspan - 1` (Inhalt unberührt) — Grenzfall 7.
+   - Ankerzeile (`row < map.height && pos == map.map[index + map.width]`): erzeugt eine
+     **Kopie mit `rowspan - 1` und vollständigem `cell.content`** und `tr.insert`et sie in
+     die Folgezeile (`map.positionAt(row + 1, col, table)`) — Inhalts-Migration, Grenzfall 6.
 
-3. **Entf/Rücktaste auf einer `CellSelection` löscht bereits heute nur den Zellinhalt**,
-   nicht die Struktur — ganz ohne eigene `keymap`-Bindung. Grund:
-   `prosemirror-tables`s `CellSelection`-Klasse überschreibt `replace(tr, content)`
-   (`dist/index.js`, Zeile 580–588) so, dass **nur der Inhalt jeder erfassten Zelle**
-   ersetzt wird, nie die Zeilen-/Zellstruktur. `baseKeymap`s `Backspace`/`Delete`
-   (`prosemirror-commands`) rufen letztlich `state.tr.deleteSelection()` auf, was
-   intern `this.selection.replace(tr)` aufruft — bei einer `CellSelection` landet man
-   also automatisch bei deren überschriebenem `replace()`. Da `WordEditor.tsx` sowohl
-   `tableEditing()` (Zeile 82) als auch `keymap(baseKeymap)` (Zeile 80) bereits aktiv
-   registriert, **funktioniert Zugriffsweg 4 der Anforderungsdatei (Abschnitt 1, Zeile
-   103) schon jetzt korrekt, ganz ohne Codeänderung** — es fehlt nur der Nachweis per
-   Test. Das ist eine wichtige Korrektur gegenüber dem „ungeklärt“-Befund der
-   Anforderungsdatei: **kein Produktivcode nötig, nur ein Regressionstest.**
+   `deleteRow` ruft `removeRow` intern von unten nach oben auf. Das deckt die Grenzfälle
+   6/7 auf Bibliotheksebene ab — **muss aber laut Anforderungsdatei je eigenständig
+   getestet werden.**
 
-4. **Zusätzlicher, in der Anforderungsdatei nicht erwähnter Fund mit direkter Relevanz
-   für Abschnitt 4.2, Testfall 3 (Rundreise Rowspan-Löschung, ODT):** Der ODT-Writer
-   erzeugt für Zeilen, die von einer `rowspan`-Zelle einer vorherigen Zeile „überdeckt“
-   werden, **kein** `<table:covered-table-cell/>`-Element — nach ODF-Spezifikation
-   zwingend erforderlich, damit Spaltenzahl und Merge-Referenzen einer Tabelle gültig
-   bleiben (siehe `src/formats/odt/writer.ts`, Fallunterscheidung `case 'table'`,
-   Zeile 86–111 — dort wird pro Zeile ausschließlich über `row.content` iteriert, ein
-   Platzhalter für überdeckte Positionen fehlt komplett; Volltextsuche nach
-   `covered-table-cell` im gesamten `src/`-Baum liefert **keinen** Treffer). Der
-   bestehende Rundreise-Test `src/formats/odt/__tests__/roundtrip.test.ts`
-   („preserves merged cells (colspan/rowspan)“, Zeile 194–209) deckt das nicht auf,
-   weil er nur `colspan` in einer einzeiligen Tabelle prüft (`rowspan: 1` überall) —
-   ein echter, über zwei Zeilen reichender `rowspan`-Fall wird dort **nicht** getestet
-   (anders als im äquivalenten DOCX-Test, Zeile 223–248, der das korrekt abdeckt und
-   auch korrekt grün ist, weil `src/formats/docx/reader.ts`/`writer.ts` Spaltenposition
-   über ein `anchors[]`-Array sauber nachführen, siehe Abschnitt 5.1 unten).
-   Der eigene Lese-Pfad (`src/formats/odt/reader.ts`, Zeile 189–203) übersteht das
-   „unsichtbar“, weil er ausschließlich nach `table-cell`-Kindelementen filtert (ein
-   fehlendes `covered-table-cell` fällt beim *eigenen* Reimport nicht auf) — die
-   erzeugte Datei ist aber nicht ODF-konform und würde in echtem LibreOffice mit
-   Spaltenversatz/Darstellungsfehlern importiert. Das ist eine **Vorbedingung**, die vor
-   grünen ODT-Rundreise-Tests für „Zeile löschen“ (insbesondere Abschnitt 4.2, Testfall
-   3, und die Baseline 4.1) behoben werden muss — siehe Abschnitt 5.2 unten. Ohne diesen
-   Fix ist Abnahmekriterium 8 der Anforderungsdatei für ODT nicht ehrlich erfüllbar.
+3. **Entf/Rücktaste auf einer `CellSelection` leert bereits heute nur den Zellinhalt —
+   kein Produktivcode nötig.** `prosemirror-tables`’ `CellSelection` überschreibt
+   `replace()` so, dass nur der Inhalt jeder erfassten Zelle ersetzt wird, nie die
+   Zeilen-/Zellstruktur. `WordEditor.tsx` registriert `keymap(baseKeymap)`
+   (**Zeile 108**) und `tableEditing()` (**Zeile 110**); `baseKeymap`s
+   `Backspace`/`Delete` laufen über `deleteSelection` → `CellSelection.replace`. Damit ist
+   Zugriffsweg 4 der Anforderungsdatei bereits korrekt — es fehlt **nur ein
+   Abgrenzungs-Test** (Abschnitt 6.6, Testfall 6). Wichtige Korrektur gegenüber dem
+   „ungeklärt“-Befund der Anforderungsdatei.
 
-5. **`tableEditing()` registriert bereits ein `appendTransaction`, das `fixTables()`
-   aufruft** (Zeile 2618–2619 in `dist/index.js`) und nach jeder Transaktion
-   automatisch inkonsistente Tabellenformen (z. B. Zeilen mit falscher Breite)
-   repariert. Das ist ein zusätzliches, bereits vorhandenes Sicherheitsnetz für
-   Grenzfall 18 (exotische Fremddatei), das im Test explizit ausgenutzt werden kann,
-   aber die eigentliche Lösch-Logik nicht ersetzt.
+4. **KORREKTUR gegenüber der früheren Fassung dieses Plans — der ODT-Writer ist bereits
+   ODF-konform, kein Bug.** Verifiziert in `src/formats/odt/writer.ts`, Fall `'table'`
+   (**Zeile 110–175**):
+   - `colCount` = **Summe der `colspan`-Werte von Zeile 0** (**Zeile 115–116**:
+     `(rows[0]?.content ?? []).reduce((sum, cell) => sum + Number(cell.attrs?.colspan ?? 1), 0) || 1`)
+     — **nicht** `rows[0].content.length`. Der früher hier behauptete colCount-Bug
+     existiert nicht.
+   - `<table:covered-table-cell/>` wird für **horizontale** Überdeckung (colspan,
+     **Zeile 160–162**) **und** für **vertikale** Überdeckung (rowspan) über einen
+     `pending[]`-Tracker (**Zeile 126, 135–140, 165–167**) emittiert. Eine Volltextsuche
+     `covered-table-cell` über `src/` liefert **15** Treffer (nicht null), inkl.
+     **bereits grüner** Tests `odt/__tests__/roundtrip.test.ts`:
+     - Zeile 275: „emits ODF-compliant covered-table-cell placeholders for a horizontal
+       (colspan) merge“
+     - Zeile 310–339: „… for a vertical (rowspan) merge“ (prüft, dass Zeile 2 an Spalte 0
+       eine `covered-table-cell` trägt).
 
-**Fazit Abschnitt 1:** Die Anforderungsdatei ist im Kern korrekt; der Umsetzungsaufwand
-ist kleiner als „von Null“, aber größer als „nur Verdrahtung“ — vor allem wegen Punkt 1
-(Sonderfall „letzte Zeile“ erfordert eigene Transaktionslogik, kein reiner
-`deleteRow`-Aufruf) und Punkt 4 (ODT-Schreibpfad muss für gültige Rowspan-Rundreisen
-nachgebessert werden, unabhängig davon, ob man das als Teil dieses Features oder als
-Voraussetzung dafür betrachtet — es **blockiert** Abnahmekriterium 8).
+   Das entspricht `zeile-loeschen-req.md` Befund 8 wörtlich („darf **nicht** erneut als
+   offener Befund geführt werden“). **Für „Zeile löschen“ ist am ODT-Reader/-Writer nichts
+   zu ändern** (Details/Belege Abschnitt 5.2).
+
+5. **`tableEditing()` fixt Tabellenformen automatisch nach jeder Transaktion —
+   bestätigt.** `fixTables` ab `dist/index.js` **Zeile 784**, aufgerufen aus dem
+   `appendTransaction` von `tableEditing()` (Normalisierung, Zeile ~2619). Zusätzliches,
+   bereits vorhandenes Sicherheitsnetz für Grenzfall 18, ersetzt aber nicht die eigene
+   Guard-Sonderbehandlung.
+
+**Fazit Abschnitt 1:** Der Umsetzungskern ist Verdrahtung (UI + Command-Wrapper) plus die
+**eine** echte Bau-Arbeit — die Guard-Sonderbehandlung „letzte/alle Zeile(n)“ aus Punkt 1.
+Weder ODT- noch DOCX-Import/Export müssen angefasst werden.
 
 ---
 
 ## 2. Architekturentscheidung
 
-- Neue Tabellen-Befehle bekommen ein eigenes Modul `tableCommands.ts` statt weiter in
-  das bereits gemischte `commands.ts` zu wachsen. Grund: Mehrere Nachbar-Features im
-  Backlog (`zeile-einfuegen`, `spalte-einfuegen`, `spalte-loeschen`,
-  `zellen-verbinden`, `tabelle-loeschen` — je eigene `*-req.md`-Datei im selben
-  `specs/`-Verzeichnis) werden voraussichtlich ebenfalls neue Tabellen-`Command`s
-  brauchen; ein eigenes Modul vermeidet, dass alle Features denselben
-  `commands.ts`-Abschnitt anfassen und sich gegenseitig Merge-Konflikte bereiten.
-  `insertTable` (bisher in `commands.ts`) wird in dieses neue Modul verschoben,
-  `commands.ts` re-exportiert es weiter, damit **kein** bestehender Importpfad
-  (`Toolbar.tsx`) angefasst werden muss.
-- Die kontextabhängige Tabellen-Werkzeugleiste bekommt eine eigene Komponente
-  `TableToolbar.tsx` statt in `Toolbar.tsx` mit hineinzuwachsen — aus demselben Grund
-  (Nachbar-Features werden hier weitere Buttons ergänzen: Zeile oberhalb/unterhalb
-  einfügen, Spalte links/rechts einfügen/löschen, Zellen verbinden/teilen, Tabelle
-  löschen). Diese Datei ist bewusst so angelegt, dass sie der gemeinsame Ort für **alle**
-  Tabellen-Kontextfunktionen wird — für „Zeile löschen“ enthält sie zunächst genau
-  einen Button.
-- Icons: neues Modul `icons.tsx` für eingebettete SVG-Icons (Anforderung: kein
-  Emoji/Unicode-Glyph, siehe `FEATURE-SPEC-DOCX-ODT.md` Abschnitt 20, Punkt 1). Auch
-  dieses Modul ist als gemeinsamer Ablageort für die Icons der Nachbar-Features gedacht,
-  nicht nur für „Zeile löschen“. **Nicht im Scope:** die bereits bestehenden
-  Emoji/Unicode-Buttons in `Toolbar.tsx` (⊞, 🖼, ⇧, ⇤, ↔, ⇥, ≡, ⌫, 🖍) werden hier
-  **nicht** migriert — das ist eine allgemeine, vorbestehende Abweichung von Abschnitt
-  20 der Feature-Spec und gehört nicht zum Slug `zeile-loeschen`.
-- Ein kleiner gemeinsamer Helper `runCommand()` wird aus `Toolbar.tsx` herausgezogen
-  (dort bisher als lokale Funktion `run()` definiert, Zeile 23–26), damit
-  `TableToolbar.tsx` ihn ohne Duplikation mitverwenden kann.
+- **Neue Tabellen-Befehle in eigenem Modul `tableCommands.ts`.** Grund: mehrere
+  Nachbar-Features (`zeile-einfuegen`, `spalte-einfuegen`, `spalte-loeschen`,
+  `zellen-verbinden`, `tabelle-loeschen`) brauchen ebenfalls Tabellen-`Command`s; ein
+  eigenes Modul vermeidet Sammel-Merge-Konflikte in `commands.ts`.
+  **`insertTable` bleibt vorerst unverändert in `commands.ts` (Zeile 92–102) — es wird
+  NICHT verschoben** (unnötiger Diff/Regressionsrisiko am funktionierenden
+  „Tabelle einfügen“-Button). `commands.ts` bekommt lediglich einen Re-Export der neuen
+  Befehle, damit `TableToolbar.tsx` demselben Importstil wie `Toolbar.tsx` folgen kann.
+- **Kontextabhängige Werkzeugleiste als eigene Komponente `TableToolbar.tsx`** (nicht in
+  `Toolbar.tsx` hineinwachsen) — künftiger gemeinsamer Ort aller Tabellen-Buttons; für
+  dieses Feature genau ein Button.
+- **SVG-Icons in neuem Modul `icons.tsx`** (Anforderung „kein Emoji/Unicode-Glyph“,
+  `FEATURE-SPEC-DOCX-ODT.md` Abschnitt 20.1; Muster: das bestehende `ScissorsIcon` in
+  `Toolbar.tsx:33–53`). **Nicht im Scope:** Migration der bestehenden Glyph-Buttons in
+  `Toolbar.tsx` (⊞, 🖼, ⇤, ↔, ⇥, ≡, ⌫, 🖍) — vorbestehende, feature-fremde Abweichung.
+- **Kleiner Ausführungs-Helper `runEditorCommand.ts`** für `TableToolbar.tsx`.
+  **Achtung — Korrektur gegenüber der früheren Fassung:** Die lokale `run()`-Funktion in
+  `Toolbar.tsx` (Zeile 28–31) ruft den Command mit **drei** Argumenten auf —
+  `command(view.state, view.dispatch, view)`. Das dritte (`view`) ist **zwingend**, weil
+  `cutSelection` (`commands.ts:149–166`) es benötigt (`view.focus()`, `view.dom…execCommand`).
+  Der neue Helper **muss** dieselbe Drei-Argument-Signatur haben. Ein Umstellen der 13
+  `run(view, …)`-Aufrufstellen in `Toolbar.tsx` auf den neuen Helper ist **optional und
+  nicht Teil dieses Plans** (reines Refactoring am funktionierenden Code; falls doch, darf
+  das dritte `view`-Argument nicht verloren gehen — sonst bricht „Ausschneiden“).
 
 ---
 
@@ -139,26 +148,24 @@ Voraussetzung dafür betrachtet — es **blockiert** Abnahmekriterium 8).
 
 ### 3.1 NEU: `src/formats/shared/editor/tableCommands.ts`
 
-Enthält (verschoben aus `commands.ts`):
-```ts
-export function insertTable(rows: number, cols: number): Command { ... }  // unverändert übernommen
-```
+Kernstück des Features. Delegiert den Normalfall an die (verifiziert korrekte) Bibliothek
+und behandelt **nur** den Guard-Sonderfall selbst.
 
-Neu:
 ```ts
-import { TableMap, selectedRect, removeRow, isInTable } from 'prosemirror-tables'
-import { TextSelection, type Command } from 'prosemirror-state'
+import { deleteRow, isInTable, selectedRect } from 'prosemirror-tables'
+import { TextSelection, type Command, type EditorState, type Transaction } from 'prosemirror-state'
 import { wordSchema } from '../schema'
 
 /**
- * Löscht die Zeile(n) der aktuellen Tabellen-Selektion (Cursor in einer Zelle oder
- * CellSelection über eine/mehrere Zeilen — siehe zeile-loeschen-req.md Abschnitt 2.2).
- * Bezieht sich immer auf ganze Zeilen, unabhängig davon, wie viele Spalten markiert sind.
- * Löscht die Selektion die einzige verbleibende Zeile bzw. ALLE Zeilen der Tabelle,
- * wird stattdessen die gesamte Tabelle entfernt (Abschnitt 2.4) — dafür wird bewusst
- * NICHT prosemirror-tables' `deleteRow` direkt aufgerufen, weil dessen interne Wächter-
- * Bedingung `rect.top == 0 && rect.bottom == rect.map.height` in genau diesem Fall
- * still (ohne dispatch) abbricht, siehe zeile-loeschen-code.md Abschnitt 1, Punkt 1.
+ * Löscht die Zeile(n) der aktuellen Tabellen-Selektion (Cursor in einer Zelle ODER
+ * CellSelection über eine/mehrere Zeilen — zeile-loeschen-req.md 2.2). Bezieht sich immer
+ * auf GANZE Zeilen, unabhängig von der Spaltenmarkierung.
+ *
+ * Umfasst die Selektion ALLE Zeilen (einzige Zeile ODER CellSelection über sämtliche
+ * Zeilen), wird die gesamte Tabelle entfernt (2.4). In genau diesem Fall darf
+ * prosemirror-tables' `deleteRow` NICHT verwendet werden: sein interner Guard
+ * `rect.top == 0 && rect.bottom == rect.map.height` (dist/index.js:1510) bricht dort still
+ * ab (kein dispatch, Rückgabe true) — siehe zeile-loeschen-code.md Abschnitt 1, Punkt 1.
  */
 export function deleteTableRow(): Command {
   return (state, dispatch) => {
@@ -168,65 +175,67 @@ export function deleteTableRow(): Command {
     try {
       rect = selectedRect(state)
     } catch {
-      // Defensiver Fallback für strukturell unerwartete Tabellen (Grenzfall 18) —
+      // Defensiver Fallback für strukturell unerwartete Tabellen (Grenzfall 18):
       // lieber unveränderter Ausgangszustand als eine halb ausgeführte Löschung.
       return false
     }
 
     const wholeTableSelected = rect.top === 0 && rect.bottom === rect.map.height
-    if (!dispatch) return true
+    if (!dispatch) return true // Verfügbarkeit: in einer Tabelle immer „möglich“ (s. u.)
 
-    if (wholeTableSelected) {
-      return removeWholeTable(state, dispatch)
-    }
+    if (wholeTableSelected) return removeWholeTable(state, dispatch, rect)
 
-    const tr = state.tr
-    for (let row = rect.bottom - 1; ; row--) {
-      removeRow(tr, rect, row)
-      if (row === rect.top) break
-      rect.table = rect.tableStart ? tr.doc.nodeAt(rect.tableStart - 1)! : tr.doc
-      rect.map = TableMap.get(rect.table)
-    }
-
-    // Cursor: gleiche Spalte, bevorzugt die nachrückende Zeile, sonst die vorherige
-    // (Anforderung Abschnitt 2.5).
-    const finalTable = rect.tableStart ? tr.doc.nodeAt(rect.tableStart - 1)! : tr.doc
-    const finalMap = TableMap.get(finalTable)
-    const targetRow = rect.top < finalMap.height ? rect.top : Math.max(0, rect.top - 1)
-    const targetCol = Math.min(rect.left, finalMap.width - 1)
-    const cellPos = finalMap.positionAt(targetRow, targetCol, finalTable)
-    tr.setSelection(TextSelection.near(tr.doc.resolve(rect.tableStart + cellPos + 1)))
-    dispatch(tr.scrollIntoView())
-    return true
+    // Normalfall: an die Bibliothek delegieren. `deleteRow` entfernt alle von der
+    // CellSelection berührten Zeilen von unten nach oben in EINER Transaktion und bildet
+    // die Selektion auf eine gültige Zelle ab (Grenzfälle 1/2/3/6/7/8/9/16, Undo = 1 Schritt).
+    return deleteRow(state, dispatch)
   }
 }
 
 /**
- * Entfernt die gesamte Tabelle (Sonderfall „letzte Zeile gelöscht“, Abschnitt 2.4).
- * Bleibt dabei stets in einem gültigen Dokumentzustand: Ist die Tabelle das einzige
- * Kind ihres Elternknotens (Dokument-Ebene ODER Zelle einer äußeren Tabelle bei
- * verschachtelten Tabellen, Grenzfall 11), wird ein leerer Absatz eingesetzt statt die
- * Tabelle ersatzlos zu entfernen (sonst Verstoß gegen `content: 'block+'` im Schema).
+ * Verfügbarkeit für den Button-Zustand. Bewusst identisch zu `isInTable`:
+ * `deleteTableRow` tut in JEDEM Tabellenkontext etwas Sichtbares — im Normalfall Zeile(n)
+ * löschen, im Guard-Fall die ganze Tabelle entfernen (2.4, Variante a). Es gibt daher
+ * KEINEN Zustand, in dem der Button ein stiller No-Op wäre; ein guard-abhängiges
+ * `disabled` (wie es der dispatch-lose `deleteRow`-Check nahelegen würde) ist deshalb
+ * WEDER nötig NOCH gewünscht — es würde den zulässigen Weg „letzte Zeile → Tabelle weg“
+ * fälschlich sperren. Erfüllt zeile-loeschen-req.md Abschnitt 6, Zeile 3 / Abschnitt 2.8.
  */
-function removeWholeTable(state: EditorState, dispatch: (tr: Transaction) => void): boolean {
-  const $anchor = state.selection.$anchor
-  let tableDepth = -1
-  for (let d = $anchor.depth; d > 0; d--) {
-    if ($anchor.node(d).type.spec.tableRole === 'table') { tableDepth = d; break }
-  }
-  if (tableDepth === -1) return false // sollte durch isInTable bereits ausgeschlossen sein
+export function canDeleteTableRow(state: EditorState): boolean {
+  return isInTable(state)
+}
 
-  const from = $anchor.before(tableDepth)
-  const to = $anchor.after(tableDepth)
-  const parent = $anchor.node(tableDepth - 1)
+/**
+ * Entfernt die gesamte Tabelle (Sonderfall „alle/letzte Zeile(n)“, 2.4) und hält dabei
+ * stets einen gültigen Dokumentzustand. Nutzt das bereits berechnete `rect`:
+ * `rect.tableStart` ist die Position DIREKT INNERHALB der Tabelle, der Tabellenknoten
+ * selbst beginnt also bei `rect.tableStart - 1`.
+ */
+function removeWholeTable(
+  state: EditorState,
+  dispatch: (tr: Transaction) => void,
+  rect: ReturnType<typeof selectedRect>,
+): boolean {
+  const from = rect.tableStart - 1
+  const to = from + rect.table.nodeSize
+  const parent = state.doc.resolve(from).parent
   const tr = state.tr
 
   if (parent.childCount === 1) {
-    const paragraph = wordSchema.nodes.paragraph.createAndFill()!
-    tr.replaceWith(from, to, paragraph)
+    // Tabelle ist einziges Kind ihres Containers — Dokumentwurzel (doc: 'block+',
+    // schema.ts:14) ODER eine äußere Tabellenzelle (cellContent: 'block+', bei
+    // verschachtelten Tabellen, Grenzfall 13). Ersatz durch leeren Absatz statt
+    // ersatzlosem Entfernen, sonst verletzt man das 'block+'-Content-Modell.
+    tr.replaceWith(from, to, wordSchema.nodes.paragraph.createAndFill()!)
     tr.setSelection(TextSelection.near(tr.doc.resolve(from + 1)))
   } else {
     tr.delete(from, to)
+    // Bias bewusst NICHT -1 (siehe Revisionshinweis 3): `Selection.near($pos, bias)`
+    // sucht zuerst in Richtung `bias`, erst als Fallback rückwärts (prosemirror-state
+    // `static near`: `findFrom($pos, bias) || findFrom($pos, -bias)`). Verlangt ist
+    // "nachfolgender Absatz bevorzugt, vorhergehender als Fallback" (2.5) — das ist
+    // die STANDARD-Richtung (bias = 1, vorwärts zuerst), nicht -1. Ein -1 hier würde
+    // die Prioritätsreihenfolge exakt umkehren.
     tr.setSelection(TextSelection.near(tr.doc.resolve(from)))
   }
   dispatch(tr.scrollIntoView())
@@ -234,37 +243,46 @@ function removeWholeTable(state: EditorState, dispatch: (tr: Transaction) => voi
 }
 ```
 
-Anmerkungen für die Umsetzung:
-- `Rect`/`TableRect`-Typ wird aus `prosemirror-tables` nicht direkt exportiert unter
-  diesem Namen für den Rückgabetyp von `selectedRect` — `ReturnType<typeof selectedRect>`
-  vermeidet einen zusätzlichen Typ-Import und bleibt stabil, falls die Bibliothek den
-  Typnamen ändert.
-- Die Schleife im Nicht-Sonderfall spiegelt bewusst `deleteRow`s eigene interne Schleife
-  (`dist/index.js` Zeile 1511–1518), **nicht** weil das nötig wäre, um Mehrzeilen-
-  Selektionen korrekt zu entfernen (das könnte man auch mit einem eigenen Aufruf von
-  `deleteRow(state, dispatch)` erreichen, solange `wholeTableSelected` false ist), sondern
-  weil wir danach selbst eine **deterministische, spaltengenaue Cursor-Position** setzen
-  wollen (Abschnitt 2.5) statt uns auf ProseMirrors automatische Selektions-Neuabbildung
-  nach der Transaktion zu verlassen, die zwar eine gültige, aber nicht notwendigerweise
-  spaltengleiche Position liefert.
-- `state.selection.$anchor` statt `$head` in `removeWholeTable`, weil bei einer
-  `CellSelection` `$anchorCell`/`$headCell` je nach Zieh-Richtung vertauscht sein können;
-  `$anchor` ist für die reine Tiefensuche nach der umgebenden `table`-Rolle unabhängig
-  von der Ziehrichtung korrekt, weil jede Zelle der Selektion im selben Tabellen-Ast liegt.
+Anmerkungen:
+- **Warum Delegation statt eigener Lösch-Schleife:** Die frühere Fassung baute die
+  bottom→top-Schleife aus `deleteRow` per Hand nach, um danach eine spaltengenaue
+  Cursor-Position zu setzen. Das ist zusätzliches Off-by-one-/Mapping-Risiko für einen
+  Nutzen (spaltengleiche Zelle), den Abschnitt 2.5 nur „bevorzugt“ verlangt — die von
+  `deleteRow` automatisch neu abgebildete Selektion ist bereits „eine sinnvolle Zelle“ und
+  hält den Editor fokussiert/bedienbar. Delegation ist robuster. Falls E2E-Tests eine
+  spaltengenaue Position doch erfordern, kann die Schleife später additiv nachgezogen
+  werden (siehe Abschnitt 8, „optional“).
+- `ReturnType<typeof selectedRect>` als rect-Typ vermeidet einen fragilen Typ-Import (der
+  Rückgabetyp wird nicht unter stabilem Namen exportiert).
+- **Warum `canDeleteTableRow` trotz des `try/catch` in `deleteTableRow` nie zu einem
+  stillen No-Op führt:** `isInTable(state)` prüft, ob **irgendein** Vorfahre von
+  `state.selection.$head` die `tableRole` `"row"` trägt (`prosemirror-tables`
+  `dist/index.js:390-393`). Das Schema (`tableNodes(...)`, `schema.ts:154`) erlaubt einer
+  `table_row` **ausschließlich** `table_cell`/`header_cell`-Kinder — liegt `$head` also
+  innerhalb eines `row`-Vorfahren, liegt es zwangsläufig **auch** innerhalb eines
+  `cell`-Vorfahren derselben Zeile. `selectionCell` (von `selectedRect` intern genutzt,
+  `dist/index.js:398-405`) findet über `cellAround($head)` in genau diesem Fall immer eine
+  Zelle. Der `try/catch` um `selectedRect` in `deleteTableRow` ist also, **solange
+  `isInTable(state)` true ist**, strukturell unerreichbar (reines Defense-in-Depth, kein
+  tatsächlicher Divergenzpfad) — `canDeleteTableRow(state) = isInTable(state)` kann demnach
+  nie „aktiviert“ anzeigen, während `deleteTableRow` intern still `false` zurückgibt.
 
 ### 3.2 GEÄNDERT: `src/formats/shared/editor/commands.ts`
 
-- Entfernen: Body von `insertTable` (Zeile 76–86).
-- Ersetzen durch: `export { insertTable, deleteTableRow } from './tableCommands'`
-- `isInTable`-Re-Export (Zeile 3/6) bleibt unverändert bestehen (weiterhin von
-  `Toolbar.tsx` und neu von `TableToolbar.tsx` genutzt).
+- **`insertTable` (Zeile 92–102) bleibt unverändert** (kein Verschieben).
+- **Ergänzen** (bei den übrigen Re-Exports, in der Nähe von `export { isInTable }`,
+  Zeile 6): `export { deleteTableRow, canDeleteTableRow } from './tableCommands'`.
+- Sonst keine Änderung an dieser Datei.
 
 ### 3.3 NEU: `src/formats/shared/editor/icons.tsx`
 
+SVG-Icon für „Zeile löschen“ (kein Glyph). Muster analog `ScissorsIcon`
+(`Toolbar.tsx:33–53`).
+
 ```tsx
-/** Kleine, eingebettete SVG-Icons für Tabellen-Kontextfunktionen (kein Emoji/Unicode-
- *  Glyph, siehe FEATURE-SPEC-DOCX-ODT.md Abschnitt 20, Punkt 1). Gemeinsamer Ablageort
- *  für „Zeile löschen“ und die Icons der Nachbar-Tabellenfeatures. */
+/** Eingebettete SVG-Icons für Tabellen-Kontextfunktionen (kein Emoji/Unicode-Glyph,
+ *  FEATURE-SPEC-DOCX-ODT.md Abschnitt 20.1). Gemeinsamer Ablageort für „Zeile löschen“
+ *  und künftige Nachbar-Tabellenfeatures. */
 export function RowDeleteIcon() {
   return (
     <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true" focusable="false">
@@ -276,38 +294,38 @@ export function RowDeleteIcon() {
   )
 }
 ```
-(Visuelle Ausgestaltung im Detail ist beim Bau final festzulegen — mittlere Zeile
-markiert/durchgestrichen als Zeile-löschen-Symbol; Kernpunkt ist „SVG statt Glyph“.)
+(Visuelle Detailausgestaltung beim Bau final; Kernpunkt: SVG statt Glyph, `aria-hidden`.)
 
-### 3.4 NEU: `src/formats/shared/editor/runCommand.ts`
+### 3.4 NEU: `src/formats/shared/editor/runEditorCommand.ts`
+
+Korrekte Drei-Argument-Signatur (siehe Abschnitt 2). Wird von `TableToolbar.tsx` genutzt.
 
 ```ts
 import type { Command } from 'prosemirror-state'
 import type { EditorView } from 'prosemirror-view'
 
-/** Führt einen ProseMirror-Command gegen die aktive View aus und stellt den Fokus
- *  wieder her — gemeinsam genutzt von Toolbar.tsx und TableToolbar.tsx. */
-export function runCommand(view: EditorView, command: Command) {
-  command(view.state, view.dispatch)
+/** Führt einen ProseMirror-Command gegen die aktive View aus und stellt den Fokus wieder
+ *  her. Reicht `view` als drittes Argument durch — Commands wie `cutSelection` benötigen
+ *  es; ein Weglassen würde diese brechen (siehe Toolbar.tsx `run()`, Zeile 28–31). */
+export function runEditorCommand(view: EditorView, command: Command) {
+  command(view.state, view.dispatch, view)
   view.focus()
 }
 ```
 
 ### 3.5 GEÄNDERT: `src/formats/shared/editor/Toolbar.tsx`
 
-- Lokale Funktion `run()` (Zeile 23–26) entfernen, stattdessen
-  `import { runCommand } from './runCommand'` und alle 12 Aufrufstellen `run(view, …)`
-  → `runCommand(view, …)` (rein mechanisches Rename, keine Verhaltensänderung).
-- Kein Button für „Zeile löschen“ hier — der lebt ausschließlich in `TableToolbar.tsx`
-  (Abschnitt 1 der Anforderungsdatei verlangt eine **eigene**, kontextabhängige
-  Werkzeugleiste, nicht einen weiteren Button in der immer sichtbaren Haupt-Toolbar).
+**Keine Änderung nötig oder geplant.** Der „Zeile löschen“-Button lebt ausschließlich in
+`TableToolbar.tsx` (Anforderungsdatei Abschnitt 1: eigene, kontextabhängige Leiste, nicht
+ein weiterer Button in der stets sichtbaren Haupt-Toolbar). Die lokale `run()`-Funktion
+(Zeile 28–31) und ihre 13 Aufrufstellen bleiben unverändert.
 
 ### 3.6 NEU: `src/formats/shared/editor/TableToolbar.tsx`
 
 ```tsx
 import type { EditorView } from 'prosemirror-view'
-import { deleteTableRow, isInTable } from './commands'
-import { runCommand } from './runCommand'
+import { canDeleteTableRow, deleteTableRow, isInTable } from './commands'
+import { runEditorCommand } from './runEditorCommand'
 import { RowDeleteIcon } from './icons'
 
 interface TableToolbarProps {
@@ -316,9 +334,9 @@ interface TableToolbarProps {
 
 /**
  * Kontextabhängige Werkzeugleiste für Tabellenoperationen — sichtbar ausschließlich,
- * während sich Cursor/Selektion in einer Tabelle befindet (isInTable). Gemeinsamer
- * Ort für alle Tabellen-Kontextfunktionen (zeile-loeschen-req.md Abschnitt 1, Zugriffs-
- * weg 1); enthält für dieses Feature genau einen Button.
+ * während sich Cursor/Selektion in einer Tabelle befindet (isInTable). Gemeinsamer Ort
+ * für alle Tabellen-Kontextfunktionen (zeile-loeschen-req.md Abschnitt 1, Zugriffsweg 1);
+ * für dieses Feature genau ein Button.
  */
 export function TableToolbar({ view }: TableToolbarProps) {
   if (!isInTable(view.state)) return null
@@ -333,11 +351,12 @@ export function TableToolbar({ view }: TableToolbarProps) {
         type="button"
         title="Zeile löschen"
         aria-label="Zeile löschen"
+        disabled={!canDeleteTableRow(view.state)}
         onMouseDown={(e) => {
           e.preventDefault()
-          runCommand(view, deleteTableRow())
+          runEditorCommand(view, deleteTableRow())
         }}
-        className="p-1.5 rounded hover:bg-neutral-200 dark:hover:bg-neutral-800 text-neutral-700 dark:text-neutral-300"
+        className="p-1.5 rounded hover:bg-neutral-200 dark:hover:bg-neutral-800 text-neutral-700 dark:text-neutral-300 disabled:opacity-40 disabled:cursor-not-allowed"
       >
         <RowDeleteIcon />
       </button>
@@ -346,48 +365,94 @@ export function TableToolbar({ view }: TableToolbarProps) {
 }
 ```
 
-Design-Entscheidung „statische zweite Zeile statt am Cursor schwebend“: Die
-Anforderungsdatei verlangt nur, dass die Werkzeugleiste **erscheint, während** sich der
-Cursor in einer Tabelle befindet — keine am Cursor „schwebende“ Positionierung. Eine
-fest angeordnete zweite Symbolleiste direkt unter der Haupt-Toolbar (analog zu vielen
-Textverarbeitungen mit kontextabhängiger zweiter Leiste) erfüllt das mit deutlich
-weniger Risiko (keine Scroll-/Positionierungs-Bugs, keine zusätzliche
-Selection-Sync-Fehlerquelle) als ein floatendes Overlay in Cursor-Nähe. Ein floatendes
-Overlay wäre eine spätere, rein optische Verbesserung, kein funktionales Erfordernis
-dieser Anforderungsdatei.
+`disabled={!canDeleteTableRow(...)}` ist hier faktisch nie `true` (die Leiste rendert nur
+in einer Tabelle) — bewusst mitgeführt für Konsistenz mit den Nachbar-Buttons und als
+explizite Umsetzung von Abnahmekriterium 3 (keine stille No-Op-Fläche).
+
+**Positionierung — statische zweite Leiste statt schwebendes Overlay:** Die
+Anforderungsdatei verlangt nur, dass die Leiste **erscheint, während** der Cursor in einer
+Tabelle ist — keine am Cursor schwebende Positionierung. Eine feste zweite Symbolleiste
+direkt unter der Haupt-Toolbar erfüllt das risikoärmer (keine Scroll-/Positionierungs- und
+keine zusätzliche Selection-Sync-Fehlerquelle) als ein Floating-Overlay. Ein Overlay wäre
+eine spätere rein optische Verbesserung.
 
 ### 3.7 GEÄNDERT: `src/formats/shared/editor/WordEditor.tsx`
 
-- Neuer Import: `import { TableToolbar } from './TableToolbar'`
-- Im JSX (Zeile 118, direkt nach `<Toolbar view={viewRef.current} />`):
+- **Import ergänzen** (nach `import { Toolbar } from './Toolbar'`, Zeile 16):
+  ```ts
+  import { TableToolbar } from './TableToolbar'
+  ```
+- **JSX ergänzen.** Die bestehende Toolbar-Zeile (**Zeile 170**) lautet aktuell **exakt**:
   ```tsx
-  {viewRef.current && <Toolbar view={viewRef.current} />}
+  {viewRef.current && <Toolbar view={viewRef.current} cutError={cutError} setCutError={setCutError} />}
+  ```
+  **Diese Zeile bleibt unverändert** (insbesondere `cutError`/`setCutError` dürfen NICHT
+  entfallen — `Toolbar` verlangt sie, `Toolbar.tsx:113`). Direkt darunter einfügen:
+  ```tsx
   {viewRef.current && <TableToolbar view={viewRef.current} />}
   ```
-- Keine weiteren Änderungen nötig: `columnResizing()`/`tableEditing()` (Zeile 81–82)
-  und die vorhandene `history()`/`keymap`-Konfiguration (Zeile 70–80, insbesondere
-  `Mod-z`/`Mod-y`/`Mod-Shift-z` für Undo/Redo) decken Abschnitt 2.6 der
-  Anforderungsdatei bereits ab — **kein neuer Keymap-Eintrag** für „Zeile löschen“
-  nötig oder gewollt (Anforderungsdatei Abschnitt 1, Zugriffsweg 3: bewusst keine
-  Tastenkombination).
-- Der bereits vorhandene `mouseup`-Handler `reconcileSelectionOnClick` (Zeile 42–53)
-  wird **nicht verändert** — er ist bereits generisch genug, um auch nach einer
-  Tabellen-Struktur-Transaktion zu greifen; das muss aber durch den neuen
-  Regressionstest in Abschnitt 6.5 unten **verifiziert**, nicht nur angenommen werden
-  (siehe Anforderungsdatei Abschnitt 2.7).
+  > Korrektur gegenüber der früheren Fassung, die hier fälschlich
+  > `<Toolbar view={viewRef.current} />` ohne die beiden Pflicht-Props zitierte/ersetzte —
+  > das hätte den „Ausschneiden“-Fehlerpfad zerstört.
+
+> **Revisionshinweis 3 (dieser Durchgang — kritische Prüfung gegen den realen Code, keine
+> Übernahme des Vorgängerplans):** Alle Datei-Fundstellen dieses Plans wurden erneut Zeile
+> für Zeile gegen den aktuellen Quelltext **und** die installierte `prosemirror-tables`-Version
+> geprüft (inkl. Blick in `node_modules/prosemirror-tables/dist/index.js` und
+> `node_modules/prosemirror-state/dist/index.js`). Ergebnis: der Plan war größtenteils exakt
+> (jede zitierte Zeile/Codezeile stimmte). Vier konkrete Korrekturen:
+> 1. **Echter Bug in `removeWholeTable` (Abschnitt 3.1) behoben:** Der `else`-Zweig setzte
+>    `TextSelection.near(tr.doc.resolve(from), -1)`. `Selection.near($pos, bias)`
+>    (`prosemirror-state/dist/index.js`, `static near`) sucht **zuerst in Richtung `bias`,
+>    erst danach in Gegenrichtung** (`findFrom($pos, bias) || findFrom($pos, -bias)`).
+>    `bias = -1` sucht also **zuerst rückwärts** (vorhergehender Absatz) und erst als
+>    Fallback vorwärts — exakt **entgegengesetzt** zu `zeile-loeschen-req.md` Abschnitt 2.5
+>    („Cursor in den **nachfolgenden** … Absatz, falls keiner existiert, vorhergehenden“).
+>    Fix: Standard-Bias (`1`, vorwärts zuerst) verwenden, wie im `if`-Zweig (leerer Absatz)
+>    bereits korrekt (implizit über `from + 1`, das ohnehin innerhalb des neuen Absatzes
+>    liegt) der Fall. Codeblock und Erläuterung in Abschnitt 3.1 sind entsprechend korrigiert.
+> 2. **Stale Zeilenangabe:** `docx/reader.ts`s `parseTable` endet inzwischen bei Zeile **364**,
+>    nicht 360 (zwischenzeitlich kam ein `MAX_TABLE_NESTING_DEPTH`-Guard mit `depth`-Parameter
+>    hinzu, s. Abschnitt 5.1) — Start (311) und Substanz des Befunds (vMerge→rowspan-Rekonstruktion
+>    korrekt) unverändert.
+> 3. **Faktenfehler korrigiert:** „14 `run(view, …)`-Aufrufstellen“ in `Toolbar.tsx` — nachgezählt
+>    (`grep -n "run(view" Toolbar.tsx`) sind es **13** (die 14. „Fundstelle“ war die
+>    Funktionsdefinition selbst, keine Aufrufstelle).
+> 4. **Testdateinamen an bestehende Konvention angeglichen:** Jedes existierende
+>    `__tests__`-File in `src/formats/docx/`/`odt/` nutzt durchgängig Kebab-Case
+>    (`cut-roundtrip.test.ts`, `blank-document.test.ts`, `external-fixtures.test.ts`,
+>    `external-validation.test.ts`) — keines nutzt ein Binnen-Camel plus Punkt wie das
+>    ursprünglich vorgeschlagene `rowDelete.roundtrip.test.ts`. In Abschnitt 6.2/6.3/6.4 auf
+>    `row-delete-roundtrip.test.ts` (docx/odt) bzw. `row-delete-cross-format.test.ts`
+>    umbenannt — reiner Namens-Fix, keine inhaltliche Änderung.
+>
+> Zusätzlich ergänzt (kein Fehler, aber eine bislang unbelegte Behauptung): eine explizite
+> Begründung, warum `canDeleteTableRow`s isInTable-only-Definition **nie** zu einem stillen
+> No-Op führen kann, obwohl `deleteTableRow` defensiv ein `try/catch` um `selectedRect` legt
+> (Abschnitt 3.1, Anmerkungen).
+
+- **Keine weiteren Änderungen.** `columnResizing()`/`tableEditing()` (**Zeile 109–110**),
+  `history()` (Zeile 84) und die `keymap`-Konfiguration mit `Mod-z`/`Mod-y`/`Mod-Shift-z`
+  (**Zeile 93–95**) decken Undo/Redo (2.6) bereits ab — **kein neuer Keymap-Eintrag** für
+  „Zeile löschen“ (Anforderungsdatei Abschnitt 1, Zugriffsweg 3: bewusst keine Tastenkombination).
+- Der `mouseup`-Handler `reconcileSelectionOnClick` (**Zeile 43–50**, Handler definiert
+  143–153, per `addEventListener` registriert **Zeile 154–155**) bleibt **unverändert**;
+  seine Wirksamkeit auch nach einer
+  Tabellen-Struktur-Transaktion wird durch den Regressionstest 6.6/7 **verifiziert**, nicht
+  nur angenommen (Anforderungsdatei 2.7).
 
 ### 3.8 GEÄNDERT: `src/index.css`
 
-Ergänzen (keine bestehende Regel wird verändert), damit eine per Maus über mehrere
-Zellen/Zeilen aufgezogene `CellSelection` überhaupt sichtbar ist — Voraussetzung dafür,
-dass Grenzfall 2/3 und Testfall 6 (Abschnitt 6 der Anforderungsdatei: Entf auf
-`CellSelection`) beim manuellen wie beim automatisierten Test überhaupt einen sichtbar
-markierten Zustand haben, den man löschen bzw. dessen Content-Leerung man beobachten
-kann (aktuell existiert **keinerlei** CSS für `.selectedCell`, obwohl das Plugin diese
-Klasse bereits aktiv setzt):
+Verifiziert: `src/index.css` (Tailwind v4, `@import 'tailwindcss'`; über `main.tsx`
+eingebunden) enthält `.ProseMirror`-Regeln, aber **keinerlei** `.selectedCell`-Regel
+(Volltextsuche über `src/`: kein Treffer). `prosemirror-tables` setzt bei einer per Maus
+aufgezogenen `CellSelection` die Klasse `selectedCell` per Decoration — ohne CSS ist die
+Selektion jedoch **unsichtbar**. Für die Grenzfälle 2/3 und den Entf-Abgrenzungstest
+(6.6/6) muss ein aufgezogener Zeilen-/Zellbereich sichtbar sein. Ergänzen (verändert keine
+bestehende Regel):
 ```css
-/* Von prosemirror-tables' CellSelection-Decoration gesetzte Klasse — ohne dieses Regel
-   ist eine per Maus aufgezogene Zeilen-/Zellselektion unsichtbar. */
+/* Von prosemirror-tables' CellSelection-Decoration gesetzt — ohne diese Regel ist eine
+   per Maus aufgezogene Zeilen-/Zellselektion unsichtbar. */
 .ProseMirror .selectedCell {
   position: relative;
 }
@@ -408,116 +473,67 @@ Klasse bereits aktiv setzt):
 | # | Weg | Entscheidung | Begründung/Umsetzung |
 |---|---|---|---|
 | 1 | Kontextabhängige Tabellen-Werkzeugleiste, Button „Zeile löschen“ | **Umgesetzt** | Abschnitt 3.6/3.7 |
-| 2 | Rechtsklick-Kontextmenü „Zeilen löschen“ | **Bewusst nicht umgesetzt** | Kein eigenes `contextmenu`-Handling wird gebaut; natives Browser-Kontextmenü bleibt bestehen (ohne Tabellenbezug). Analog zur bereits dokumentierten Entscheidung zum „Anwendungsmenü“-Fall in `ausschneiden-req.md` Abschnitt 1: „Zeile löschen“ ist ausschließlich über Weg 1 (Tabellen-Werkzeugleiste) erreichbar. Diese Zeile in diesem Plan **ist** die geforderte Dokumentation dieser Entscheidung. |
-| 3 | Tastenkombination | **Bewusst nicht umgesetzt** | Kein Referenzverhalten in Word/LibreOffice; kein Keymap-Eintrag in `WordEditor.tsx`. |
-| 4 | Entf/Rücktaste bei `CellSelection` | **Bereits vorhanden, keine Codeänderung** | Siehe Abschnitt 1, Punkt 3 dieses Plans — `CellSelection.replace()` aus `prosemirror-tables` leert nur Inhalt. Nur Testabsicherung nötig (Abschnitt 6.1, Testfall „Entf-Abgrenzung“). |
-| 5 | Bestätigungsdialog | **Bewusst nicht umgesetzt** | Strg+Z (vorhandener `history()`/`undo`-Keymap) ist das vorgesehene Sicherheitsnetz. |
-| 6 | Mobile/Touch | **Über Weg 1 abgedeckt** | `TableToolbar`-Button ist ein normales `<button>`-Element ohne Hover-Abhängigkeit — auf „Mobile“ (Pixel 7) und „Tablet“ (iPad Mini) laut `playwright.config.ts` per Tap erreichbar. Nachweis über E2E-Tests, die ohne Projekt-Einschränkung laufen (Abschnitt 6.5). |
+| 2 | Rechtsklick-Kontextmenü „Zeilen löschen“ | **Bewusst nicht umgesetzt** | Kein eigenes `contextmenu`-Handling; das native Kontextmenü bleibt erreichbar (bewusste projektweite Entscheidung, `WordEditor.tsx:117–121`, analog `ausschneiden-req.md` Abschnitt 1). „Zeile löschen“ ist ausschließlich über Weg 1 erreichbar. Diese Zeile **ist** die geforderte Dokumentation. |
+| 3 | Tastenkombination | **Bewusst nicht umgesetzt** | Kein Referenzverhalten in Word/LibreOffice; kein Keymap-Eintrag. |
+| 4 | Entf/Rücktaste bei `CellSelection` | **Bereits vorhanden, keine Codeänderung** | Abschnitt 1, Punkt 3 — `CellSelection.replace` leert nur Inhalt. Nur Testabsicherung (6.6/6). |
+| 5 | Bestätigungsdialog | **Bewusst nicht umgesetzt** | Strg+Z (`history()`) ist das Sicherheitsnetz. |
+| 6 | Mobile/Touch | **Über Weg 1 abgedeckt** | `TableToolbar`-Button ist ein normales `<button>` ohne Hover-Abhängigkeit — per Tap erreichbar. Nachweis über E2E ohne Projekt-Einschränkung (6.6). |
 
 ---
 
-## 5. Import/Export-Anpassungen
+## 5. Import/Export — Analyse (verifiziert)
 
 ### 5.1 DOCX — keine Anpassung an Reader/Writer nötig
 
-`src/formats/docx/reader.ts` (`parseTable`, Zeile 210–256) und
-`src/formats/docx/writer.ts` (`tableToDocx`, Zeile 128–171) lesen bzw. schreiben die
-Tabellenstruktur bei **jedem** Export/Import komplett neu aus dem aktuellen
-ProseMirror-Dokument (`node.content` zum Zeitpunkt des Exports). Da „Zeile löschen“
-ausschließlich den ProseMirror-Zustand verändert (Abschnitt 3.1), spiegelt ein
-nachfolgender Export automatisch die reduzierte Zeilenzahl wider:
-- `tblGrid`/Spaltenanzahl wird aus `rows[0]` neu berechnet (Writer, Zeile 130) — kein
-  verwaistes `<w:tr>` möglich, weil jede Zeile 1:1 aus dem aktuellen Dokument-JSON
-  entsteht.
-- `vMerge`/`gridSpan` werden pro Zeile aus dem aktuellen `pending[]`-Array neu erzeugt
-  (Writer, Zeile 133–165) bzw. beim Import über ein spaltenweises `anchors[]`-Array
-  korrekt nachgeführt (Reader, Zeile 216–250) — beides bereits vor diesem Feature
-  korrekt und durch den bestehenden Rowspan-Rundreise-Test abgesichert
-  (`src/formats/docx/__tests__/roundtrip.test.ts`, Zeile 223–248).
-- Bilder in gelöschten Zellen verschwinden automatisch aus dem Export, weil
-  `ImageCollector` (`src/formats/docx/imageCollector.ts`) nur beim rekursiven Ablaufen
-  des tatsächlichen (nach der Löschung bereits reduzierten) Dokumentbaums befüllt wird
-  (`writer.ts`, `blockToDocx`/`tableToDocx`) — ein gelöschtes Bild wird nie besucht,
-  landet nie in der Collector-Liste und damit auch nicht im ZIP. Kein Code nötig für
-  Abschnitt 4.2, Testfall 6 (DOCX-Teil).
+`src/formats/docx/writer.ts` `tableToDocx` (**Zeile 158–201**) und
+`src/formats/docx/reader.ts` `parseTable` (**Zeile 311–364** — inzwischen mit `depth`-Parameter
+und `MAX_TABLE_NESTING_DEPTH`-Guard gegen Stack-Overflow bei pathologisch tief verschachtelten
+Fremddateien, Revisionshinweis 3; Substanz der vMerge→rowspan-Rekonstruktion unverändert)
+verarbeiten die
+Tabellenstruktur bei jedem Export/Import komplett neu aus dem aktuellen
+ProseMirror-Dokument. Da „Zeile löschen“ nur den ProseMirror-Zustand ändert, spiegelt ein
+nachfolgender Export automatisch die reduzierte Zeilenzahl:
+- `colCount`/`tblGrid` aus `rows[0]` inkl. `colspan`-Summe (**Writer Zeile 160–161**) —
+  kein verwaistes `<w:tr>` möglich.
+- `vMerge`/`gridSpan` werden pro Zeile aus dem `pending[]`-Array neu erzeugt
+  (**Writer Zeile 163–193**: `restart` bei 188, Fortsetzung `<w:vMerge/>` bei 174) bzw.
+  beim Import über ein spaltenweises `anchors[]`-Array rekonstruiert
+  (**Reader Zeile 317–356**). Bereits durch den Rowspan-Rundreise-Test
+  `docx/__tests__/roundtrip.test.ts:279–300` („preserves vertically merged cells (rowspan)“)
+  abgesichert.
+- Bilder in gelöschten Zellen verschwinden automatisch aus dem Export, weil der
+  `ImageCollector` nur beim rekursiven Ablaufen des (bereits reduzierten) Dokumentbaums
+  befüllt wird (`writer.ts`, `blockToDocx`/`tableToDocx`) — ein gelöschtes Bild wird nie
+  besucht, landet nie in `word/media/`. Kein Code für 5.2-Testfall 6 (DOCX) nötig.
 
-**Fazit:** Für DOCX ist dieses Feature eine reine Editor-Änderung; Reader/Writer
-bleiben unangetastet. Das muss trotzdem durch die neuen Rundreise-Tests in Abschnitt
-6.2 **bestätigt**, nicht nur behauptet werden.
+**Fazit DOCX:** reine Editor-Änderung; Reader/Writer unangetastet. Durch die neuen
+Rundreise-Tests (6.2) zu **bestätigen**.
 
-### 5.2 ODT — Bugfix erforderlich, Voraussetzung für Abnahmekriterium 8
+### 5.2 ODT — keine Anpassung an Reader/Writer nötig (frühere „Bugfix“-Annahme war falsch)
 
-**Datei: `src/formats/odt/writer.ts`, Funktion `blockToOdt`, Fall `'table'`
-(Zeile 86–111).** Aktuell wird pro Zeile ausschließlich über die tatsächlich
-vorhandenen `row.content`-Zellen iteriert; für Spalten, die von einer `rowspan`-Zelle
-einer vorherigen Zeile überdeckt werden, fehlt das nach ODF-Spezifikation zwingende
-`<table:covered-table-cell/>`-Platzhalterelement. Das betrifft **jede** Tabelle mit
-`rowspan > 1` über mehr als eine Zeile, unabhängig von „Zeile löschen“ — wird aber
-durch dieses Feature **sichtbar/relevant**, weil Abschnitt 4.2, Testfall 3 der
-Anforderungsdatei genau diesen Fall (Rowspan-Anker gelöscht → Export → Reimport)
-verlangt, und weil in vielen Ausgangstabellen nach dem Löschen einer *anderen*, mit dem
-Rowspan nicht zusammenhängenden Zeile ein unverändertes Rowspan-Paar übrig bleibt, das
-dann fehlerhaft exportiert würde.
+Verifiziert (siehe Abschnitt 1, Punkt 4):
+- `src/formats/odt/writer.ts` `case 'table'` (**Zeile 110–175**) berechnet `colCount`
+  korrekt als `colspan`-Summe (Zeile 115–116) und emittiert `<table:covered-table-cell/>`
+  für horizontale (Zeile 160–162) **und** vertikale (Zeile 126, 135–140, 165–167)
+  Überdeckung. **Bereits ODF-konform.**
+- `src/formats/odt/reader.ts` `table`-Fall (**Zeile 301–321**) liest je Zeile nur
+  `<table:table-cell>` (Zeile 304) und rekonstruiert `colspan`/`rowspan` aus
+  `number-columns-/rows-spanned` (Zeile 305–306). Das Überspringen von
+  `covered-table-cell` ist für das ProseMirror-Modell selbstkonsistent (überdeckte
+  Rasterpositionen dürfen im `content`-Array einer Zeile nicht auftauchen). Für dieses
+  Feature **keine Änderung**; für fremde ODT-Dateien mit vertikalen Verbindungen bleibt es
+  eine bekannte, geteilte Import-Asymmetrie (Rundreise-Testfall 9, als **Abhängigkeit** der
+  gemeinsamen Import-Infrastruktur zu kennzeichnen, nicht als `zeile-loeschen`-Fehler —
+  Anforderungsdatei Befund 8).
 
-Notwendige Änderung (innerhalb der bestehenden `case 'table'`-Behandlung):
-- Beim Aufbau der Zeilen zusätzlich Buchführung über offene Rowspans pro Spalte führen
-  (Pendant zum bereits vorhandenen `pending[]`-Array im DOCX-Writer, Zeile 133 in
-  `docx/writer.ts` — dasselbe Muster lässt sich 1:1 auf ODT übertragen):
-  ```ts
-  const colCount = /* wie bisher, aus rows[0] inkl. colspan-Summe berechnen —
-                        bisher (Zeile 88) fälschlich nur rows[0]?.content?.length,
-                        was bei colspan>1 in Zeile 1 bereits eine zu kleine
-                        Spaltenzahl liefert; Fix: dieselbe Summenbildung wie
-                        docx/writer.ts Zeile 130 übernehmen */
-  const pendingRowSpans: number[] = Array.from({ length: colCount }, () => 0)
-  const rowsXml = rows.map((row) => {
-    let col = 0
-    let cellIndex = 0
-    const cellsXml: string[] = []
-    while (col < colCount) {
-      if (pendingRowSpans[col] > 0) {
-        pendingRowSpans[col] -= 1
-        cellsXml.push('<table:covered-table-cell/>')
-        col += 1
-        continue
-      }
-      const cell = row.content?.[cellIndex]
-      cellIndex += 1
-      if (!cell) { col += 1; continue }
-      const colspan = Number(cell.attrs?.colspan ?? 1)
-      const rowspan = Number(cell.attrs?.rowspan ?? 1)
-      // ... bestehende spanAttrs-/inner-Logik unverändert ...
-      if (rowspan > 1) {
-        for (let c = col; c < col + colspan; c++) pendingRowSpans[c] = rowspan - 1
-      }
-      col += colspan
-    }
-    return `<table:table-row>${cellsXml.join('')}</table:table-row>`
-  })
-  ```
-- **Zusätzlich betroffen (bereits existierender, von diesem Fix mit ausgebesserter
-  Bug):** `colCount` (Zeile 88: `rows[0]?.content?.length ?? 1`) berücksichtigt
-  `colspan` nicht — bei einer ersten Zeile mit einer `colspan: 2`-Zelle und einer
-  normalen Zelle würde `colCount` fälschlich `2` statt `3` liefern, sobald weitere
-  Spalten existieren. Fix im selben Zug: `colCount` wie im DOCX-Writer als Summe der
-  `colspan`-Werte der ersten Zeile berechnen.
+Wie DOCX ist „Zeile löschen“ auch für ODT eine reine Editor-Änderung, die ein
+nachfolgender Export automatisch abbildet. **Kein ODT-Bugfix, keine Voraussetzung für
+Abnahmekriterium 8** (die frühere Fassung dieses Plans lag hier falsch). Nachweis durch
+die neuen Rundreise-Tests (6.3), die auf die bereits vorhandene, korrekte
+`covered-table-cell`-Logik aufsetzen.
 
-**Datei: `src/formats/odt/reader.ts`, Funktion `elementToBlocks`, Fall
-`ns === ODF_NAMESPACES.table && local === 'table'` (Zeile 189–203).** Keine
-zwingende Änderung nötig — der Reader filtert bereits korrekt nur nach
-`table-cell`-Kindern (`childElements(rowEl, ODF_NAMESPACES.table, 'table-cell')`,
-Zeile 192) und ignoriert `covered-table-cell` damit implizit richtig, auch für Dateien,
-die (nach dem Fix oben) jetzt korrekt welche enthalten, und für real importierte
-Fremddateien, die sie schon immer enthalten. **Empfohlen, aber optional:** einen
-Kommentar an dieser Stelle ergänzen, der explizit festhält, dass
-`covered-table-cell`-Elemente absichtlich übersprungen werden (Wartbarkeit/Nachvoll-
-ziehbarkeit für zukünftige Bearbeiter), keine Verhaltensänderung.
-
-**Auswirkung auf bestehenden Test:** Der bestehende Test „preserves merged cells
-(colspan/rowspan)“ in `src/formats/odt/__tests__/roundtrip.test.ts` (Zeile 194–209)
-bleibt grün (er testet nur `colspan`, keine mehrzeilige `rowspan`-Struktur) — er wird
-in Abschnitt 6.3 unten um einen echten mehrzeiligen `rowspan`-Fall ergänzt, der ohne
-diesen Fix fehlschlagen würde (Nachweis, dass der Fix nötig und wirksam ist).
+Optional (Wartbarkeit, keine Verhaltensänderung): ein Kommentar am ODT-Reader-`table`-Fall,
+dass `covered-table-cell` bewusst übersprungen wird.
 
 ---
 
@@ -525,188 +541,144 @@ diesen Fix fehlschlagen würde (Nachweis, dass der Fix nötig und wirksam ist).
 
 ### 6.1 NEU: `src/formats/shared/editor/__tests__/deleteTableRow.test.ts`
 
-Reine Unit-Tests gegen `deleteTableRow()` über direkt konstruierte `EditorState`s
-(kein DOM/View nötig, analog zum bereits vorhandenen Muster in
-`pagination.test.ts`, nur mit `prosemirror-state`/`prosemirror-model` statt reiner
-Funktionen). Deckt ab:
+Unit-Tests gegen `deleteTableRow()`/`canDeleteTableRow()` über direkt konstruierte
+`EditorState`s (Muster wie `commands.test.ts`/`pagination.test.ts` im selben `__tests__`).
+Deckt ab:
 
-| Testfall | Grenzfall (Anforderungsdatei) |
+| Testfall | Grenzfall (req) |
 |---|---|
-| Cursor (kollabiert) in einer Zelle einer 3-Zeilen-Tabelle → mittlere Zeile verschwindet, Zeile 1/3 bleiben, Reihenfolge korrekt | 3.1 |
-| `CellSelection` über 2 von 4 Spalten einer Zeile → komplette Zeile verschwindet, nicht nur markierte Zellen | 3.2 |
-| `CellSelection` über 2 vollständige Zeilen einer 4-Zeilen-Tabelle → beide verschwinden in einer Transaktion | 3.3 |
-| Tabelle mit genau 1 Zeile → gesamte Tabelle verschwindet, Cursor landet im umgebenden Absatz | 3.4 / 2.4 |
-| Tabelle mit 1 Zeile als **einziges** Dokumentelement → nach Löschung genau ein leerer Absatz übrig, kein leeres `doc` | 2.4 (zweiter Teil) |
-| Rowspan-Anker-Zeile gelöscht → Inhalt migriert in Folgezeile, `rowspan` dekrementiert | 3.5 |
-| Nur überdeckte Zeile (nicht Anker) gelöscht → Ankerzelle `rowspan - 1`, Inhalt unverändert | 3.6 |
-| Erste Zeile gelöscht → keine Off-by-one-Verschiebung bei einer zweiten, direkt folgenden Löschung derselben Tabelle | 3.7 |
-| Letzte Zeile gelöscht (bei >1 Zeile) → Tabelle bleibt, Cursor in neuer letzter Zeile | 3.8 |
-| Tabelle als erstes bzw. letztes Element des Dokuments, letzte Zeile gelöscht → Cursor in gültigem Nachbar-Absatz, kein Crash | 3.9 |
-| Zelle mit mehreren Absätzen/Bild in der gelöschten Zeile → Knoten verschwinden vollständig, kein Rest andernorts im Dokument | 3.10 |
-| Verschachtelte Tabelle: Zeile der äußeren Tabelle gelöscht, während sich Cursor in der inneren Tabelle befindet vs. in der äußeren → jeweils korrekte (innerste) Tabelle betroffen, kein Absturz; zusätzlich: innere Tabelle ist einzige Zeile & einziger Zellinhalt → Zelle bekommt Ersatz-Absatz (Fallback-Pfad aus `removeWholeTable`) | 3.11 |
-| Aufruf ohne Tabellenkontext (`isInTable` false) → `false`, keine Exception, `dispatch` nicht aufgerufen | 3.15 |
-| Große Tabelle (>5 Spalten, >10 Zeilen) → Löschen einer mittleren Zeile lässt alle anderen Zellinhalte unverändert und in korrekter Reihenfolge | 3.17 |
-| Zeile mit reiner `colspan`-Zelle (kein rowspan) gelöscht → Zelle verschwindet vollständig, keine Migration | 3.16 |
-| Selektierte Spanne deckt **alle** Zeilen einer mehrzeiligen Tabelle ab (nicht nur eine einzeilige Tabelle) → ebenfalls Tabelle-komplett-Pfad, kein stiller No-Op wie bei `deleteRow` direkt | Ergänzung zu 2.4 (Abschnitt 1, Punkt 1 dieses Plans) |
+| Kollabierter Cursor in einer Zelle einer 3-Zeilen-Tabelle → mittlere Zeile weg, Zeile 1/3 bleiben, Reihenfolge korrekt | 3.1 |
+| `CellSelection` über 2 von 4 Spalten einer Zeile → komplette Zeile weg, nicht nur markierte Zellen | 3.2 |
+| `CellSelection` über 2 vollständige Zeilen (von 4) → beide in einer Transaktion weg | 3.3 |
+| Tabelle mit genau 1 Zeile → gesamte Tabelle weg, Cursor im umgebenden Absatz | 3.4 / 2.4 |
+| Tabelle mit 1 Zeile als **einziges** Dokumentelement → danach genau ein leerer Absatz, kein leeres `doc` | 2.4 |
+| `CellSelection` über **alle** Zeilen einer **mehrzeiligen** Tabelle → Tabelle-komplett-Pfad (kein stiller No-Op wie bei `deleteRow` direkt) | 3.4 / Abschnitt 1 Punkt 1 |
+| Rowspan-Ankerzeile gelöscht → Inhalt migriert in Folgezeile, `rowspan` dekrementiert | 3.6 |
+| Nur überdeckte Zeile (nicht Anker) gelöscht → Ankerzelle `rowspan-1`, Inhalt unverändert | 3.7 |
+| Erste Zeile gelöscht → keine Off-by-one-Verschiebung bei Folgeoperation | 3.8 |
+| Letzte Zeile (bei >1) gelöscht → Tabelle bleibt, Cursor sinnvoll | 3.9 |
+| Zelle mit mehreren Absätzen/Bild in gelöschter Zeile → Knoten vollständig weg, kein Rest andernorts | 3.12 |
+| Verschachtelte Tabelle: innere einzeilige Tabelle, deren einzige Zeile gelöscht wird → Zelle erhält Ersatz-Absatz (`removeWholeTable`-Fallback), kein Absturz | 3.13 |
+| `deleteTableRow` ohne Tabellenkontext → `false`, keine Exception, `dispatch` nicht aufgerufen; `canDeleteTableRow` → `false` | 3.15 |
+| Große Tabelle (>5 Spalten, >10 Zeilen) → mittlere Zeile gelöscht, alle übrigen Inhalte/Reihenfolge unverändert | 3.17 |
+| Reine `colspan`-Zelle (kein rowspan) in gelöschter Zeile → Zelle vollständig weg, keine Migration | 3.16 |
 
-Cursor-/Selektionsprüfungen (Abschnitt 2.5) erfolgen durch Assertion auf
-`state.selection.$from.parent`/Spaltenindex nach Anwendung des Commands, nicht nur auf
-die Dokumentstruktur.
+Zusätzlich: `deleteTableRow` erzeugt **genau einen** `dispatch(tr)` pro Ausführung
+(Voraussetzung für Undo = ein Schritt, 2.6). Undo/Redo selbst wird auf E2E-Ebene (6.6)
+geprüft.
 
-*Nicht* Gegenstand dieser Unit-Tests: Undo/Redo (Abschnitt 2.6/Grenzfall 12/13) — das
-erfordert eine echte `history()`-Plugin-Instanz und wird bewusst auf E2E-Ebene
-geprüft (Abschnitt 6.5), wo es zusammen mit echtem Tippen/Klicken sinnvoll beobachtbar
-ist. Unit-seitig wird nur sichergestellt, dass `deleteTableRow` **genau einen**
-`dispatch(tr)`-Aufruf pro Ausführung erzeugt (Voraussetzung dafür, dass die
-Undo-Historie sie als einen Schritt gruppiert).
+### 6.2 NEU: `src/formats/docx/__tests__/row-delete-roundtrip.test.ts`
 
-### 6.2 NEU: `src/formats/docx/__tests__/rowDelete.roundtrip.test.ts`
+> Dateiname an die im Verzeichnis durchgängig verwendete Kebab-Case-Konvention angeglichen
+> (`cut-roundtrip.test.ts`, `blank-document.test.ts`, `external-fixtures.test.ts`,
+> `external-validation.test.ts`) — Revisionshinweis 3.
 
-Integrationstest, der (anders als `roundtrip.test.ts`) nicht direkt fertige
-Nach-Löschen-JSON-Strukturen konstruiert, sondern den echten Befehl ausführt:
-`EditorState` mit Tabelle aufbauen → `deleteTableRow()` anwenden → `state.doc.toJSON()`
-in `WordDocumentContent.body` einsetzen → `writeDocx` → `readDocx` → Struktur prüfen.
-Deckt Abschnitt 4.2, Testfälle 1, 3, 4, 5, 6, 7, 11 (DOCX-Teil) ab:
-1. Mehrzeilige Tabelle, eine Zeile gelöscht → Export/Reimport → Zeile fehlt,
-   übrige Zeilen/Zellinhalte unverändert, `tblGrid` konsistent.
-3. Rowspan-Anker gelöscht → Export/Reimport → `rowSpan` der verbleibenden Zelle korrekt
-   dekrementiert, migrierter Inhalt an richtiger Stelle.
-4. Colspan-Zeile gelöscht → Export/Reimport → Zeile inkl. verbundener Zelle komplett
-   weg, übrige `gridSpan`-Werte unangetastet.
-5. Einzige Zeile gelöscht → Export/Reimport → keine leere Tabelle im Ergebnis,
-   Nachbarabsätze unverändert.
-6. Zeile mit Bild gelöscht → Export/Reimport → Bild nicht mehr enthalten, `writeDocx`
-   erzeugtes ZIP enthält keine verwaiste Bilddatei (Test öffnet das erzeugte `Blob` mit
-   `JSZip` und prüft die Dateiliste in `word/media/` direkt).
-7. Mehrzeilen-`CellSelection` gelöscht → Export/Reimport → exakt erwartete Zeilen fehlen.
-11. Große Tabelle (>5 Spalten, >10 Zeilen), mittlere Zeile gelöscht → Export/Reimport →
-    alle übrigen Zellinhalte identisch und in unveränderter Reihenfolge.
+Führt den **echten** Befehl aus (nicht: fertiges Nach-Löschen-JSON konstruieren):
+`EditorState` mit Tabelle → `deleteTableRow()` → `state.doc.toJSON()` als `body` →
+`writeDocx` → `readDocx` → prüfen. Deckt 5.2-Testfälle 1,3,4,5,6,7,13 (DOCX):
+1. Mehrzeilige Tabelle, eine Zeile gelöscht → Zeile fehlt, Rest unverändert, `tblGrid` konsistent.
+3. Rowspan-Anker gelöscht → `rowspan` der verbleibenden Zelle korrekt dekrementiert, migrierter Inhalt an richtiger Stelle.
+4. Colspan-Zeile gelöscht → Zeile inkl. verbundener Zelle komplett weg, übrige `gridSpan` unangetastet.
+5. Einzige Zeile gelöscht → keine leere Tabelle, Nachbarabsätze unverändert.
+6. Zeile mit Bild gelöscht → Bild nicht mehr enthalten; erzeugtes ZIP per `JSZip` öffnen und prüfen, dass `word/media/` keine verwaiste Datei enthält.
+7. Mehrzeilen-`CellSelection` gelöscht → exakt erwartete Zeilen fehlen.
+13. Große Tabelle, mittlere Zeile gelöscht → alle übrigen Inhalte identisch/Reihenfolge unverändert.
 
-### 6.3 NEU: `src/formats/odt/__tests__/rowDelete.roundtrip.test.ts`
+### 6.3 NEU: `src/formats/odt/__tests__/row-delete-roundtrip.test.ts`
 
-Analog zu 6.2, für ODT (`writeOdt`/`readOdt`), deckt Testfälle 2, 3, 4, 5, 6, 7, 11 ab.
-**Enthält zusätzlich** den in Abschnitt 5.2 angekündigten Nachweis, dass der
-`covered-table-cell`-Fix nötig und wirksam ist:
-- Test „exportiert gültige `covered-table-cell`-Platzhalter für unberührte
-  Rowspan-Zeilen nach Löschung einer anderen Zeile“: 3-Zeilen-Tabelle, Zeile 0+1 bilden
-  ein Rowspan-Paar (Spalte 0), Zeile 2 ist unabhängig davon; Zeile 2 wird gelöscht
-  (Rowspan-Paar bleibt unberührt) → Export → das rohe XML (`content.xml` aus dem `Blob`
-  extrahiert) wird auf Vorhandensein von genau einem
-  `<table:covered-table-cell` in Zeile 1 geprüft, **nicht** nur über den eigenen
-  Reimport (der den Fehler nicht sichtbar machen würde, siehe Abschnitt 1, Punkt 4).
-- Test für Testfall 3 (Rowspan-Anker selbst gelöscht) prüft zusätzlich, dass **kein**
-  verwaistes `table:number-rows-spanned` auf eine nicht mehr existierende Zeile zeigt
-  (indirekt über: exportierte Spaltenanzahl pro Zeile stimmt mit `table:table-column`-
-  Anzahl überein, wenn man reale, überdeckte Positionen mitzählt).
+Analog 6.2 für ODT (`writeOdt`/`readOdt`), Testfälle 2,3,4,5,6,7,13.
+**Wichtig — nutzt die bereits vorhandene, korrekte `covered-table-cell`-Logik**; es wird
+**kein** Writer-Bug „nachgewiesen/gefixt“ (den es nicht gibt). Die bestehenden Tests
+`odt/__tests__/roundtrip.test.ts:275` (colspan) und `:310–339` (rowspan) bleiben der
+Beleg für die Placeholder-Korrektheit und dürfen **nicht** dupliziert werden. Ergänzend
+sinnvoll:
+- Rowspan-Paar bleibt bei Löschung einer **anderen** Zeile unberührt → Export → das rohe
+  `content.xml` (aus dem `Blob`) enthält weiterhin die erwarteten `covered-table-cell`
+  an den überdeckten Rasterpositionen (raw-XML-Assertion, nicht nur eigener Reimport).
+- Rowspan-Anker selbst gelöscht (Testfall 3) → Export → Reimport → `rowspan` der
+  verbleibenden Zelle korrekt reduziert, keine verwaiste `number-rows-spanned`-Referenz.
 
-### 6.4 NEU: `src/formats/shared/editor/__tests__/rowDelete.crossFormat.test.ts`
+### 6.4 NEU: `src/formats/shared/editor/__tests__/row-delete-cross-format.test.ts`
 
-Deckt Abschnitt 4.2, Testfälle 8, 9, 10 ab:
-8. ODT importieren (`readOdt` auf eine im Test erzeugte ODT-Tabelle) → `deleteTableRow`
-   im Editor-Modell → als DOCX exportieren (`writeDocx`) → reimportieren (`readDocx`) →
-   Struktur konsistent.
-9. Umgekehrt: DOCX → Zeile löschen → ODT → reimportieren.
-10. Doppelte Rundreise: DOCX → Zeile löschen → ODT → (erneut laden, keine weitere
-    Änderung) → DOCX → Inhalt entspricht weiterhin dem erwarteten Nach-Löschen-Zustand.
+5.2-Testfälle 10,11,12:
+- ODT (im Test erzeugt) → `readOdt` → `deleteTableRow` → `writeDocx` → `readDocx` → Struktur konsistent.
+- Umgekehrt: DOCX → Zeile löschen → ODT → Reimport.
+- Doppelte Rundreise DOCX → Zeile löschen → ODT → DOCX → Inhalt weiterhin = erwarteter Nach-Löschen-Zustand (Text-/Strukturverlust unzulässig; Cross-Format-Formatierungsverluste dokumentieren).
 
-### 6.5 NEU: reale Fixture-Fälle (Grenzfall 18 / Baseline 4.1)
+### 6.5 NEU: reale Fixture-Fälle (Grenzfall 18 / Baseline 5.1)
 
-Ergänzung in `src/formats/odt/__tests__/rowDelete.roundtrip.test.ts` bzw.
-`src/formats/docx/__tests__/rowDelete.roundtrip.test.ts` (kein separates drittes Modul
-nötig, um den Fixture-Ladepfad aus `external-fixtures.test.ts` wiederzuverwenden):
-Import einer echten Datei mit Tabelle aus dem vorhandenen Korpus
-(`tests/fixtures/external/odt/{BigTable,crazyTable,feature_attributes_tables,Tabelle1,TestTextTable}.odt`,
-`tests/fixtures/external/docx/{TestTableColumns,deep-table-cell,table-indent}.docx`) →
-`deleteTableRow` auf die erste im Dokument gefundene Tabelle anwenden (Cursor
-programmatisch in die erste Zelle der ersten Tabelle setzen) → Assertion: kein Wurf,
-Ergebnisdokument ist weiterhin ein gültiges `wordSchema`-Dokument
-(`wordSchema.nodeFromJSON(result.body)` wirft nicht). Deckt Baseline 4.1 (reale Datei,
-hier zusätzlich mit einer tatsächlichen Löschoperation statt nur unverändertem
-Rundreise-Test) sowie Grenzfall 18 ab.
+Ergänzung in 6.2/6.3 (Fixture-Ladepfad aus `external-fixtures.test.ts` wiederverwenden).
+Verifiziert vorhandene, einschlägige Fixtures:
+`tests/fixtures/external/odt/`: `tableRowDeletionTest.odt` (direkt einschlägig),
+`tableOps.odt`, `tableCoveredContent.odt`, `tableComplex_DOC_LO41.odt`,
+`table-column-delete-with-merge.odt`, `mergedCells.odt`, `subTables.odt`/`subTables2.odt`
+(verschachtelt, Grenzfall 13), `BigTable.odt`/`crazyTable.odt` (groß/exotisch);
+`tests/fixtures/external/docx/`: `deep-table-cell.docx`, `TestTableColumns.docx`,
+`table-indent.docx`.
+Vorgehen: Datei importieren → Cursor programmatisch in die erste Zelle der ersten Tabelle
+setzen → `deleteTableRow` → Assertion: **kein Wurf**, Ergebnis bleibt gültiges
+`wordSchema`-Dokument (`wordSchema.nodeFromJSON(result.body)` wirft nicht) und übersteht
+`writeOdt`/`writeDocx` + Reimport. Deckt Baseline 5.1 (reale Datei mit echter
+Löschoperation) und Grenzfall 18.
 
 ### 6.6 NEU: `tests/e2e/table-row-delete.spec.ts`
 
-Analog zu `tests/e2e/selection-regression.spec.ts` (gleiche Locator-/Card-Konventionen:
-`odtCard`/`docxCard`-Helper, `.ProseMirror`-Locator, `getByRole`/`getByTitle`, echte
-Browser-Interaktion über `page.keyboard`/`page.mouse`). Läuft **ohne**
-Projekt-Einschränkung, dadurch automatisch auf allen drei in `playwright.config.ts`
-konfigurierten Projekten (Desktop Chrome, Mobile/Pixel 7, Tablet/iPad Mini) — deckt
-damit Testfall 14 ohne zusätzlichen Code ab. Testfälle (Abschnitt 6 der
-Anforderungsdatei, 1:1 nummeriert):
-
-1. Tabelle mit 3 Zeilen, Cursor in mittlerer Zeile, `getByTitle('Zeile löschen')` klicken
-   → mittlere Zeile weg, Zeile 1/3 bleiben und rücken zusammen.
-2. Zwei komplette Zeilen per `page.mouse.down/move/up` über mehrere `td` aufziehen
-   (`CellSelection`), „Zeile löschen“ klicken → beide Zeilen verschwinden in einem
-   Schritt.
-3. Nur Teilbereich einer Zeile markieren (nicht alle Spalten), „Zeile löschen“ klicken
-   → komplette Zeile verschwindet trotzdem.
-4. Tabelle mit genau einer Zeile → „Zeile löschen“ klicken → Tabelle verschwindet,
-   Editor bleibt bedienbar (Tippen direkt danach funktioniert, kein weiterer Klick nötig).
-5. Tabelle mit rowspan-Zelle (2 Zeilen) → Ankerzeile löschen → verbleibende Zeile zeigt
-   migrierten Inhalt.
-6. Entf-Taste bei markierter `CellSelection` einer ganzen Zeile → nur Zellinhalte
-   geleert, Zeile bleibt strukturell bestehen (Abgrenzungstest, siehe Abschnitt 1,
-   Punkt 3 — hier zusätzlich der geforderte E2E-Nachweis, dass **kein** neuer
-   Produktivcode das versehentlich ändert).
-7. **Pflicht-Regressionstest** (Abschnitt 2.7/3.14 der Anforderungsdatei): Tabelle mit
-   mehreren Zeilen anlegen → „Zeile löschen“ → per Klick in verbleibender Zelle neu
-   positionieren → Enter → weiter tippen → Dokument bleibt konsistent, beide
-   benachbarten Zellen/Absätze bleiben erhalten (analog zum bestehenden Muster in
-   `selection-regression.spec.ts`, Test „same regression inside a table cell“, aber mit
-   einer echten Struktur-Löschung statt nur einer Formatierungs-Aktion davor).
-8. Strg+Z direkt nach „Zeile löschen“ → exakter Ursprungszustand.
-9. Strg+Z, danach Strg+Y → Zeile erneut identisch entfernt.
-10. „Zeile löschen“ ohne Tabellenkontext (Cursor im Fließtext) → Button nicht sichtbar
-    (`getByTitle('Zeile löschen')` liefert kein Element/ist nicht sichtbar), keine
-    Konsole-Exception (`page.on('console', …)`/`page.on('pageerror', …)`-Assertion).
-11. Export nach DOCX über echten Download-Flow → Reimport → siehe 6.2, Testfall 1
-    (E2E-Gegenstück zum Integrationstest, über echte UI-Bedienung).
+Muster wie `tests/e2e/selection-regression.spec.ts` (verifiziert: `odtCard`-Helper Zeile 3,
+`getByTitle(...)`, Test „same regression inside a table cell“ Zeile 43; echte Interaktion
+über `page.keyboard`/`page.mouse`). Läuft **ohne** Projekt-Einschränkung → automatisch auf
+allen drei Projekten (`playwright.config.ts`: Desktop Chrome, Mobile/Pixel 7,
+Tablet/iPad Mini) → deckt Testfall 15 (Mobile/Tablet) ohne Zusatzcode. Testfälle (req
+Abschnitt 7):
+1. 3 Zeilen, Cursor in mittlere Zeile, `getByTitle('Zeile löschen')` klicken → mittlere weg, 1/3 bleiben.
+2. Zwei komplette Zeilen per `page.mouse` aufziehen (`CellSelection`), löschen → beide weg, dritte bleibt.
+3. Teilbereich einer Zeile (nicht alle Spalten) markieren, löschen → komplette Zeile weg.
+4. `CellSelection` über **alle** Zeilen → löschen → Tabelle verschwindet, kein stiller No-Op (Guard, Grenzfall 4).
+5. Tabelle mit genau 1 Zeile → löschen → Tabelle weg, Editor bleibt bedienbar (Tippen ohne weiteren Klick).
+6. Tabelle mit rowspan (2 Zeilen) → Ankerzeile löschen → verbleibende Zeile zeigt migrierten Inhalt.
+7. **Pflicht-Regressionstest Selection-Sync (2.7/Grenzfall 14):** Tabelle → Zeile löschen → per Klick in verbleibende Zelle neu positionieren → Enter → weiter tippen → Dokument konsistent, keine unbeabsichtigte Komplett-Löschung.
+8. Entf bei markierter `CellSelection` einer ganzen Zeile → nur Zellinhalte geleert, Zeile bleibt strukturell (Abgrenzungstest, Abschnitt 1 Punkt 3).
+9. Strg+Z direkt nach „Zeile löschen“ → exakter Ursprungszustand; danach Strg+Y → erneut identisch entfernt.
+10. „Zeile löschen“ ohne Tabellenkontext (Cursor im Fließtext) → Button nicht sichtbar (`getByTitle('Zeile löschen')` nicht vorhanden/sichtbar), keine Konsole-/`pageerror`-Exception.
+11. Export nach DOCX über echten Download-Flow → Reimport → siehe 6.2/1.
 12. Dasselbe für ODT.
-13. Große Tabelle über echten Datei-Import laden (Fixture aus 6.5), mittlere Zeile per
-    Toolbar löschen → übrige Zellinhalte sichtbar unverändert.
-14. Implizit durch fehlende Projekt-Einschränkung (s. o.) auf allen drei Projekten
-    nachgewiesen.
+13. Große Tabelle per echtem Datei-Import (Fixture aus 6.5), mittlere Zeile per Toolbar löschen → übrige Inhalte sichtbar unverändert.
+14. Verschachtelte Tabelle (`subTables*.odt`) → Zeile der äußeren Tabelle mit innerer Tabelle löschen → kein Absturz, innere Tabelle verschwindet mit (Grenzfall 13).
 
 ---
 
-## 7. Abnahmekriterien-Abgleich (Definition of Done, Anforderungsdatei Abschnitt 8)
+## 7. Abnahmekriterien-Abgleich (Definition of Done, req Abschnitt 9)
 
 | # | Kriterium | Abgedeckt durch |
 |---|---|---|
-| 1 | Kontextabhängige Werkzeugleiste mit funktionierendem „Zeile löschen“ | Abschnitt 3.6/3.7, Testfall 6.6/1 |
-| 2 | Jeder Zugriffsweg dokumentiert | Abschnitt 4 dieses Plans |
-| 3 | Cursor/Teil-Zeile/Mehrzeilen-Verhalten exakt nach 2.2, inkl. Abgrenzung zu Entf | Abschnitt 3.1, Tests 6.1 + 6.6/6 |
-| 4 | Rowspan-/Colspan-Sonderfälle je eigener Test | Tests 6.1 (Zeilen 5/6/16), 6.2/6.3 Testfall 3/4 |
-| 5 | „Letzte Zeile löscht Tabelle“ inkl. Tabelle-als-einziges-Element | Abschnitt 3.1 `removeWholeTable`, Test 6.1 |
-| 6 | Alle Grenzfälle aus Abschnitt 3 einzeln abgedeckt/dokumentiert | Mapping-Tabelle 6.1, Grenzfall 19 explizit als Nicht-Scope in Abschnitt 8 unten |
-| 7 | Pflicht-Regressionstest Selection-Sync × Zeile löschen | Test 6.6/7 |
-| 8 | Rundreise-Testfälle 4.2 für DOCX **und** ODT grün, inkl. Bild-Verwaisung | Abschnitt 5.1/5.2 (inkl. nötigem ODT-Bugfix als Voraussetzung), Tests 6.2/6.3 |
+| 1 | Kontextabhängige Werkzeugleiste mit funktionierendem „Zeile löschen“ | 3.6/3.7, Test 6.6/1 |
+| 2 | Jeder Zugriffsweg dokumentiert | Abschnitt 4 |
+| 3 | Cursor/Teil-Zeile/Mehrzeilen-Verhalten exakt nach 2.2, inkl. Entf-Abgrenzung | 3.1, Tests 6.1 + 6.6/8 |
+| 4 | Guard-Sonderfall (letzte/alle Zeile → Tabelle weg, nie stiller No-Op; einzige Tabelle → leerer Absatz) | 3.1 `removeWholeTable` + `canDeleteTableRow`, Tests 6.1, 6.6/4+5 |
+| 5 | Rowspan-Migration, Rowspan-Dekrement, Colspan-Komplettverlust je eigener Test | Tests 6.1 (3.6/3.7/3.16), 6.2/6.3 Testfall 3/4 |
+| 6 | Pflicht-Regressionstest Selection-Sync × Zeile löschen | Test 6.6/7 |
+| 7 | Rundreise 5.2 für DOCX **und** ODT grün, inkl. Bild-Verwaisung, unabhängiger Parser | 5.1/5.2 (ohne ODT-Bugfix — keiner nötig), Tests 6.2/6.3/6.4 |
+| 8 | Alle Grenzfälle aus req Abschnitt 3 einzeln abgedeckt/dokumentiert | Mapping 6.1/6.6; Grenzfall 20 als Nicht-Scope (Abschnitt 8) |
 | 9 | Kein stiller Datenverlust/keine Konsole-Exception | `removeWholeTable`-Fallback (nie leeres `doc`), `try/catch` um `selectedRect`, Test 6.6/10 |
-| 10 | Backlog-Statuswechsel erst nach 1–9 | Nicht Teil dieses Codeplans — Entscheidung obliegt dem Backlog-Pflegeprozess, nachdem alle oben genannten Tests grün sind |
+| 10 | Statuswechsel „fehlt“ → „vorhanden“ erst nach 1–9 | Backlog-Pflegeprozess, nachdem alle Tests grün |
 
 ---
 
 ## 8. Bewusst nicht im Scope
 
-- **Grenzfall 19 (Track-Changes-Abhängigkeit):** Änderungsverfolgung existiert laut
-  `FEATURE-SPEC-DOCX-ODT.md` Abschnitt 13 noch nicht (Phase 3, separat). „Zeile
-  löschen“ entfernt Inhalt daher immer sofort endgültig; keine Vorbereitung dafür wird
-  in `deleteTableRow` eingebaut, um keine tote Abstraktion vorwegzunehmen.
-- **Eigenes Kontextmenü (Zugriffsweg 2):** siehe Abschnitt 4 — explizit nicht gebaut.
-- **Migration der bestehenden Emoji/Unicode-Buttons in `Toolbar.tsx` auf SVG:**
-  vorbestehende, allgemeine Abweichung von Abschnitt 20 der Feature-Spec, gehört zu
-  keinem Einzel-Slug und wird hier nicht mitgezogen.
-- **Allgemeine Spaltenbreiten-/Rahmen-Darstellung, Tab-Navigation, Zellen
-  verbinden/teilen, Spalte einfügen/löschen, Tabelle explizit löschen:** eigene
-  Backlog-Slugs mit eigenen `*-req.md`-Dateien (`spalte-einfuegen`, `spalte-loeschen`,
-  `zellen-verbinden`, `tabelle-loeschen`, `zeile-einfuegen`) — `TableToolbar.tsx` ist so
-  angelegt, dass diese Features ihre Buttons dort ergänzen können, aber ihre Umsetzung
-  ist nicht Teil dieses Plans.
-- **Exotischer Fallback bei nicht eindeutig auflösbarer Rowspan-Migration
-  (Grenzfall 18, zweiter Halbsatz):** `prosemirror-tables`s `removeRow` liefert bereits
-  ein deterministisches Verhalten (siehe Abschnitt 1, Punkt 2) und wird unverändert
-  übernommen; ein zusätzlicher eigener Fallback-Mechanismus für hypothetische, damit
-  nicht abgedeckte Strukturen wird nicht gebaut, da im vorhandenen Fixture-Korpus
-  (Abschnitt 6.5) keine solche Struktur nachgewiesen werden konnte, die `removeRow`
-  nicht sauber verarbeitet.
+- **Grenzfall 20 (Track-Changes):** Änderungsverfolgung existiert noch nicht
+  (`FEATURE-SPEC-DOCX-ODT.md` Abschnitt 13, Phase 3). „Zeile löschen“ entfernt sofort
+  endgültig; keine tote Abstraktion vorwegnehmen.
+- **Eigenes Kontextmenü (Zugriffsweg 2):** Abschnitt 4 — explizit nicht gebaut.
+- **Migration bestehender Glyph-Buttons in `Toolbar.tsx` auf SVG** und **Umstellen der 14
+  `run()`-Aufrufstellen** auf `runEditorCommand`: vorbestehend/optional, kein
+  `zeile-loeschen`-Scope (und: das dritte `view`-Argument darf dabei nicht verloren gehen).
+- **Verschieben von `insertTable` nach `tableCommands.ts`:** unnötiger Diff; bleibt in
+  `commands.ts`.
+- **Spaltengenaue Cursor-Neupositionierung nach Mehrzeilen-Löschung:** Abschnitt 2.5
+  verlangt sie nur „bevorzugt“; `deleteRow`s automatische Selektions-Neuabbildung genügt.
+  Falls E2E doch eine spaltengenaue Position erfordert, additiv als eigene Schleife
+  nachrüstbar (Abschnitt 3.1, Anmerkung) — nicht als Erstumsetzung.
+- **Nachbar-Tabellenfeatures** (`zeile-einfuegen`, `spalte-einfuegen`, `spalte-loeschen`,
+  `zellen-verbinden`, `tabelle-loeschen`): eigene Slugs/`*-req.md`. `TableToolbar.tsx`,
+  `icons.tsx`, `tableCommands.ts`, `runEditorCommand.ts` sind als gemeinsame Ablageorte
+  angelegt, ihre Umsetzung ist nicht Teil dieses Plans.

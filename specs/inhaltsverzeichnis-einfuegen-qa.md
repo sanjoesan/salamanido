@@ -25,6 +25,14 @@ Zwei verpflichtende, **getrennte** Testebenen, wie vom Auftrag gefordert:
    ZIP/XML-Struktur) — **kein** Test in dieser Ebene ruft `insertTableOfContents()`,
    `navigateToTocEntry()` oder eine andere interne Funktion/einen Command-Export direkt auf.
 
+Beide Ebenen sind zwingend **deterministisch** zu halten: keine Race-Conditions durch zu schnelle
+Tastatureingaben, der asynchrone Selektions-Sync von ProseMirror wird an jedem betroffenen
+Übergang abgewartet. Die dafür verbindlichen Regeln stehen — aus den bereits im Repo real
+aufgetretenen und behobenen Flaky-Runden (Commits `0797d13`/`db61c89`/`29cbc80`) verallgemeinert —
+in **§1.1** und sind Teil der Abnahme (§6), nicht bloß eine Empfehlung. Die konkreten Snippets in
+§4.0/§4.7 sind bereits nach diesen Regeln ausformuliert (Stand dieser QA-Überarbeitung:
+2026-07-05).
+
 Referenz-Infrastruktur im Repo, gegen die tatsächlichen Dateien verifiziert:
 `tests/e2e/docx.spec.ts`, `tests/e2e/odt.spec.ts`, `tests/e2e/selection-regression.spec.ts`
 (Helper `docxCard(page)`/`odtCard(page)`, Muster „echter Download → `download.path()` →
@@ -202,11 +210,23 @@ Gemeinsame Konventionen (aus bestehenden Specs übernommen):
 
 Neue, feature-spezifische Selektoren/Hilfsfunktionen (aus `inhaltsverzeichnis-einfuegen-code.md`
 Abschnitt 5/6/7/8 abgeleitet — bei Umsetzung gegen die tatsächlich gebauten `aria-label`/Klassen
-zu verifizieren, nicht blind zu übernehmen):
+zu verifizieren, nicht blind zu übernehmen). Die realen Selektor-Fakten wurden gegen den
+tatsächlichen Code gegengeprüft: das Absatzformat-`<select>` trägt `aria-label="Absatzformat"`
+(`Toolbar.tsx:166`) und verwendet als Options-`value` die reine Ebenenzahl `"1"`…`"6"` bzw.
+`"normal"` für „Standard" (`Toolbar.tsx:174–177`) — **nicht** den sichtbaren Text „Überschrift 1".
+`selectOption('1')` setzt daher Überschrift 1, `selectOption('normal')` setzt Standard zurück.
 
 ```ts
+// Zentrale Konstante für alle Selektions-Sync-Wartepunkte (siehe §1.1). Bewusst identisch
+// zu dem in selection-regression.spec.ts / cut.spec.ts / clipboard.spec.ts bereits
+// etablierten 50-ms-Wert — kein neuer, frei erfundener Zahlenwert.
+const SELECTION_SYNC_MS = 50
+
 async function openInsertTocDialog(page: Page) {
   await page.locator('.ProseMirror').click()
+  // Der Button öffnet per onMouseDown (Toolbar.tsx Abschnitt 6, e.preventDefault, damit die
+  // Editor-Selektion NICHT verloren geht) — ein Playwright-.click() löst mousedown mit aus,
+  // funktioniert also; ein reines dispatchEvent('mousedown') wäre fragiler und ist unnötig.
   await page.getByRole('button', { name: 'Inhaltsverzeichnis einfügen' }).click()
   return page.getByRole('dialog', { name: /inhaltsverzeichnis/i })
 }
@@ -214,11 +234,91 @@ async function insertTocViaDialog(page: Page, maxLevel?: number) {
   const dialog = await openInsertTocDialog(page)
   if (maxLevel) await dialog.getByLabel(/ebenentiefe/i).selectOption(String(maxLevel))
   await dialog.getByRole('button', { name: 'Einfügen' }).click()
+  // Das Einfügen ist ein synchrones dispatch; das Warten auf den sichtbaren .pm-toc-Knoten
+  // (statt eines blinden Timeouts) ist der deterministische Ankerpunkt für Folgeaktionen.
+  await expect(tocContainer(page)).toBeVisible()
 }
+
+/**
+ * Deterministischer Weg, die AKTUELLE Zeile in eine Überschrift der gegebenen Ebene zu
+ * verwandeln. Kapselt die drei race-anfälligen Schritte, damit sie nicht in jedem Test
+ * einzeln (und uneinheitlich) wiederholt werden:
+ *   1) Ctrl+Home/Shift+End statt Home/Shift+End — `Home` springt nur an den Anfang der
+ *      aktuellen VISUELLEN Zeile; auf dem schmalen Mobile-Viewport (Pixel 7) bricht ein
+ *      längerer Satz um und `Home` landet mitten im Satz (direkt in cut.spec.ts:54 belegt).
+ *      Ctrl+Home/… trifft zuverlässig den echten Zeilen-/Blockanfang, viewport-unabhängig.
+ *   2) waitForTimeout(SELECTION_SYNC_MS) NACH dem tastaturgetriebenen Selektionsaufbau, BEVOR
+ *      selectOption feuert — ProseMirror lernt die native, per Tastatur gesetzte Selektion nur
+ *      über das asynchrone `selectionchange`-Event (selection-regression.spec.ts:27–34);
+ *      selectOption sofort danach kann die Selektion noch veraltet sehen.
+ * NB: Der Text muss VOR dem Aufruf bereits in der Zeile stehen.
+ */
+async function applyHeadingToCurrentLine(page: Page, level: 1 | 2 | 3 | 4 | 5 | 6) {
+  await page.keyboard.press('ControlOrMeta+Home') // pro Test ggf. an die Zielzeile anpassen
+  await page.keyboard.down('Shift')
+  await page.keyboard.press('End')
+  await page.keyboard.up('Shift')
+  await page.waitForTimeout(SELECTION_SYNC_MS)
+  await page.getByLabel('Absatzformat').selectOption(String(level))
+}
+
+/**
+ * Klickt einen ToC-Eintrag an und WARTET den durch navigateToTocEntry ausgelösten,
+ * asynchronen Selektions-/scrollIntoView-Sync ab, bevor der aufrufende Test weiter tippt.
+ * Der Klick ist selbst ein Mausklick im Editor-DOM (Grenzfall 18) und setzt die Selektion
+ * über denselben async-`selectionchange`-Pfad; ohne dieses Abwarten würde ein unmittelbar
+ * folgendes `keyboard.type` gegen die noch nicht synchronisierte Selektion laufen (exakt der
+ * in selection-regression.spec.ts / cut.spec.ts dokumentierte Race, hier auf den ToC-Klick
+ * übertragen).
+ */
+async function clickTocEntryAndSettle(page: Page, index = 0) {
+  await tocEntries(page).nth(index).click()
+  await page.waitForTimeout(SELECTION_SYNC_MS)
+}
+
 const tocContainer = (page: Page) => page.locator('.ProseMirror .pm-toc')
 const tocEntries = (page: Page) => page.locator('.ProseMirror .pm-toc-entry')
 const tocRefreshButton = (page: Page) => tocContainer(page).getByRole('button', { name: 'Aktualisieren' })
 ```
+
+Zusätzlich wird in **jedem** neuen E2E-Test der bereits im Repo etablierte Konsolen-/JS-Fehler-
+Wächter `watchForConsoleErrors(page)` aus `cut.spec.ts:17–24` verwendet (`page.on('pageerror')`
++ `page.on('console', type==='error')`, am Testende `assertNoConsoleErrors()`), damit ein still
+geworfener JS-Fehler (z. B. beim Klick auf ein gelöschtes Sprungziel, Grenzfall 13) einen
+grün wirkenden Test nicht überlebt. Synthetische Upload-Fixtures werden über die vorhandenen
+Builder `buildSampleDocx`/`buildSampleOdt` aus `tests/e2e/fixtures/builders.ts` erzeugt bzw.
+erweitert (nicht in einer zweiten, parallelen Builder-Datei dupliziert — dieselbe „auslagern
+statt duplizieren"-Vorgabe, die `cut.spec.ts` bereits befolgt).
+
+---
+
+## 1.1 Determinismus-Regeln (verbindlich für ALLE E2E-Tests dieses Plans)
+
+Dieser Abschnitt ist **nicht** optional. Das Repo hat für exakt dieses Feature-Umfeld bereits
+mehrere Flaky-Test-Runden hinter sich, die ausschließlich auf zu schnelle, menschlich nie
+auftretende Tastatur-/Klick-Kadenzen zurückgingen (Git-History: `0797d13` „give async selection
+sync time before the next keystroke", `db61c89` „same async-selection-sync race as
+selection-regression.spec.ts", `29cbc80` CI-only Mobile-Limitation). Die folgenden Regeln sind
+die **verallgemeinerte, verbindliche** Fassung dessen, was dort punktuell repariert wurde — sie
+gelten für die neuen ToC-Tests von Anfang an, damit dieselbe Fehlerklasse nicht erneut zuerst
+rot werden muss.
+
+| # | Regel | Begründung / Präzedenz im Repo |
+|---|---|---|
+| D1 | **Nach jedem tastaturgetriebenen Caret-/Selektionswechsel** (`End`, `Ctrl+Home`, Klick zum Neupositionieren, `Shift+ArrowRight`-Selektion) **und vor der nächsten Aktion, die auf dieser Selektion aufbaut** (`Enter`, `selectOption`, `Strg+X`, `type`), ein `await page.waitForTimeout(SELECTION_SYNC_MS)` einfügen. | ProseMirror übernimmt native Selektionsänderungen nur über das asynchrone `selectionchange`-Event; ein sofort folgender Tastendruck agiert sonst auf der veralteten Position. `selection-regression.spec.ts:27–34`, `cut.spec.ts:74`. |
+| D2 | **Nach einem Klick auf einen ToC-Eintrag** (löst `navigateToTocEntry` → async Selektion + `scrollIntoView` aus) **vor jedem Folge-`type`** denselben Sync abwarten — über `clickTocEntryAndSettle(...)`. | Der ToC-Klick ist ein Mausklick im Editor-DOM und damit der **direkte** Grenzfall-18-Auslöser; identisch zum „Klick zum Neupositionieren"-Fall in `selection-regression.spec.ts`. |
+| D3 | **Ranges nie per Zero-Delay-`Shift+ArrowRight`-Schleife aufbauen** — pro Tastendruck `{ delay: 20 }` **und** danach `waitForTimeout(SELECTION_SYNC_MS)` vor der konsumierenden Aktion. | Ohne Delay schwankte die tatsächlich erfasste Zeichenzahl zwischen 1 und 11 bei identischer sichtbarer Selektion (`cut.spec.ts:61–74`, direkt reproduziert). |
+| D4 | **`Ctrl+Home`/`Ctrl+End` statt `Home`/`End`**, wo der echte Block-/Dokumentanfang gemeint ist. `Home` springt an den Anfang der **visuellen** Zeile → auf dem Mobile-Viewport (Pixel 7, umbrechender Text) landet es mitten im Absatz. | `cut.spec.ts:54–58`, direkt verifiziert. |
+| D5 | **Auf Zustände warten, nicht auf Zeit**, wo immer ein beobachtbarer DOM-Zustand existiert: `await expect(tocContainer(page)).toBeVisible()` / `await expect(tocEntries(page)).toHaveCount(n)` / `toBeInViewport()` **statt** blinder Timeouts. `waitForTimeout` bleibt ausschließlich dem async-`selectionchange`-Sync (D1–D3) vorbehalten, für den es keinen beobachtbaren DOM-Anker gibt. | Allgemeine Playwright-Robustheit; `waitForEvent('download')` statt Timeout ist bereits Repo-Standard (`docx.spec.ts`). |
+| D6 | **Mehr-Projekt-Realität einkalkulieren.** Alle E2E laufen in drei Projekten (`Desktop Chrome`, `Mobile`/Pixel 7 Chromium, `Tablet`/iPad Mini WebKit, `playwright.config.ts`). Selektions-/Zwischenablage-empfindliche Sequenzen sind auf **allen dreien** zu prüfen; für eine nach zwei belegten, sauberen Fix-Versuchen weiterhin **nur auf Mobile in CI** flakende Sequenz ist das etablierte Muster `test.skip(testInfo.project.name === 'Mobile', '<begründeter Verweis>')` zulässig (Präzedenz `cut.spec.ts:492/526`, Commit `29cbc80`) — **niemals** ein pauschales Hochsetzen globaler Timeouts oder ein `test.slow()` ohne Begründung. |
+| D7 | **WebKit-Zwischenablage.** Cut→Paste-Rundläufe per Tastenkürzel sind unter dem `Tablet`-Projekt (WebKit) unzuverlässig und werden dort per `test.skip(browserName === 'webkit', …)` übersprungen (`cut.spec.ts:82–90`). Für dieses Feature nur relevant, falls ein ToC-Test Zwischenablage nutzt (aktuell keiner) — als Regel dennoch festgehalten, damit ein später ergänzter Copy/Paste-ToC-Test sie nicht übersieht. |
+
+**Konsequenz für die konkreten Snippets unten:** Die in §4.0 und §4.7 gezeigten Beispiel-
+Sequenzen sind **bereits nach D1–D5 ausformuliert** (Waits an den markierten Stellen, `Ctrl+Home`
+statt `Home`, `applyHeadingToCurrentLine`/`clickTocEntryAndSettle` statt inline wiederholter
+Roh-Tastensequenzen). Wird bei der Umsetzung ein Test **ohne** diese Guards geschrieben, ist er
+auch dann zurückzuweisen, wenn er lokal auf `Desktop Chrome` zufällig grün ist — die Regel D1–D6
+ist Teil der Abnahme (§6, letzter Punkt), nicht nur eine Empfehlung.
 
 ---
 
@@ -362,9 +462,12 @@ andere interne Funktion/einen Command-Export direkt auf.
 Neuer Test **direkt** im bestehenden `describe`-Block dieser Datei (analog zum bereits etablierten
 Muster für Tabellen/Seitenumbrüche), **nicht** nur isoliert in einer neuen Datei:
 
-```ts
-test('page break… ' /* Platzhaltername, siehe unten */ , async ({ page }) => {})
+Der Test wird **innerhalb** des bestehenden `describe`-Blocks von `selection-regression.spec.ts`
+ergänzt (nicht als isolierte neue Datei), damit er im selben Regressions-Kontext läuft wie die
+bereits vorhandenen Selection-Sync-Fälle. Das Snippet ist **vollständig nach D1–D5 (§1.1)
+ausformuliert** — bewusst als Referenz dafür, wie die Guards konkret sitzen müssen:
 
+```ts
 test('ToC insert + reselect + click entry + type — no data loss (Grenzfall 18)', async ({ page }) => {
   const editor = page.locator('.ProseMirror')
   await editor.click()
@@ -372,24 +475,27 @@ test('ToC insert + reselect + click entry + type — no data loss (Grenzfall 18)
   await page.keyboard.press('Enter')
   await page.keyboard.type('Text danach.')
 
-  // Überschrift setzen, damit ein Verzeichnis überhaupt einen Eintrag bekommt
-  await page.keyboard.press('Home')
-  await page.keyboard.down('Shift')
-  await page.keyboard.press('End')
-  await page.keyboard.up('Shift')
-  // (Zeile „Kapitel eins" markiert — Absatzformat auf Überschrift 1 setzen)
-  await page.getByLabel('Absatzformat').selectOption('1')
+  // Überschrift auf die ERSTE Zeile („Kapitel eins") setzen, damit das Verzeichnis einen
+  // Eintrag bekommt. applyHeadingToCurrentLine springt per Ctrl+Home an den echten
+  // Dokumentanfang (D4 — ein blankes `Home` bliebe auf der zweiten, aktuellen Zeile „Text
+  // danach." stehen und würde die falsche Zeile zur Überschrift machen) und wartet nach dem
+  // Selektionsaufbau den async selectionchange-Sync ab, bevor selectOption feuert (D1).
+  await applyHeadingToCurrentLine(page, 1)
 
+  // Cursor deterministisch ans Dokumentende, dann Verzeichnis über den Dialog einfügen.
   await page.keyboard.press('ControlOrMeta+End')
+  await page.waitForTimeout(SELECTION_SYNC_MS) // D1: Caret-Move vor dem nächsten Enter absetzen
   await page.keyboard.press('Enter')
-  await insertTocViaDialog(page)
+  await insertTocViaDialog(page) // wartet intern auf sichtbaren .pm-toc (D5)
 
+  // Selektions-Sync-Bug-Auslöser: Alles auswählen → formatieren → auf ToC-Eintrag klicken.
   await page.keyboard.press('ControlOrMeta+a')
   await page.getByTitle('Fett').click()
 
-  // Reproduziert exakt den bekannten Selection-Sync-Bug-Auslöser: Klick auf einen ToC-Eintrag
-  // ist selbst ein Mausklick im Editor-DOM.
-  await tocEntries(page).first().click()
+  // Der ToC-Klick ist selbst ein Mausklick im Editor-DOM (Grenzfall 18); clickTocEntryAndSettle
+  // wartet den dadurch ausgelösten async Selektions-/scrollIntoView-Sync ab (D2), BEVOR getippt
+  // wird — ohne dieses Abwarten liefe das folgende type() gegen die veraltete Selektion.
+  await clickTocEntryAndSettle(page, 0)
   await page.keyboard.type(' Weiterer Text.')
 
   await expect(editor).toContainText('Kapitel eins')
@@ -397,8 +503,17 @@ test('ToC insert + reselect + click entry + type — no data loss (Grenzfall 18)
   await expect(editor).toContainText('Weiterer Text.')
 })
 ```
+
+Zusätzliche, ausdrücklich geforderte Variante (Code-Plan Abschnitt 0'.2 Punkt 2): **dieselbe
+Sequenz einmal mit `Shift+Delete` (dem kürzlich eingeführten Cut-Keybinding) als vorangestelltem
+Auslöser** vor dem ToC-Klick durchspielen, damit die Wechselwirkung der beiden erst kürzlich
+stabilisierten Selection-Sync-Pfade (`cut.spec.ts` / `selection-regression.spec.ts`) mit dem neuen
+ToC-Klick nicht übersehen wird — mit denselben D1–D3-Waits um die Cut-Selektion herum.
+
 **Abnahmekriterium:** Dieser Test bleibt dauerhafter Bestandteil der Suite (Anforderung Testfall
-10, DoD Punkt 12) — nicht nur einmalig ausgeführt.
+10, DoD Punkt 12) — nicht nur einmalig ausgeführt. Bei einer Ergänzung dieser Datei ist per
+Diff-Review zu bestätigen, dass **alle bereits vorhandenen** Tests unverändert erhalten bleiben
+(§7, letzter Punkt).
 
 ### 4.1 Dialog-Grundverhalten (Testfälle 2–4 der Anforderung, Grenzfall 1)
 
@@ -427,7 +542,7 @@ test('ToC insert + reselect + click entry + type — no data loss (Grenzfall 18)
 
 | ID | Testname | Kernschritte | Assertion |
 |---|---|---|---|
-| E2E-NAV-01 | `clicking a ToC entry scrolls to and places the cursor at the referenced heading` | Mehrseitiges Dokument (viel Füll-Text zwischen Überschriften) → Verzeichnis einfügen → Klick auf einen Eintrag, dessen Ziel **außerhalb** des aktuell sichtbaren Bereichs liegt | Zielüberschrift ist nach dem Klick sichtbar (`toBeInViewport()`); Cursor-Position lässt sich indirekt verifizieren, indem direkt danach getippt wird und der neue Text **unmittelbar an/nach dieser Überschrift** erscheint, nicht an anderer Stelle |
+| E2E-NAV-01 | `clicking a ToC entry scrolls to and places the cursor at the referenced heading` | Mehrseitiges Dokument (viel Füll-Text zwischen Überschriften) → Verzeichnis einfügen → Klick auf einen Eintrag (über `clickTocEntryAndSettle`, D2), dessen Ziel **außerhalb** des aktuell sichtbaren Bereichs liegt | Zielüberschrift ist nach dem Klick sichtbar (`toBeInViewport()`); Cursor-Position wird indirekt verifiziert, indem **nach dem D2-Settle** getippt wird und der neue Text **unmittelbar an/nach dieser Überschrift** erscheint, nicht an anderer Stelle. Ohne das Settle liefe das `type` gegen die noch nicht synchronisierte Selektion (Grenzfall 18 / Race aus `selection-regression.spec.ts`) |
 | E2E-NAV-02 | `jump works across a visual page break (pagination.ts)` | Dokument mit genug Inhalt, dass die Zielüberschrift auf einer **anderen visuellen Seite** liegt (`.page-break-spacer` zwischen Ausgangs- und Zielposition) → Klick auf Eintrag | Sprung funktioniert trotzdem zuverlässig (Testfall 8, Anforderung 2.6) |
 | E2E-NAV-03 | `clicking an entry whose heading was deleted shows a visible flash, does not navigate, does not crash` | Verzeichnis einfügen → referenzierte Überschrift danach vollständig löschen (Text markieren + Entf, dann Absatzformat zurück auf „Standard" oder Absatz löschen) → Eintrag anklicken | `navigateToTocEntry`-Fehlschlag sichtbar gemacht (`.pm-toc-entry--missing`-Klasse/Flash-Animation kurzzeitig vorhanden, per `toHaveClass`-Polling), **kein** Sprung, **kein** Konsolenfehler (Grenzfall 13) |
 
@@ -464,6 +579,7 @@ Neue Datei `tests/e2e/toc-roundtrip.spec.ts`:
 
 ```ts
 test('DOCX: ToC via dialog round-trips through real export/re-import, verified with an independent parser', async ({ page }) => {
+  const assertNoConsoleErrors = watchForConsoleErrors(page) // cut.spec.ts:17–24, wiederverwendet
   await docxCard(page).getByRole('button', { name: 'Neu erstellen' }).click()
   const editor = page.locator('.ProseMirror')
   await editor.click()
@@ -471,15 +587,22 @@ test('DOCX: ToC via dialog round-trips through real export/re-import, verified w
   const headings = ['Einleitung', 'Hauptteil', 'Unterkapitel', 'Schluss', 'Anhang']
   for (const [i, text] of headings.entries()) {
     await page.keyboard.type(text)
+    // Die eben getippte Überschrift steht allein auf ihrer eigenen, frischen Zeile. Sie ist
+    // kurz und bricht auch auf dem Mobile-Viewport NICHT um, daher ist Home/Shift+End hier
+    // sicher (anders als der lange Satz in cut.spec.ts:54, der Ctrl+Home erzwang). WÜRDE eine
+    // Überschrift potenziell umbrechen, wäre stattdessen eine zeichengezählte
+    // Shift+ArrowLeft-Selektion mit { delay: 20 } (D3) nötig.
     await page.keyboard.press('Home')
     await page.keyboard.down('Shift'); await page.keyboard.press('End'); await page.keyboard.up('Shift')
-    await page.getByLabel('Absatzformat').selectOption(String((i % 3) + 1))
+    await page.waitForTimeout(SELECTION_SYNC_MS) // D1: Selektions-Sync vor selectOption abwarten
+    await page.getByLabel('Absatzformat').selectOption(String((i % 3) + 1)) // "1"/"2"/"3" = Überschrift-Ebene
     await page.keyboard.press('End')
+    await page.waitForTimeout(SELECTION_SYNC_MS) // D1: Caret-Move vor dem nächsten Enter absetzen
     await page.keyboard.press('Enter')
   }
 
-  await insertTocViaDialog(page, 3)
-  await expect(tocEntries(page)).toHaveCount(5)
+  await insertTocViaDialog(page, 3) // wartet intern auf sichtbaren .pm-toc (D5)
+  await expect(tocEntries(page)).toHaveCount(5) // Zustand statt Timeout (D5)
 
   const downloadPromise = page.waitForEvent('download')
   await page.getByRole('button', { name: 'Exportieren' }).click()
@@ -503,6 +626,7 @@ test('DOCX: ToC via dialog round-trips through real export/re-import, verified w
   await input.setInputFiles({ name: 'export.docx', mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', buffer })
   await expect(tocContainer(page)).toBeVisible()
   await expect(tocEntries(page)).toHaveCount(5)
+  assertNoConsoleErrors()
 })
 ```
 
@@ -624,6 +748,15 @@ Der Status „fehlt" darf aus QA-Sicht erst auf „verifiziert" geändert werden
       explizit beantwortet und in der Anforderung nachgetragen sein müssen.
 - [ ] DoD Punkt 12 (Selection-Sync-Regressionstest dauerhaft Teil der Suite): Abschnitt 4.0,
       **verankert in `selection-regression.spec.ts`**, nicht nur in einer separaten Datei.
+- [ ] **Determinismus (§1.1, D1–D7) eingehalten und belegt:** Jeder neue E2E-Test wendet die
+      Selektions-Sync-Guards an (Waits nach tastaturgetriebenen Caret-/Selektionswechseln und
+      nach ToC-Klicks, `Ctrl+Home` statt `Home` für Blockanfänge, Zustands- statt Zeit-Warten).
+      Nachweis nicht durch „ist gerade grün", sondern durch **wiederholten** Lauf auf **allen
+      drei** Playwright-Projekten (`Desktop Chrome`, `Mobile`, `Tablet`) — Empfehlung: die neuen
+      ToC-Specs mindestens 3× hintereinander bzw. mit `--repeat-each=3` grün, damit ein
+      verbliebener Race nicht zufällig durchrutscht. Jede projektspezifische `test.skip`-Ausnahme
+      trägt eine begründete Kommentarzeile (Muster `cut.spec.ts:492`), kein pauschales
+      Timeout-Hochsetzen.
 - [ ] Baseline-Regression (UT-BASE-01–03, E2E-BASE-01) vollständig grün.
 
 Andernfalls: Status „teilweise", mit Verweis auf die konkret offenen Punkte aus dieser Liste.

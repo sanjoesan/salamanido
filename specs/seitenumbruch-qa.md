@@ -19,6 +19,12 @@ Zwei verpflichtende, **getrennte** Testebenen, wie vom Auftrag gefordert:
    (JSZip gegen die reale ZIP/XML-Struktur) — **nicht** nur Aufrufe interner
    TypeScript-Funktionen innerhalb eines Browser-Kontexts.
 
+Als **dritte, querschnittliche** Pflichtvorgabe (vom Auftrag ausdrücklich verlangt) gilt für die
+gesamte E2E-Ebene **Determinismus**: keine Race-Conditions durch zu schnelle Tastatureingaben,
+Selektions-Sync stets abgewartet. Dieses Repo hat diesen Fehlerkanal real und wiederholt getroffen;
+Abschnitt 0.3 belegt ihn, Abschnitt 2.1.1 macht die Gegenmaßnahmen verbindlich, und Abschnitt 4
+führt Determinismus als eigenes Abnahme-Gate.
+
 Referenz-Infrastruktur im Repo, gegen die tatsächlichen Dateien verifiziert (nicht aus dem
 Code-Plan übernommen): `tests/e2e/docx.spec.ts`, `tests/e2e/odt.spec.ts`,
 `tests/e2e/selection-regression.spec.ts` (Helper `docxCard(page)`/`odtCard(page)`, Muster
@@ -100,7 +106,39 @@ Seitenumbruch-Feature. Zwei Optionen, mit PO/Dev vor Abnahme zu klären (siehe A
   nachzuliefern — außerhalb des Geltungsbereichs von `seitenumbruch-req.md`.
 
 Dieser Testplan verfolgt (a) und markiert das E2E-Gegenstück explizit als **nicht ausführbar,
-dokumentierte Lücke** (Abschnitt 4.11), nicht als stillschweigend ausgelassen.
+dokumentierte Lücke** (Abschnitt 2.11), nicht als stillschweigend ausgelassen.
+
+### 0.3 Determinismus ist in diesem Repo ein bekanntes, hartes Problem — nicht optional
+
+Der Auftrag verlangt ausdrücklich **deterministische** Tests ohne Race-Conditions durch zu
+schnelle Tastatureingaben und mit abgewartetem Selektions-Sync. Das ist hier **keine**
+theoretische Vorsichtsmaßnahme: Das Repo hat einen real reproduzierten, bereits mehrfach
+geflakten Fehlerkanal, den jede neue E2E-Datei erneut trifft, wenn sie ihn ignoriert. Belege,
+direkt im Repo verifiziert (nicht aus dem Code-Plan übernommen):
+
+- `tests/e2e/selection-regression.spec.ts:26–35` dokumentiert wortwörtlich: „ProseMirror only
+  learns a native, keyboard-driven caret move (like the `End` above) via the browser's
+  **asynchronous** `selectionchange` event. Firing `Enter` immediately after … can race ahead of
+  that catch-up and still act on the pre-`End` position." Mitigation dort: `await
+  page.waitForTimeout(50)` **zwischen** dem Caret-Move und der nächsten mutierenden Taste.
+- `tests/e2e/cut.spec.ts:60–74` dokumentiert dieselbe Klasse zweifach: (a) ein „rapid, zero-delay
+  loop of individual `Shift+ArrowRight` keydowns immediately followed by `Strg+X`" schnitt real
+  „between 1 and 11 characters" statt der vollen Selektion → Mitigation `delay: 20` pro Taste
+  **plus** `waitForTimeout(50)` vor dem Schnitt; (b) `Home` traf auf schmalem Viewport durch
+  Zeilenumbruch die falsche Position → Mitigation `ControlOrMeta+Home`.
+- Git-Historie (`git log`): „Fix flaky Mobile-project cut.spec.ts failures: **same
+  async-selection-sync race** as selection-regression.spec.ts" und „give async selection sync
+  time before the next keystroke". Also bereits **produktiv aufgetreten**, nicht hypothetisch.
+- `playwright.config.ts:27–36`: die **drei Default-Projekte** `Desktop Chrome`, `Mobile`
+  (`Pixel 7`) und `Tablet` (`iPad Mini` → **WebKit**) laufen **jede** Spec (außer den
+  clipboard-only-Specs). Jeder E2E-Test unten läuft also dreifach auf drei Viewports/Engines —
+  ein auf Chromium/Desktop grüner, aber nicht viewport-robuster Test ist **nicht** abnahmefähig.
+
+**Konsequenz für diesen Testplan:** Abschnitt 2.1.1 formuliert die daraus abgeleiteten
+**verbindlichen** Determinismus-Regeln, und die Code-Skizzen in 2.6/2.8 wurden gegenüber einer
+naiven Fassung **korrigiert** (die ursprüngliche 2.6-Skizze feuerte `Enter` unmittelbar nach
+`End` — genau der oben belegte Bug). Ein E2E-Test, der diese Regeln verletzt, gilt als **nicht
+bestanden**, auch wenn er lokal einmal grün war.
 
 ---
 
@@ -247,6 +285,58 @@ Editor-Verdrahtung (Toolbar-Button tatsächlich vorhanden und klickbar, Keymap t
 gebunden, DOM tatsächlich mit den richtigen Klassen gerendert, Datei tatsächlich
 herunterladbar) nicht abdecken.
 
+#### 2.1.1 Determinismus-Regeln (verbindlich für jeden Test dieser Ebene)
+
+Abgeleitet aus 0.3, direkt aus dem bestehenden Repo-Muster übernommen (nicht neu erfunden).
+**Jeder** Test in Abschnitt 2.x muss sie einhalten; ein Verstoß ist ein QA-Fehlschlag, kein
+Stilfrage.
+
+1. **Selektions-Sync abwarten (Kern-Regel).** Nach **jeder** nativen, tastatur- oder
+   maus­getriebenen **Caret-Bewegung** (`End`, `Home`, `ControlOrMeta+Home`, `ArrowLeft/Right/
+   Up/Down`, oder ein `editor.click()`/Zell-Klick, der den Cursor umsetzt), die von einer
+   **darauf folgenden, positions­abhängigen mutierenden Taste** (`Enter`, `ControlOrMeta+Enter`
+   = Seitenumbruch, `Backspace`, `Delete`, `type(...)`) gefolgt wird, **genau ein**
+   `await page.waitForTimeout(50)` einschieben — identisch zu `selection-regression.spec.ts:34`
+   und `cut.spec.ts:74`. Ohne diese Pause kann die mutierende Taste auf der **veralteten**
+   Cursor-/Selektionsposition wirken (belegt in 0.3). Die Pause ist **nur** an genau diesen
+   Übergängen nötig, nicht pauschal vor jeder Taste — das erste `editor.click()` + sofortiges
+   `type(...)` (nichts Veraltetes vorhanden) bleibt bewusst ohne Pause (Muster `docx.spec.ts:74`).
+2. **Der Seitenumbruch-Command selbst ist synchron.** `insertPageBreak` läuft als reguläre
+   ProseMirror-Transaktion über `dispatchTransaction` und setzt den Cursor selbst — direkt
+   **nach** `ControlOrMeta+Enter` darf ohne Pause weitergetippt werden (kein nativer Caret-Move
+   dazwischen). Die Pause aus Regel 1 gilt für den **Klick/Pfeil-danach**, nicht für das
+   Command selbst. Das ist genau der Punkt, den der Selection-Sync-Regressionstest (2.6) prüfen
+   muss: Einfügen selbst darf keinen inkonsistenten Zustand hinterlassen.
+3. **Selektion per Tastatur, nicht per Pixel-Maus-Drag.** Bereichs­selektionen über
+   `ControlOrMeta+a` oder `ControlOrMeta+Home` + Schleife aus `Shift+ArrowRight`/`ArrowLeft`
+   mit **`{ delay: 20 }` pro Taste** (Muster `cut.spec.ts:70`, `clipboard.spec.ts:349`). **Kein**
+   Fixed-Pixel-`mouse.move/down/up`-Drag: er ist über die drei Viewport-Projekte (Desktop/Mobile/
+   Tablet) unzuverlässig, weil die Seitenbreite fix ist und Text unterschiedlich umbricht
+   (verifiziert dokumentiert in `cut.spec.ts:60–67`).
+4. **Viewport-robuste Navigation.** Für „an den Dokumentanfang": **`ControlOrMeta+Home`**, nicht
+   `Home` (das auf dem schmalen Mobile/Tablet-Viewport nur an den Anfang der aktuellen **visuellen
+   Zeile** springt — belegt in `cut.spec.ts:60–67`). Für „ans Ende": `ControlOrMeta+End`.
+5. **Auto-Waiting statt fester Sleeps für DOM-Zustände.** Auf gerenderte Ergebnisse **nur** mit
+   web-first-Assertions warten (`await expect(locator).toHaveCount(n)` / `.toContainText(...)` /
+   `.toBeVisible()`), die Playwright bis zum Timeout retryt. Feste `waitForTimeout` sind
+   **ausschließlich** für den Selektions-Sync-Übergang aus Regel 1 zulässig, nirgends sonst
+   („warte bis Spacer da ist" → `toHaveCount`, nicht `waitForTimeout`).
+6. **Kein stiller JS-Fehler (Anforderung 3.10).** Jeder Test registriert den bereits etablierten
+   `watchForConsoleErrors(page)`-Helfer (`cut.spec.ts:16–26`: `page.on('pageerror')` +
+   `console`-Typ `error`) und ruft die zurückgegebene Assertion am Testende auf. Ein Klick/
+   Tastendruck, der visuell „nichts tut", aber eine Exception in die Konsole wirft, ist ein
+   Verstoß gegen „nie ein ergebnisloser Tastendruck/Klick" und muss so **auffliegen**, nicht
+   durchrutschen.
+7. **Re-Upload nach Export beachtet den Lifecycle-Guard.** Das Dokument-Workspace zeigt bei
+   ungespeicherten Änderungen `● ungespeichert` (`DocumentWorkspace.tsx:119`) und armiert eine
+   `beforeunload`-Warnung; ein `page.reload()` auf einem **dirty** Dokument löst einen
+   Bestätigungsdialog aus (siehe `save-export-lifecycle.spec.ts`, Testfall 15). Ein Export macht
+   das Dokument **clean** (Indikator verschwindet), erst **danach** ist `reload()` dialogfrei. Der
+   Re-Upload-Fluss (2.8) muss deshalb entweder (a) **nach** dem Export erst
+   `await expect(page.getByText('● ungespeichert')).toHaveCount(0)` abwarten und dann neu laden,
+   **oder** (b) vorsorglich `page.on('dialog', (d) => d.accept())` registrieren. Sonst hängt/
+   flakt der Reload projektabhängig.
+
 ### 2.2 Wiederverwendete Infrastruktur (bereits im Repo vorhanden, verifiziert)
 
 ```ts
@@ -255,6 +345,16 @@ function docxCard(page: Page) {
 }
 function odtCard(page: Page) {
   return page.locator('div.rounded-lg', { has: page.getByRole('heading', { name: 'OpenDocument Text (.odt)' }) })
+}
+
+// Regel 6 (2.1.1): identisch aus cut.spec.ts:16–26 übernommen — für die neue Datei mit
+// exportieren/importieren (nicht duplizieren, in fixtures/ auslagern, sobald zweiter Nutzer
+// existiert). Fängt „stille" JS-Fehler, die ein Klick/Tastendruck sonst unsichtbar auslöst.
+function watchForConsoleErrors(page: Page) {
+  const errors: string[] = []
+  page.on('pageerror', (err) => errors.push(String(err)))
+  page.on('console', (msg) => { if (msg.type() === 'error') errors.push(msg.text()) })
+  return () => expect(errors, `Unerwartete Konsolen-/JS-Fehler: ${errors.join('\n')}`).toEqual([])
 }
 ```
 
@@ -277,6 +377,13 @@ neuen Datei geführt.
 | E2E-INSERT-04 | Vorherige Textselektion vorhanden (`ControlOrMeta+a`), dann Umbruch einfügen | Selektierter Text ist **ersetzt** (verschwunden), nicht zusätzlich zum Umbruch erhalten (Anforderung 3.2) |
 | E2E-INSERT-05 | ODT-Karte, identischer Ablauf wie E2E-INSERT-01/02/03 | Identisches Ergebnis auf der ODT-Karte (Feature ist formatunabhängig im selben Editor) |
 
+**Determinismus-Hinweis zu 2.3 (Regel 1/2, 2.1.1):** In E2E-INSERT-01/02/03 gibt es zwischen
+`type(...)`, dem synchronen `insertPageBreak` und dem folgenden `type(...)` **keinen** nativen
+Caret-Move → **keine** `waitForTimeout` nötig und keine einfügen (überflüssige Sleeps sind
+ebenfalls unerwünscht). E2E-INSERT-04 nutzt `ControlOrMeta+a` (synchron gesetzte `AllSelection`)
+direkt vor dem Einfügen — ebenfalls pausenfrei korrekt. Die Pause aus Regel 1 wird erst dort
+relevant, wo ein Klick/Pfeil/`End` **vor** einer mutierenden Taste steht (2.5/2.6/2.7).
+
 ### 2.4 Visuelle Unterscheidbarkeit automatisch vs. manuell (Testplan-Punkt 6 der Anforderung)
 
 | ID | Testfall | Prüfung |
@@ -285,13 +392,22 @@ neuen Datei geführt.
 | E2E-VISUAL-02 | Sehr langes Dokument (viel Text, mehrere automatische Überlauf-Umbrüche zu erwarten) **ohne** jeden manuellen Umbruch | Alle vorhandenen `.page-break-spacer`-Elemente tragen **nicht** die Klasse `--manual` und **nicht** `[data-manual-page-break="true"]` |
 | E2E-VISUAL-03 | Kombination: langes Dokument mit automatischen Umbrüchen **und** zusätzlich einem manuellen Umbruch dazwischen | Beide Umbruch-Arten sind im DOM gleichzeitig vorhanden und über die Klasse/das Attribut eindeutig unterscheidbar (Anforderung 3.8, „Zusammenspiel … korrekt") |
 
+**Determinismus-/Projekt-Hinweis zu 2.4:** Die **Anzahl automatischer** Überlauf-Umbrüche hängt
+von gemessenen DOM-Höhen ab und variiert über die drei Projekte (`Desktop Chrome`/`Mobile`/
+`Tablet` mit unterschiedlichen Viewports/Zeilenumbrüchen, `playwright.config.ts:34–36`).
+Assertions in E2E-VISUAL-02/03 daher **count-agnostisch** formulieren: „**kein** Element trägt
+`--manual`/`[data-manual-page-break="true"]`" bzw. „**genau ein** `--manual` existiert", **nicht**
+„es gibt genau N automatische Spacer". Für E2E-VISUAL-01 gilt umgekehrt: der manuelle Umbruch ist
+höhenunabhängig (er entsteht aus `breakBefore`, nicht aus Überlauf) → seine `toHaveCount(1)` ist
+über alle drei Projekte stabil.
+
 ### 2.5 Löschen + Undo/Redo (echte Bedienung)
 
 | ID | Testfall | Prüfung |
 |---|---|---|
-| E2E-DELETE-01 | Umbruch einfügen (E2E-INSERT-01) → Cursor unmittelbar danach positionieren → `page.keyboard.press('Backspace')` | `.pm-page-break-before`/`.page-break-spacer--manual` verschwindet aus dem DOM; Text davor/danach bleibt inhaltlich unverändert |
-| E2E-DELETE-02 | Nach E2E-DELETE-01: `page.keyboard.press('ControlOrMeta+z')` | Umbruch **und** ursprünglicher Zustand sind in **einem** Schritt wiederhergestellt (Grenzfall 13); erneutes `ControlOrMeta+Shift+z` (Redo) stellt den gelöschten Zustand identisch wieder her |
-| E2E-DELETE-03 | Backspace/Delete an einer Position, die **nicht** exakt an der Umbruch-Grenze liegt (z. B. mitten im Text nach dem Umbruch) | Normales Zeichen-Löschverhalten, `breakBefore` bleibt unangetastet — keine Regression am Standard-Backspace/Delete |
+| E2E-DELETE-01 | Umbruch einfügen (E2E-INSERT-01) → Cursor an den **Anfang** des Umbruch-Absatzes navigieren (`ControlOrMeta+Home` bzw. Pfeil an die Grenze, Regel 4) → **`await page.waitForTimeout(50)` (Regel 1)** → `page.keyboard.press('Backspace')` | `.pm-page-break-before`/`.page-break-spacer--manual` verschwindet aus dem DOM; Text davor/danach bleibt inhaltlich unverändert. Die Pause ist Pflicht: `Backspace` ist positions­abhängig und würde sonst evtl. auf der veralteten Position wirken (Regel 1) |
+| E2E-DELETE-02 | Nach E2E-DELETE-01: `page.keyboard.press('ControlOrMeta+z')` | Umbruch **und** ursprünglicher Zustand sind in **einem** Schritt wiederhergestellt (Grenzfall 13); erneutes Redo (`ControlOrMeta+y` **oder** `ControlOrMeta+Shift+z` — beide sind laut Keymap gebunden) stellt den gelöschten Zustand identisch wieder her |
+| E2E-DELETE-03 | Backspace/Delete an einer Position, die **nicht** exakt an der Umbruch-Grenze liegt (z. B. mitten im Text nach dem Umbruch; nach dem Repositionieren wieder **Regel 1** beachten) | Normales Zeichen-Löschverhalten, `breakBefore` bleibt unangetastet — keine Regression am Standard-Backspace/Delete |
 
 ### 2.6 Pflicht-Regressionstest Selection-Sync (Grenzfall 7, verpflichtend in `selection-regression.spec.ts`)
 
@@ -301,19 +417,27 @@ Seitenumbruch-Einfüge-Sequenz:
 
 ```ts
 test('page break insert + reselect + type — selection stays consistent', async ({ page }) => {
+  const assertNoConsoleErrors = watchForConsoleErrors(page) // Regel 6 (2.1.1)
   const editor = page.locator('.ProseMirror')
   await editor.click()
   await page.keyboard.type('Erster Absatz.')
-  await page.keyboard.press('ControlOrMeta+Enter') // Seitenumbruch einfügen
+  // ControlOrMeta+Enter (insertPageBreak) ist eine synchrone PM-Transaktion, die den Cursor
+  // selbst setzt — direkt danach tippen ist bewusst ohne Pause korrekt (Regel 2).
+  await page.keyboard.press('ControlOrMeta+Enter')
   await page.keyboard.type('Zweiter Absatz.')
 
   await page.keyboard.press('ControlOrMeta+a')
   await page.getByTitle('Fett').click()
 
   // Reproduziert exakt den bekannten Selection-Sync-Bug-Auslöser: erneuter Klick in den
-  // jetzt fett markierten, noch selektierten Text.
+  // jetzt fett markierten, noch selektierten Text, dann eine native Caret-Bewegung.
   await editor.click()
   await page.keyboard.press('End')
+  // PFLICHT (Regel 1 / 0.3): der native `End`-Caret-Move wird nur asynchron über
+  // `selectionchange` in ProseMirrors Modell nachgezogen; das folgende `Enter` darf nicht
+  // vorausrasen. IDENTISCH zu selection-regression.spec.ts:34. Fehlte in der naiven Fassung
+  // dieser Skizze — genau der in 0.3 belegte Bug.
+  await page.waitForTimeout(50)
   await page.keyboard.press('Enter')
   await page.keyboard.type('Dritter Absatz.')
 
@@ -321,6 +445,7 @@ test('page break insert + reselect + type — selection stays consistent', async
   await expect(editor).toContainText('Zweiter Absatz.')
   await expect(editor).toContainText('Dritter Absatz.')
   await expect(page.locator('.ProseMirror .pm-page-break-before')).toHaveCount(1)
+  assertNoConsoleErrors()
 })
 ```
 
@@ -342,16 +467,31 @@ Blick.
 | E2E-EDGE-07 | Bild einfügen, Cursor direkt davor **und** separat direkt danach, jeweils Umbruch einfügen | Bild bleibt exakt einmal im DOM vorhanden (keine Duplizierung), landet je nach Cursor-Position eindeutig auf der Seite davor/danach (Grenzfall 12) |
 | E2E-EDGE-08 | Drei „Kapitel"-Absätze, je durch einen manuellen Umbruch getrennt | Alle drei `.page-break-spacer--manual`-Elemente einzeln vorhanden, in der richtigen Reihenfolge (Grenzfall 9) |
 
+**Determinismus-Hinweis zu 2.7 (Regel 1/3/4):** In E2E-EDGE-01/04/05/06/07 wird der Cursor vor
+dem Umbruch **in** eine Zelle/einen Listenpunkt/eine Überschrift/neben ein Bild gesetzt (Klick
+oder Pfeil = nativer Caret-Move). Zwischen diesem Positionieren und dem auslösenden
+`ControlOrMeta+Enter` **muss** ein `await page.waitForTimeout(50)` stehen (Regel 1), sonst kann der
+Umbruch am falschen Ort landen. Zellauswahl über `page.locator('.ProseMirror td').nth(i).click()`
+(Muster `selection-regression.spec.ts:48–49`), nicht über Pixelkoordinaten (Regel 3). Für
+E2E-EDGE-01 („Dokumentanfang") `ControlOrMeta+Home` statt `Home` (Regel 4).
+
 ### 2.8 Datei-Rundreise über echten Download + echten Re-Upload (Req-Abschnitt 5.2, Punkte 1/2)
 
 **DOCX:**
 
 ```ts
 test('page break survives a real export + re-upload round trip (DOCX)', async ({ page }) => {
+  const assertNoConsoleErrors = watchForConsoleErrors(page) // Regel 6 (2.1.1)
+  // Sicherheitsnetz gegen den beforeunload-Guard beim späteren reload() (Regel 7): falls das
+  // Dokument wider Erwarten noch dirty wäre, den Bestätigungsdialog automatisch akzeptieren,
+  // statt den Test hängen zu lassen.
+  page.on('dialog', (d) => void d.accept())
+
   await docxCard(page).getByRole('button', { name: 'Neu erstellen' }).click()
   const editor = page.locator('.ProseMirror')
   await editor.click()
   await page.keyboard.type('Vor dem Umbruch.')
+  // insertPageBreak ist synchron (Regel 2) — direkt danach tippen ist korrekt.
   await page.keyboard.press('ControlOrMeta+Enter')
   await page.keyboard.type('Nach dem Umbruch.')
 
@@ -372,6 +512,10 @@ test('page break survives a real export + re-upload round trip (DOCX)', async ({
   expect(documentXml).toContain('Vor dem Umbruch.')
   expect(documentXml).toContain('Nach dem Umbruch.')
 
+  // Regel 7: der Export hat das Dokument clean gemacht — erst DAS abwarten, dann ist reload()
+  // deterministisch dialogfrei (save-export-lifecycle.spec.ts, Testfall 15).
+  await expect(page.getByText('● ungespeichert')).toHaveCount(0)
+
   // Echter Re-Upload derselben Datei in eine frische Sitzung:
   await page.reload()
   await page.getByRole('button', { name: /verstanden/i }).click()
@@ -385,6 +529,7 @@ test('page break survives a real export + re-upload round trip (DOCX)', async ({
   await expect(page.locator('.ProseMirror')).toContainText('Vor dem Umbruch.')
   await expect(page.locator('.ProseMirror')).toContainText('Nach dem Umbruch.')
   await expect(page.locator('.ProseMirror .pm-page-break-before')).toHaveCount(1)
+  assertNoConsoleErrors()
 })
 ```
 
@@ -444,6 +589,7 @@ geführt, nicht stillschweigend als „erledigt" markiert.
 | Req 5.2 Punkte 7/8 (reale Fremddateien) | UT-DOCX-FIX-*, UT-ODT-FIX-*, E2E-IMPORT-01–07 |
 | Selection-Sync-Regression (Grenzfall 7) | E2E-REGRESSION (Abschnitt 2.6, zusätzlich in `selection-regression.spec.ts` verankert) |
 | Testplan-Hinweise Abschnitt 6, Punkt 7 (Unit **und** E2E für Rundreise) | Beide Ebenen jeweils oben geführt, keine der beiden ersetzt die andere |
+| Auftrag: **deterministische** Tests (kein Race durch zu schnelle Tastatur, Selektions-Sync abwarten) | Abschnitt 0.3 (Befund) + 2.1.1 (Regeln 1–7) + korrigierte Skizzen 2.6/2.8 + Determinismus-Hinweise zu 2.3/2.4/2.5/2.7 + Abnahme-Gate in Abschnitt 4 |
 
 ---
 
@@ -470,6 +616,17 @@ Der Status „vorhanden" (Req-Abschnitt 7) darf aus QA-Sicht erst vergeben werde
 - [ ] Alle 13 Grenzfälle aus Req-Abschnitt 4 sind einzeln mit Testergebnis befundet
       (funktioniert / bewusst abweichend + dokumentiert / repariert), nicht pauschal
       „erledigt".
+- [ ] **Determinismus (Abschnitt 0.3/2.1.1) eingehalten und belegt:** jeder neue E2E-Test hält
+      Regeln 1–7 ein — kein nativer Caret-Move (`End`/`Home`/Pfeil/Klick) unmittelbar vor einer
+      mutierenden Taste **ohne** den `waitForTimeout(50)`-Sync; kein Fixed-Pixel-Maus-Drag; keine
+      festen Sleeps außer für den Selektions-Sync-Übergang; `watchForConsoleErrors` aktiv; der
+      Re-Upload-Fluss beachtet den Lifecycle-Guard. Nachweis: die gesamte Suite läuft auf
+      **allen drei** Default-Projekten (`Desktop Chrome`/`Mobile`/`Tablet`) **grün, ohne
+      Retry-Abhängigkeit** — ein Test, der nur mit `retries: 1` grün wird, gilt als flaky und
+      **nicht** bestanden.
+- [ ] Selection-Sync-Regressionstest (2.6) ist **zusätzlich** dauerhaft in
+      `tests/e2e/selection-regression.spec.ts` verankert (Code-Plan 14.4), nicht nur in
+      `seitenumbruch.spec.ts`.
 
 Andernfalls: Status „teilweise", mit Verweis auf die konkret offenen Punkte aus dieser Liste
 — analog zur in `seitenumbruch-req.md` Abschnitt 7 festgelegten Vorgehensweise.

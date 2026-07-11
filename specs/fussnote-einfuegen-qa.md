@@ -12,6 +12,20 @@ den tatsächlich gebauten Code → Rückmeldung an Backlog-Status. Jeder Testfal
 (Selektoren, Dateien, exakte Assertions) formuliert, dass er direkt in Code umgesetzt/ausgeführt werden
 kann, ohne weitere Interpretation.
 
+**Überarbeitung 2026-07-05 (kritische QA-Nachverifikation, Schwerpunkt Determinismus).** Der vorige
+Entwurf dieses Plans war inhaltlich vollständig, beschrieb seine E2E-Beispiele aber mit **Race-anfälligen**
+Bediensequenzen, die genau die im Projekt bereits mehrfach behobene Flakiness-Klasse reproduziert hätten
+(async `selectionchange`-Sync, `prosemirror-history`-Gruppierung, `beforeunload`-Guard). Konkret korrigiert:
+(1) neuer **verbindlicher Abschnitt 1.1 (R1–R8)** mit den 1:1 aus `selection-regression.spec.ts`/`cut.spec.ts`
+übernommenen Anti-Flakiness-Mustern; (2) B.0 um Pflicht-Helper `settle`, `typeIntoFootnoteBody`,
+`shiftSelect`, `backToFormats`, `watchForConsoleErrors` ergänzt; (3) alle B.1/B.2-Sequenzen auf diese Helper
+umgestellt — insbesondere Tippen in den geschachtelten Fußnotentext (R1), Undo-Atomaritätstest mit
+History-Gruppen-Trennung (R3), Re-Import über den In-App-`← Formate`-Weg statt `page.reload()` (R5, wegen
+`useBeforeUnloadWarning` in `src/App.tsx`), Anzeigenummer-Prüfung nur über auto-retrying `expect` (R4, da
+die Nummer per `requestAnimationFrame` gesetzt wird); (4) Determinismus-Nachweis (`--repeat-each`, Anti-Muster-
+`grep`) in Abschnitt D verankert. Die fachliche Testabdeckung (Traceability-Matrix Abschnitt 4) ist
+unverändert vollständig.
+
 ---
 
 ## 0. Ausgangslage zum Zeitpunkt der Testplan-Erstellung (2026-07-04)
@@ -74,6 +88,95 @@ Gemeinsame Konventionen (aus bestehenden Specs `docx.spec.ts`/`odt.spec.ts`/`sel
 - Alle in diesem Plan referenzierten realen Testkorpus-Dateien liegen bereits im Repo unter
   `tests/fixtures/external/docx/{footnotes,table_footnotes,form_footnotes}.docx` und
   `tests/fixtures/external/odt/footnote.odt` — **keine** neuen Dateien müssen beschafft werden.
+
+---
+
+## 1.1 Determinismus-Regeln (verbindlich für **jeden** E2E-Test dieses Plans)
+
+Die Anforderung dieses QA-Auftrags verlangt ausdrücklich **deterministische** Tests: „keine Race-Conditions
+durch zu schnelle Tastatureingaben; Selektions-Sync abwarten". Dieses Projekt hat genau diese Klasse von
+Flakiness bereits mehrfach real erlebt und behoben (siehe die Kommentare in
+`tests/e2e/selection-regression.spec.ts`, `tests/e2e/cut.spec.ts` sowie die jüngsten Commits „Fix flaky
+Mobile-project … same async-selection-sync race"). Die folgenden Regeln sind **nicht optional** und
+**nicht** neu zu erfinden — sie übernehmen 1:1 die im Repo bereits etablierten Muster. Jeder Fußnoten-E2E-
+Test **muss** sie anwenden; ein Testfall, der sie verletzt, gilt als nicht abnahmefähig, auch wenn er
+lokal „meistens grün" ist.
+
+**R1 — Nach jedem die Caret-Position ändernden Klick, vor der nächsten Tastatureingabe: `settle()`.**
+ProseMirror erfährt eine native, per Maus/Tastatur ausgelöste Caret-Bewegung nur über das **asynchrone**
+`selectionchange`-Event des Browsers. Eine unmittelbar folgende Playwright-Tastatureingabe (Playwright fügt
+**keine** menschliche Reaktionspause ein) kann diesem Nachziehen vorauslaufen und noch auf der **alten**
+Position wirken. Verbindlich:
+```ts
+const SELECTION_SYNC_MS = 50 // identisch zu selection-regression.spec.ts / cut.spec.ts
+async function settle(page: Page) { await page.waitForTimeout(SELECTION_SYNC_MS) }
+```
+`settle(page)` ist Pflicht **nach** jedem `…click()`, das den Caret neu setzt, **und** nach jedem
+Loslassen von `Shift` am Ende einer per Shift+Pfeil aufgebauten Selektion — **bevor** die nächste
+`keyboard.press/type` folgt. **Für dieses Feature besonders kritisch:** der Klick in den **verschachtelten**
+Fußnotentext-Bereich (`.footnote-item-body`, ein editierbares Content-Hole **innerhalb** eines
+`contenteditable="false"`-Wirts, Code-Plan 3.1) ist der riskanteste Selektions-Wechsel des gesamten Features
+(Fokuswechsel zwischen Haupt-`EditorView` und geschachteltem Bereich). Hier ist `settle()` zwingend, sonst
+landet das erste getippte Zeichen nichtdeterministisch im Hauptdokument statt im Fußnotentext (genau der in
+B.1 #2 zu widerlegende Fehler).
+
+**R2 — Selektion per Shift+Pfeil: `{ delay: 20 }` pro Taste, danach `settle()`.**
+Eine Serie von Null-Delay-`Shift+Arrow`-Keydowns unmittelbar vor einer Aktion (Löschen/Einfügen/Cut) kann
+die DOM-Selektions-Sync von ProseMirror überholen und mehr/weniger erfassen als sichtbar selektiert (real
+beobachtet in `cut.spec.ts` Testfall 1: `window.getSelection()` meldete korrekt, der tatsächlich betroffene
+Bereich schwankte). Verbindlich: jede `ArrowLeft/Right/Up/Down`-Taste beim Aufbau einer Selektion mit
+`{ delay: 20 }`, danach `settle(page)`. Gilt insbesondere für B.1 #8/#8b (Pfeil über die atomare Marke).
+
+**R3 — Undo-Gruppierung: vor einem `Ctrl+Z`-Atomaritätstest ~600 ms Ruhe.**
+`prosemirror-history` fasst zeitlich benachbarte Transaktionen (Default `newGroupDelay` ≈ 500 ms) zu **einem**
+Undo-Schritt zusammen. Playwright feuert Tippen + Button-Klick + `Ctrl+Z` sonst innerhalb dieses Fensters,
+wodurch das Einfügen der Fußnote mit dem vorherigen Tippen in **dieselbe** Gruppe fällt — ein einzelnes
+`Ctrl+Z` würde dann auch den zuvor getippten Text („Vorher.") mit rückgängig machen und B.1 #5 fälschlich
+rot färben. Verbindlich (analog `cut.spec.ts` Testfall 9): **vor** dem `insertFootnoteViaToolbar` in den
+Undo-Tests `await page.waitForTimeout(600)` einfügen, damit Einfüge- und Tipp-Schritt getrennte Undo-Gruppen
+bilden. (Der Einfüge-Command selbst ist bereits **eine** atomare Transaktion, Code-Plan 4.1 — R3 trennt nur
+die vorherige Tippphase davon ab, es widerspricht nicht der geforderten Atomarität von Marke+Eintrag.)
+
+**R4 — Anzeigenummern nur über auto-retrying Locator-Assertions prüfen, nie per Einmal-`textContent()`.**
+Die sichtbare Fußnotennummer wird **nicht** im Dokument gespeichert, sondern vom
+`createFootnoteDisplayPlugin` **im `requestAnimationFrame` nach jedem View-Update** als DOM-Text gesetzt
+(Code-Plan 1.4/2.2). Sie ist daher erst **einen Animationsframe** nach dem Einfügen/Umsortieren im DOM. Ein
+einmaliges `await locator.textContent()` kann die Zahl noch als leer/veraltet lesen. Verbindlich: **immer**
+`await expect(footnoteRefs(page).nth(i)).toHaveText(String(i + 1))` bzw.
+`await expect(footnoteRefs(page)).toHaveText(['1','2'])` — diese Assertions warten (poll-basiert) auf den
+stabilen Endzustand. Gleiches gilt für `toHaveCount`/`toContainText`/`toBeVisible`; **kein** synchrones
+`.textContent()`/`.innerText()`-Lesen mit anschließendem `expect(wert)`.
+
+**R5 — Re-Import über den In-App-Weg `← Formate`, **nicht** über `page.reload()`.**
+`src/App.tsx` verdrahtet `useBeforeUnloadWarning(active?.document.dirty ?? false)`: ein `page.reload()` bei
+ungespeichertem (dirty) Dokument kann den nativen `beforeunload`-Dialog auslösen und den Reload
+blockieren/verzögern — nichtdeterministisch je nach Timing und Projekt. Der etablierte, dialogfreie Weg
+zurück zur Formatauswahl (um dieselbe exportierte Datei wieder hochzuladen) ist der In-App-Button
+`page.getByRole('button', { name: /formate/i }).click()` (so in `cut.spec.ts` Rundreise 10 und mehreren
+anderen QA-Specs). Verbindlich: **alle** Re-Import-Schritte dieses Plans nutzen `backToFormats(page)` (B.0),
+**nicht** `page.reload()` + erneutes Schließen des PrivacyModals. (Sollte die App-Navigation abweichen, ist
+der reale Bedienweg vor Testlauf zu verifizieren — die Prüfabsicht „exportierte Datei erneut laden" bleibt.)
+
+**R6 — Zwischenablage-abhängige Tests: WebKit/Nicht-Chromium gezielt skippen, Chromium-Permission granten.**
+Paste-basierte Fälle (Grenzfall 3.11 „Tabelle in den Fußnotentext einfügen") sind in Playwright nur auf
+Chromium mit `await page.context().grantPermissions(['clipboard-read','clipboard-write'])` zuverlässig; auf
+WebKit (Projekt „Tablet") schlägt der native Cut/Paste-Rundlauf reproduzierbar fehl. Verbindlich dasselbe
+`test.skip(browserName !== 'chromium', …)`-Muster wie `cut.spec.ts` Testfall 12 — **kein** stilles Auslassen.
+
+**R7 — „Kein-Absturz"-Tests hängen einen Konsolen-Fehler-Wächter ein.**
+Für jeden Absturzfreiheits-Testfall (Grenzfall 3.3/3.10/3.11) wird der bereits etablierte
+`watchForConsoleErrors(page)`-Helfer aus `cut.spec.ts` (Zeile 16–23) wiederverwendet und am Testende
+`assertNoConsoleErrors()` aufgerufen — Absturzfreiheit wird so **positiv nachgewiesen**, nicht nur
+implizit angenommen.
+
+**R8 — Mobile-Projekt-Flakiness: erst R1–R2 anwenden, dann — nur bei belegter CI-only-Nichtreproduzierbarkeit — dokumentiert skippen.**
+`playwright.config.ts` fährt standardmäßig drei Projekte (Desktop Chrome, Mobile = Pixel-7-Touch-Emulation,
+Tablet = iPad/WebKit). Für **jede** neue Fußnoten-Sequenz gilt: zuerst R1–R2 sauber anwenden. Sollte danach
+eine konkrete Sequenz **ausschließlich** auf dem CI-Mobile-Projekt und **lokal nie** (100+ Wiederholungen)
+flaky bleiben — wie bereits bei `cut.spec.ts` Rundreise 1/2 dokumentiert —, ist ein
+`test.skip(testInfo.project.name === 'Mobile', 'CI-only Mobile limitation — siehe Kommentar')` **mit
+begründendem Kommentar** zulässig, **nachdem** die identische Absicherung auf Desktop Chrome und Tablet real
+grün ist. Niemals still skippen; der eingeschränkte Nachweisumfang wird in Abschnitt D protokolliert.
 
 ---
 
@@ -280,7 +383,25 @@ Anforderung ausdrücklich („nicht nur interne Funktionsaufrufe“, Zeile 11 de
 
 ### B.0 Gemeinsame Helper
 
+Die Helper kapseln die verbindlichen Determinismus-Regeln aus **Abschnitt 1.1** (R1–R7), damit kein
+einzelner Testfall sie versehentlich umgeht. **`settle`, `typeIntoFootnoteBody` und `backToFormats` sind
+Pflicht-Bausteine**, keine Bequemlichkeit.
+
 ```ts
+const SELECTION_SYNC_MS = 50 // R1: identisch zu selection-regression.spec.ts / cut.spec.ts
+const HISTORY_GROUP_MS = 600 // R3: > prosemirror-history newGroupDelay (~500 ms)
+
+// R7: Konsolen-/JS-Fehler-Wächter, wörtlich aus cut.spec.ts übernommen.
+function watchForConsoleErrors(page: Page) {
+  const errors: string[] = []
+  page.on('pageerror', (err) => errors.push(String(err)))
+  page.on('console', (msg) => { if (msg.type() === 'error') errors.push(msg.text()) })
+  return () => expect(errors, `Unerwartete Konsolen-/JS-Fehler: ${errors.join('\n')}`).toEqual([])
+}
+
+// R1: nach jedem caret-verschiebenden Klick / Selektionsende, vor der nächsten Tastatureingabe.
+async function settle(page: Page) { await page.waitForTimeout(SELECTION_SYNC_MS) }
+
 function docxCard(page: Page) {
   return page.locator('div.rounded-lg', { has: page.getByRole('heading', { name: 'Word-Dokument (.docx)' }) })
 }
@@ -306,6 +427,28 @@ function footnoteRefs(page: Page) {
 function footnoteItems(page: Page) {
   return page.locator('.ProseMirror .footnote-item')
 }
+
+// R1 (kritischster Fall dieses Features): in den geschachtelten Fußnotentext klicken UND den
+// Selection-Sync abwarten, BEVOR getippt wird — sonst landet das erste Zeichen nichtdeterministisch
+// im Hauptdokument. `nth` erlaubt das gezielte Beschreiben der i-ten Fußnote.
+async function typeIntoFootnoteBody(page: Page, nth: number, text: string) {
+  await footnoteItems(page).nth(nth).locator('.footnote-item-body').click()
+  await settle(page) // R1 — Pflicht
+  await page.keyboard.type(text)
+}
+
+// R5: dialogfreier Rückweg zur Formatauswahl statt page.reload() (beforeunload-Guard in App.tsx).
+async function backToFormats(page: Page) {
+  await page.getByRole('button', { name: /formate/i }).click()
+}
+
+// R2: Selektion per Shift+Pfeil mit Pro-Taste-Delay + abschließendem settle.
+async function shiftSelect(page: Page, key: string, times: number) {
+  await page.keyboard.down('Shift')
+  for (let i = 0; i < times; i++) await page.keyboard.press(key, { delay: 20 })
+  await page.keyboard.up('Shift')
+  await settle(page) // R2 — Pflicht
+}
 ```
 
 Selektoren aus `fussnote-einfuegen-code.md` Abschnitt 3.1/5.2 übernommen (`sup.footnote-ref`,
@@ -316,40 +459,51 @@ entsprechend anzupassen (siehe Abschnitt 0 dieses Plans).
 
 Deckt Anforderung Abschnitt 5, Testfälle 1–8, 14, 16 sowie Abschnitt 2.9 (Begriffsabgrenzung).
 
+**Verbindlich für jede Zeile unten:** die „Kernschritte“ sind Absicht, nicht wörtlicher Code. Bei der
+Umsetzung gelten die Determinismus-Regeln aus **Abschnitt 1.1** ausnahmslos — insbesondere: Tippen in den
+Fußnotentext **immer** über `typeIntoFootnoteBody()` (R1), Shift+Pfeil-Selektionen über `shiftSelect()`
+(R2), Undo-Tests mit vorherigem `waitForTimeout(HISTORY_GROUP_MS)` (R3), Nummern-/Count-Prüfungen nur über
+auto-retrying `expect(...)` (R4), Absturzfreiheits-Zeilen mit `watchForConsoleErrors()` (R7). Die Spalte
+„Kernschritte“ ist entsprechend bereits mit diesen Helpern formuliert.
+
 | # (Anforderung §5) | Testname | Kernschritte | Assertion |
 |---|---|---|---|
 | — (Vorbedingung) | `the toolbar exposes a "Fußnote einfügen" button distinct from any footer control (Anforderung 2.9)` | `openNewDocxEditor(page)` | `page.getByRole('button', { name: 'Fußnote einfügen' })` ist sichtbar und **eindeutig** (`toHaveCount(1)`); sichtbarer Button-Text ist „Fußnote“ (nicht nur ein Icon); es existiert **kein** Button mit `name`/Text, der den Wortstamm „Fußzeile“ trägt (`page.getByRole('button', { name: /fußzeile/i })` → `toHaveCount(0)`, da diese Funktion laut Anforderung ohnehin noch nicht existiert) |
-| 1 | `clicking "Fußnote einfügen" shows a superscript "1" and an editable footnote area` | `page.locator('.ProseMirror').click()`, `insertFootnoteViaToolbar(page)` | `footnoteRefs(page)` hat Count 1, Text `"1"`; `footnoteItems(page)` hat Count 1 und ist sichtbar (`toBeVisible()`) |
-| 2 | `typing into the footnote area puts the text there, not in the main document` | Wie oben, dann `footnoteItems(page).first().locator('.footnote-item-body').click()`, `page.keyboard.type('Testfußnote eins')` | `footnoteItems(page).first()` enthält „Testfußnote eins“; der **Hauptabsatz** (`.ProseMirror > p` bzw. das erste Top-Level-Element) enthält den Text **nicht** |
-| 3 | `inserting a second footnote before the first renumbers both correctly (Anforderung 2.6)` | Text „AB“ tippen, Cursor zwischen A/B (Home, `ArrowRight`), erste Fußnote einfügen und Text „Erste“ eintippen, danach Cursor an den **Anfang** des Dokuments setzen (`ControlOrMeta+Home`) und **dort** eine zweite Fußnote einfügen mit Text „Zweite“ | `footnoteRefs(page).nth(0)` zeigt `"1"` (die neu eingefügte, vor der ersten liegende), `footnoteRefs(page).nth(1)` zeigt `"2"`; `footnoteItems(page).nth(0)` enthält „Zweite“, `footnoteItems(page).nth(1)` enthält „Erste“ — Reihenfolge in `footnotes_area` folgt der Lesereihenfolge im Text, nicht der Einfüge-Reihenfolge |
-| 4 | `deleting a footnote reference removes it and its text, renumbering the rest (Anforderung 2.7)` | Zwei Fußnoten wie oben, Klick auf die **erste** Referenzmarke im Text (setzt `NodeSelection`), `Delete` drücken | `footnoteRefs(page)` hat danach Count 1 und zeigt `"1"` (vormals „2“, jetzt neu nummeriert); `footnoteItems(page)` hat Count 1 mit dem Text der vormals zweiten Fußnote; der Text der gelöschten Fußnote ist **nirgends** mehr im DOM vorhanden |
-| 5 | `Ctrl+Z right after inserting removes both the reference and the footnote area` | Text „Vorher.“ tippen, Fußnote einfügen, `ControlOrMeta+z` | `footnoteRefs(page)` Count 0, `footnoteItems(page)` Count 0, `.ProseMirror .footnote-area` nicht mehr im DOM (ganzer Bereich entfernt, nicht nur geleert); `.ProseMirror` enthält weiterhin „Vorher.“ |
-| 6 | `Ctrl+Shift+Z restores the (empty) footnote after an undo` | Fortsetzung von Testfall 5, danach `ControlOrMeta+Shift+z` | `footnoteRefs(page)` Count 1 (Text `"1"`), `footnoteItems(page)` Count 1, Fußnotentext leer (kein Text außer ggf. Platzhalter-Whitespace) |
-| 7 | `bold applied inside the footnote area renders correctly (Anforderung 2.5)` | In den Fußnotentext-Bereich klicken, Text „Fett“ tippen, `ControlOrMeta+a` **innerhalb** des Fußnotentext-Bereichs (nicht des ganzen Dokuments — Selektion per Dreifachklick auf den Fußnotentext-Absatz), `ControlOrMeta+b` bzw. Toolbar-Button „Fett“ | `footnoteItems(page).first().locator('strong, b')` enthält „Fett“ |
-| 8 | `arrow-key navigation skips over the reference as a single atomic step (Anforderung 2.4)` | Text „A“ tippen, Fußnote einfügen (Cursor jetzt direkt hinter der Referenz), Text „B“ tippen (Ergebnis „A[ref]B“), `Home` drücken, dann **genau einmal** `ArrowRight` drücken, dann `X` tippen | `.ProseMirror`-Absatz-Text (ohne die Fußnoten-Ziffer) ist „AXB“, **nicht** „AXB“ mit `X` versehentlich vor der Referenz stehen geblieben oder die Referenz „zerteilt“ — konkret: `X` erscheint **zwischen** Referenz und „B“, was nur möglich ist, wenn der eine `ArrowRight`-Druck den gesamten Atom-Knoten in einem Schritt übersprungen hat |
-| 8b | `Shift+ArrowRight over the reference selects it as a whole (Anforderung 2.4, Grenzfall 4)` | „A[ref]B“, Cursor vor der Referenz (`Home` + einmal `ArrowRight` reicht, um vor die Referenz zu kommen — je nach Ausgangslage anzupassen), `Shift+ArrowRight` einmal, danach `Delete` | Nach `Delete`: Referenz **und** ihr Fußnotentext-Eintrag sind vollständig weg (Count 0), „A“ und „B“ bleiben unverändert — bestätigt, dass die Selektion die atomare Einheit **vollständig** erfasste, nicht nur ein „unsichtbares“ Teilzeichen |
-| 14 (Grenzfall 3.8) | `inserting 50 footnotes keeps the UI responsive and numbering correct` | 50× `insertFootnoteViaToolbar(page)` in einer Schleife (Cursor jeweils ans Dokumentende gesetzt zwischen den Klicks, `ControlOrMeta+End`) | `footnoteRefs(page)` Count 50; Texte `"1"`..`"50"` in aufsteigender Reihenfolge (`for`-Schleife über `nth(i)` → `toHaveText(String(i+1))`); die komplette Schleife läuft ohne Timeout des Test-Runners (Standard-Timeout nicht überschritten) — indirekter Reaktionsfähigkeits-Nachweis |
-| 16 (Grenzfall 3.16) | `two fast real clicks insert exactly two footnotes, not one and not three` | `Promise.all([button.click(), button.click()])` (zwei native Klicks ohne `await` dazwischen) | `footnoteRefs(page)` Count **genau 2** (nicht 1 durch versehentliche Deduplizierung, nicht 3 durch doppeltes Event-Handling) |
-| 15 | `clicking a reference scrolls the corresponding footnote item into view (Anforderung 2.8, optional aber laut Code-Plan umgesetzt)` | Genug Absätze tippen, damit die Fußnote weit vom Fußnotenbereich entfernt scrollt; Fußnote am Dokumentanfang einfügen, danach ans Ende scrollen; Klick auf `footnoteRefs(page).first()` | Nach dem Klick: `footnoteItems(page).first()` liegt innerhalb des sichtbaren Viewports (`await expect(footnoteItems(page).first()).toBeInViewport()`) |
+| 1 | `clicking "Fußnote einfügen" shows a superscript "1" and an editable footnote area` | `page.locator('.ProseMirror').click()`; `await settle(page)` (R1); `insertFootnoteViaToolbar(page)` | `await expect(footnoteRefs(page)).toHaveText(['1'])` (R4, wartet auf den rAF-gesetzten Text); `await expect(footnoteItems(page)).toHaveCount(1)`; `await expect(footnoteItems(page).first()).toBeVisible()` |
+| 2 | `typing into the footnote area puts the text there, not in the main document` | Wie #1, dann **`typeIntoFootnoteBody(page, 0, 'Testfußnote eins')`** (kapselt Klick→`settle`→type, R1 — das erste Zeichen darf nicht im Hauptdokument landen) | `await expect(footnoteItems(page).first()).toContainText('Testfußnote eins')`; der **Hauptabsatz** (`.ProseMirror > p:first-of-type`) enthält den Text **nicht** (`not.toContainText`) |
+| 3 | `inserting a second footnote before the first renumbers both correctly (Anforderung 2.6)` | Klick in Editor, `settle`; Text „AB“ tippen; `Home`, `ArrowRight`, **`settle`** (R1); erste Fußnote einfügen; `typeIntoFootnoteBody(page, 0, 'Erste')`; zurück in den Haupttext klicken, `settle`; `ControlOrMeta+Home`, **`settle`** (R1); **dort** zweite Fußnote einfügen; `typeIntoFootnoteBody(page, 0, 'Zweite')` (die neue liegt jetzt an Position 0) | `await expect(footnoteRefs(page)).toHaveText(['1','2'])` (R4); `await expect(footnoteItems(page).nth(0)).toContainText('Zweite')`; `nth(1)` enthält „Erste“ — Reihenfolge in `footnotes_area` folgt der Lesereihenfolge, nicht der Einfüge-Reihenfolge |
+| 4 | `deleting a footnote reference removes it and its text, renumbering the rest (Anforderung 2.7)` | Zwei Fußnoten wie #3; **Klick auf die erste Referenzmarke** (`footnoteRefs(page).first().click()`, setzt `NodeSelection`), **`settle`** (R1); `Delete` | `await expect(footnoteRefs(page)).toHaveText(['1'])` (verbleibende, neu nummeriert; R4); `await expect(footnoteItems(page)).toHaveCount(1)` mit dem Text der vormals zweiten Fußnote; der Text der gelöschten Fußnote ist **nirgends** mehr im DOM (`await expect(page.locator('.ProseMirror')).not.toContainText(<gelöschter Text>)`) |
+| 5 | `Ctrl+Z right after inserting removes both the reference and the footnote area` | Klick in Editor, `settle`; Text „Vorher.“ tippen; **`await page.waitForTimeout(HISTORY_GROUP_MS)`** (R3 — trennt Tipp- von Einfüge-Undo-Gruppe, sonst entfernt ein einzelnes Ctrl+Z auch „Vorher."); Fußnote einfügen; `ControlOrMeta+z` | `await expect(footnoteRefs(page)).toHaveCount(0)`; `await expect(footnoteItems(page)).toHaveCount(0)`; `await expect(page.locator('.ProseMirror .footnote-area')).toHaveCount(0)` (ganzer Bereich weg, nicht nur geleert); `await expect(page.locator('.ProseMirror')).toContainText('Vorher.')` |
+| 6 | `Ctrl+Shift+Z restores the (empty) footnote after an undo` | Fortsetzung von #5, danach `ControlOrMeta+Shift+z` | `await expect(footnoteRefs(page)).toHaveText(['1'])` (R4); `await expect(footnoteItems(page)).toHaveCount(1)`; Fußnotentext leer (kein Text außer ggf. Platzhalter-Whitespace) |
+| 7 | `bold applied inside the footnote area renders correctly (Anforderung 2.5)` | `typeIntoFootnoteBody(page, 0, 'Fett')`; Selektion **nur** des Fußnotentext-Absatzes per Dreifachklick auf `.footnote-item-body` (`click({ clickCount: 3 })`), **`settle`** (R1 — nicht `ControlOrMeta+a`, das selektiert dokumentweit); Toolbar-Button „Fett“ (`page.getByTitle('Fett').click()`) | `await expect(footnoteItems(page).first().locator('strong, b')).toContainText('Fett')` |
+| 8 | `arrow-key navigation skips over the reference as a single atomic step (Anforderung 2.4)` | Klick, `settle`; „A“ tippen; Fußnote einfügen; „B“ tippen (Ergebnis „A[ref]B“); `Home`, **`settle`** (R1); **genau einmal** `ArrowRight` mit `{ delay: 20 }` (R2), **`settle`**; `X` tippen | Haupt-Absatztext (ohne die Fußnoten-Ziffer) ist „AXB“ — `X` steht **zwischen** Referenz und „B“, was nur möglich ist, wenn der eine `ArrowRight`-Druck den gesamten Atom-Knoten in **einem** Schritt übersprungen hat (nicht „zerteilt“) |
+| 8b | `Shift+ArrowRight over the reference selects it as a whole (Anforderung 2.4, Grenzfall 4)` | „A[ref]B“, Cursor vor die Referenz (`Home`, `settle`, ggf. `ArrowRight {delay:20}` + `settle`); **`shiftSelect(page, 'ArrowRight', 1)`** (R2, inkl. abschließendem `settle`); `Delete` | Nach `Delete`: `await expect(footnoteRefs(page)).toHaveCount(0)` **und** `footnoteItems(page)` Count 0; „A“ und „B“ bleiben — bestätigt, dass die Selektion die atomare Einheit **vollständig** erfasste, nicht nur ein „unsichtbares“ Teilzeichen |
+| 14 (Grenzfall 3.8) | `inserting 50 footnotes keeps the UI responsive and numbering correct` | Schleife 50×: `ControlOrMeta+End`, **`settle`** (R1 — Cursor-Sync vor dem Einfügen, sonst landet die Marke nichtdeterministisch), `insertFootnoteViaToolbar(page)`, `await expect(footnoteRefs(page)).toHaveCount(i+1)` (synchronisiert die Schleife auf den DOM-Stand statt „blind" weiterzuklicken) | Am Ende `await expect(footnoteRefs(page)).toHaveCount(50)`; Texte `"1"`..`"50"` per `for`-Schleife `await expect(footnoteRefs(page).nth(i)).toHaveText(String(i+1))` (R4); die komplette Schleife läuft ohne Test-Runner-Timeout — indirekter Reaktionsfähigkeits-Nachweis. **Hinweis R8:** falls diese Schleife ausschließlich auf CI-Mobile flaky wird und lokal nie, dokumentierter Mobile-Skip zulässig |
+| 16 (Grenzfall 3.16) | `two fast real clicks insert exactly two footnotes, not one and not three` | Klick in Editor, `settle`; `const b = page.getByRole('button', { name: 'Fußnote einfügen' })`; `await Promise.all([b.click(), b.click()])` (zwei native Klicks ohne `await` dazwischen) | `await expect(footnoteRefs(page)).toHaveCount(2)` — genau 2 (nicht 1 durch Deduplizierung, nicht 3 durch doppeltes Event-Handling). Ein **echter** Doppelklick erzeugt legitim zwei Fußnoten; geprüft wird nur, dass **ein** Klick nie zwei Aufrufe erzeugt (Code-Plan 5.2) |
+| 15 | `clicking a reference scrolls the corresponding footnote item into view (Anforderung 2.8, optional aber laut Code-Plan umgesetzt)` | Fußnote am Dokumentanfang einfügen; genug Absätze tippen, damit der Fußnotenbereich weit außerhalb des Viewports liegt; ans Dokumentende scrollen; `footnoteRefs(page).first().click()` | Nach dem Klick: `await expect(footnoteItems(page).first()).toBeInViewport()` (auto-retrying, wartet die `scrollIntoView({behavior:'smooth'})`-Animation aus Code-Plan 2.2 ab; **kein** manuelles Sleep nötig) |
 | 15b | `clicking the backlink button in the footnote item scrolls back to the reference (Anforderung 2.8, Rückwärtsnavigation)` | Fortsetzung von 15, Klick auf `.footnote-item-backlink` | `footnoteRefs(page).first()` liegt im Viewport |
-| — (Grenzfall 3.10) | `inserting a footnote inside a list item does not break the list` | Aufzählungsliste erzeugen, Text „ab“ tippen, Cursor zwischen a/b, Fußnote einfügen | Liste bleibt **ein** `<ul>` (nicht gesplittet); Referenzmarke liegt innerhalb desselben `<li>`; `footnotes_area` bleibt weiterhin als eigener Bereich außerhalb der Liste am Dokumentende sichtbar |
-| — (Grenzfall 3.3) | `inserting a footnote at the very start/end of the document` | Neues leeres Dokument, sofort Fußnote einfügen (Dokumentanfang); separat: Text tippen, `End`, Fußnote einfügen (Dokumentende) | Kein Absturz; Cursor kann in beiden Fällen weiterhin vor/nach der Referenz positioniert und getippt werden |
-| — (Grenzfall 3.1) | `inserting while text is selected replaces the selection (Anforderung 2.1)` | Text „Markiert“ tippen, `ControlOrMeta+a` (nur den Absatztext, nicht das ganze Dokument, falls das Dokument mehr enthält), Fußnote einfügen | Ursprünglicher Text „Markiert“ ist **weg**, Referenzmarke steht an dessen Stelle — bestätigt gewolltes Ersetzungsverhalten |
-| — (Grenzfall 3.11) | `pasting a table into the footnote area does not crash the footnote editor` | Tabelle im Hauptdokument erzeugen, komplett markieren, kopieren (`ControlOrMeta+c`), in den Fußnotentext-Bereich klicken, einfügen (`ControlOrMeta+v`) | Keine Konsolenfehler (`page.on('console', …)`-Listener sammelt keine `'error'`-Einträge), Seite bleibt bedienbar (z. B. weiterer Text kann danach getippt werden) — **kein** Blocker, ob die Tabelle korrekt dargestellt wird, nur Absturzfreiheit ist Pflicht |
+| — (Grenzfall 3.10) | `inserting a footnote inside a list item does not break the list` | Aufzählungsliste erzeugen (`page.getByTitle('Aufzählung').click()`); „ab“ tippen; Cursor zwischen a/b (`ArrowLeft {delay:20}`, **`settle`** R2); Fußnote einfügen | Liste bleibt **ein** `<ul>` (`await expect(page.locator('.ProseMirror ul')).toHaveCount(1)`); Referenzmarke liegt im selben `<li>`; `footnotes_area` bleibt als eigener Bereich außerhalb der Liste am Dokumentende sichtbar |
+| — (Grenzfall 3.3) | `inserting a footnote at the very start/end of the document` | `watchForConsoleErrors` (R7); neues leeres Dokument, Klick, `settle`, sofort Fußnote einfügen (Anfang); separat: Text tippen, `End`, **`settle`** (R1), Fußnote einfügen (Ende) | `assertNoConsoleErrors()`; Cursor kann in beiden Fällen weiterhin vor/nach der Referenz positioniert werden und Tippen landet an erwarteter Stelle |
+| — (Grenzfall 3.1) | `inserting while text is selected replaces the selection (Anforderung 2.1)` | Klick, `settle`, „Markiert“ tippen, `ControlOrMeta+a` (keine Tastatureingabe danach → kein Sync-Race), Fußnote einfügen | Ursprünglicher Text „Markiert“ ist **weg**, Referenzmarke steht an dessen Stelle — bestätigt gewolltes Ersetzungsverhalten (`await expect(page.locator('.ProseMirror')).not.toContainText('Markiert')`, `await expect(footnoteRefs(page)).toHaveCount(1)`) |
+| — (Grenzfall 3.11) | `pasting a table into the footnote area does not crash the footnote editor` | **R6:** `test.skip(browserName !== 'chromium', …)` + `grantPermissions(['clipboard-read','clipboard-write'])`; **R7:** `watchForConsoleErrors`. Tabelle im Hauptdokument erzeugen, `ControlOrMeta+a`, `ControlOrMeta+c`; in `.footnote-item-body` klicken, **`settle`** (R1), `ControlOrMeta+v` | `assertNoConsoleErrors()` (R7); Seite bleibt bedienbar (weiterer Text via `typeIntoFootnoteBody` danach möglich) — **kein** Blocker, ob die Tabelle korrekt dargestellt wird, nur Absturzfreiheit ist Pflicht |
 | — (Grenzfall 3.17, defensiv) | `no footnote button appears inside a not-yet-existing header/footer context` | Da `kopfzeile-bearbeiten`/`fusszeile-bearbeiten` laut Anforderung selbst nicht existieren, ist dieser Testfall aktuell **nicht ausführbar** — als „nicht anwendbar, bis Fußzeilen-Feature existiert“ im Abnahmeprotokoll (Abschnitt D) zu vermerken, nicht stillschweigend auszulassen |
 
 ### B.2 Neue Datei `tests/e2e/footnote-roundtrip.spec.ts` — Rundreise DOCX/ODT/Cross-Format über echten Upload/Export
 
 Deckt Anforderung Abschnitt 4 (komplett) und Abschnitt 5, Testfälle 9–13.
 
+**Hinweis zu allen B.2-Beispielen:** Tippen in den Fußnotentext läuft über `typeIntoFootnoteBody()` (R1),
+der Re-Import über `backToFormats()` statt `page.reload()` (R5). Beide Helper sind in B.0 definiert; die
+Beispiele unten sind bereits so geschrieben.
+
 ```ts
 test('DOCX: a footnote inserted via toolbar round-trips through export/re-import with an independent parser (4.1.1/4.1.2)', async ({ page }) => {
   await openNewDocxEditor(page)
   await page.locator('.ProseMirror').click()
+  await settle(page) // R1
   await page.keyboard.type('Text vor der Marke.')
   await insertFootnoteViaToolbar(page)
-  await footnoteItems(page).first().locator('.footnote-item-body').click()
-  await page.keyboard.type('Testfußnote eins')
+  await typeIntoFootnoteBody(page, 0, 'Testfußnote eins') // R1: Klick→settle→type gekapselt
 
   const downloadPromise = page.waitForEvent('download')
   await page.getByRole('button', { name: 'Exportieren' }).click()
@@ -357,7 +511,7 @@ test('DOCX: a footnote inserted via toolbar round-trips through export/re-import
   const fs = await import('node:fs/promises')
   const buffer = await fs.readFile((await download.path())!)
 
-  // Unabhängiger Parser: JSZip + rohes XML
+  // Unabhängiger Parser: JSZip + rohes XML (KEIN Aufruf der eigenen reader.ts)
   const zip = await JSZip.loadAsync(buffer)
   const documentXml = await zip.file('word/document.xml')!.async('text')
   const footnotesXml = await zip.file('word/footnotes.xml')!.async('text')
@@ -367,26 +521,26 @@ test('DOCX: a footnote inserted via toolbar round-trips through export/re-import
   expect(idMatch).toBeTruthy()
   expect(footnotesXml).toMatch(new RegExp(`<w:footnote w:id="${idMatch![1]}">[\\s\\S]*Testfußnote eins`))
 
-  // Re-Import (4.1.2)
-  await page.reload()
-  await page.getByRole('button', { name: /verstanden/i }).click()
+  // Re-Import (4.1.2) über den In-App-Weg, NICHT page.reload() (R5 — beforeunload-Guard)
+  await backToFormats(page)
   const input = docxCard(page).locator('input[type="file"]')
   await input.setInputFiles({ name: 'export.docx', mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', buffer })
-  await expect(footnoteRefs(page)).toHaveText(['1'])
+  await expect(footnoteRefs(page)).toHaveText(['1']) // R4: auto-retrying
   await expect(footnoteItems(page).first()).toContainText('Testfußnote eins')
 })
 
 test('DOCX: two footnotes preserve order and text after export/re-import (4.1.3)', async ({ page }) => {
   await openNewDocxEditor(page)
   await page.locator('.ProseMirror').click()
+  await settle(page) // R1
   await insertFootnoteViaToolbar(page)
-  await footnoteItems(page).first().locator('.footnote-item-body').click()
-  await page.keyboard.type('Erste')
+  await typeIntoFootnoteBody(page, 0, 'Erste')
   await page.locator('.ProseMirror').click()
+  await settle(page) // R1
   await page.keyboard.press('ControlOrMeta+End')
+  await settle(page) // R1: Cursor-Sync vor dem zweiten Einfügen
   await insertFootnoteViaToolbar(page)
-  await footnoteItems(page).nth(1).locator('.footnote-item-body').click()
-  await page.keyboard.type('Zweite')
+  await typeIntoFootnoteBody(page, 1, 'Zweite')
 
   const downloadPromise = page.waitForEvent('download')
   await page.getByRole('button', { name: 'Exportieren' }).click()
@@ -397,11 +551,10 @@ test('DOCX: two footnotes preserve order and text after export/re-import (4.1.3)
   expect(order[0]).toBeGreaterThan(-1)
   expect(order[1]).toBeGreaterThan(order[0])
 
-  await page.reload()
-  await page.getByRole('button', { name: /verstanden/i }).click()
+  await backToFormats(page) // R5
   const input = docxCard(page).locator('input[type="file"]')
   await input.setInputFiles({ name: 'zwei.docx', mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', buffer })
-  await expect(footnoteRefs(page)).toHaveText(['1', '2'])
+  await expect(footnoteRefs(page)).toHaveText(['1', '2']) // R4
   await expect(footnoteItems(page).nth(0)).toContainText('Erste')
   await expect(footnoteItems(page).nth(1)).toContainText('Zweite')
 })
@@ -421,8 +574,7 @@ test('DOCX: a real foreign file with footnotes (footnotes.docx) round-trips with
   await page.getByRole('button', { name: 'Exportieren' }).click()
   const exportedBuffer = await fs.readFile((await (await downloadPromise).path())!)
 
-  await page.reload()
-  await page.getByRole('button', { name: /verstanden/i }).click()
+  await backToFormats(page) // R5
   const input2 = docxCard(page).locator('input[type="file"]')
   await input2.setInputFiles({ name: 're-import.docx', mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', buffer: exportedBuffer })
   await expect(footnoteRefs(page)).toHaveCount(1)
@@ -437,9 +589,9 @@ test('DOCX: a footnote reference inside a table cell survives real upload/export
 test('ODT: a footnote inserted via toolbar round-trips through export/re-import (4.2.1/4.2.2)', async ({ page }) => {
   await openNewOdtEditor(page)
   await page.locator('.ProseMirror').click()
+  await settle(page) // R1
   await insertFootnoteViaToolbar(page)
-  await footnoteItems(page).first().locator('.footnote-item-body').click()
-  await page.keyboard.type('Testfußnote eins')
+  await typeIntoFootnoteBody(page, 0, 'Testfußnote eins') // R1
 
   const downloadPromise = page.waitForEvent('download')
   await page.getByRole('button', { name: 'Exportieren' }).click()
@@ -451,11 +603,10 @@ test('ODT: a footnote inserted via toolbar round-trips through export/re-import 
   expect(contentXml).toMatch(/<text:note-citation>1<\/text:note-citation>/)
   expect(contentXml).toContain('Testfußnote eins')
 
-  await page.reload()
-  await page.getByRole('button', { name: /verstanden/i }).click()
+  await backToFormats(page) // R5
   const input = odtCard(page).locator('input[type="file"]')
   await input.setInputFiles({ name: 'export.odt', mimeType: 'application/vnd.oasis.opendocument.text', buffer })
-  await expect(footnoteRefs(page)).toHaveText(['1'])
+  await expect(footnoteRefs(page)).toHaveText(['1']) // R4
   await expect(footnoteItems(page).first()).toContainText('Testfußnote eins')
 })
 
@@ -477,8 +628,7 @@ test('ODT: a real foreign file with a footnote AND an endnote (footnote.odt) kee
   const contentXml = await zip.file('content.xml')!.async('text')
   expect((contentXml.match(/text:note-class="footnote"/g) ?? []).length).toBe(1)
 
-  await page.reload()
-  await page.getByRole('button', { name: /verstanden/i }).click()
+  await backToFormats(page) // R5
   const input2 = odtCard(page).locator('input[type="file"]')
   await input2.setInputFiles({ name: 're-import.odt', mimeType: 'application/vnd.oasis.opendocument.text', buffer: exportedBuffer })
   await expect(footnoteRefs(page)).toHaveCount(1)
@@ -509,12 +659,17 @@ test('Cross-Format double round trip: ODT -> DOCX -> ODT keeps footnote text (4.
 test('deleting the whole paragraph containing a reference removes the orphaned footnote after re-import (Testfall 13, Grenzfall 3.4)', async ({ page }) => {
   await openNewDocxEditor(page)
   await page.locator('.ProseMirror').click()
+  await settle(page) // R1
   await page.keyboard.type('Zu löschender Satz')
   await insertFootnoteViaToolbar(page)
   await page.keyboard.press('Home')
+  await settle(page) // R1: Selektions-Sync nach der Caret-Bewegung
+  // Home + Shift+End selektiert den ganzen Absatz inkl. der Marke (nicht ControlOrMeta+a:
+  // das wäre dokumentweit und würde auch den footnotes_area mitselektieren).
   await page.keyboard.down('Shift')
-  await page.keyboard.press('End')
+  await page.keyboard.press('End', { delay: 20 }) // R2
   await page.keyboard.up('Shift')
+  await settle(page) // R2
   await page.keyboard.press('Delete')
   await expect(footnoteRefs(page)).toHaveCount(0)
 
@@ -621,6 +776,16 @@ Zusätzlich, **zwingend** vor Status-Änderung „fehlt“ → „verifiziert“
   Testfall 2 real nachgewiesen werden, jsdom-Unit-Tests reichen laut Code-Plan selbst ausdrücklich nicht.
 - Bestätigung, dass **keine** bestehende Baseline-Testdatei (A.1) durch die Schema-/Keymap-Änderungen
   beschädigt wurde (Diff-Review der Testergebnisse vor/nach Umsetzung, nicht nur „ist grün“).
+- **Determinismus-Nachweis (Abschnitt 1.1):** Beide neuen E2E-Specs (`footnote-insert.spec.ts`,
+  `footnote-roundtrip.spec.ts`) müssen **stabil** über alle drei `playwright.config.ts`-Projekte
+  (Desktop Chrome, Mobile, Tablet) laufen — nachgewiesen durch mindestens einen Lauf mit
+  `--repeat-each=5` ohne Flake (analog zur Vorgeschichte der Mobile-Selection-Sync-Flakes). Jeder
+  gemäß R8 dokumentiert übersprungene Fall (z. B. CI-only-Mobile) wird hier namentlich mit Begründung
+  protokolliert; ein Skip **ohne** Protokolleintrag gilt als Fehler des Abnahmelaufs, nicht als bestanden.
+- Bestätigung, dass **kein** neuer E2E-Test die verbotenen Anti-Muster enthält: kein `page.reload()` für
+  Re-Import (R5), kein Tippen direkt nach einem caret-verschiebenden Klick ohne `settle` (R1), kein
+  Einmal-`textContent()` für die Anzeigenummer (R4). Kurzer `grep`-Review der beiden neuen Specs auf
+  `page.reload(` und `.textContent(` vor Abnahme.
 
 ---
 

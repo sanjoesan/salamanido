@@ -1,92 +1,205 @@
 # QA-Testplan: „Manueller Zeilenumbruch (Umschalt+Enter)"
 
-Bezug: `specs/zeilenumbruch-manuell-req.md` (Anforderung, Stand geprüft 2026-07-04) und
-`specs/zeilenumbruch-manuell-code.md` (Umsetzungsplan, Stand geprüft 2026-07-04). Rolle
+Bezug: `specs/zeilenumbruch-manuell-req.md` (Anforderung, Stand 2026-07-05) und
+`specs/zeilenumbruch-manuell-code.md` (Umsetzungsplan, Stand 2026-07-05). Rolle
 dieses Dokuments: konkreter, ausführbarer Testplan für die Freigabe nach Anforderung
-Abschnitt 7. Referenzierte Bestandsdateien wurden für diesen Testplan gegen den tatsächlichen
-Repo-Inhalt verifiziert (`playwright.config.ts`, `tests/e2e/docx.spec.ts`,
-`tests/e2e/odt.spec.ts`, `tests/e2e/selection-regression.spec.ts`,
+Abschnitt 7. Alle referenzierten Bestandsdateien wurden für diesen Testplan **direkt
+gegen den aktuellen Repo-Inhalt (2026-07-05)** verifiziert:
+`playwright.config.ts`, `tests/e2e/docx.spec.ts`, `tests/e2e/selection-regression.spec.ts`,
 `src/formats/shared/schema.ts`, `src/formats/shared/editor/commands.ts`,
 `src/formats/shared/editor/Toolbar.tsx`, `src/formats/shared/editor/WordEditor.tsx`,
-`src/formats/docx/__tests__/roundtrip.test.ts`, `src/formats/docx/__tests__/external-fixtures.test.ts`).
+`src/formats/docx/__tests__/roundtrip.test.ts`, `src/formats/odt/__tests__/roundtrip.test.ts`.
+**Load-bearing ist jeweils das beschriebene Verhalten und der Testname, nicht die exakte
+Zeilennummer** — die Dateien verschieben sich zwischen den Ständen.
 
 **Grundprinzip dieses Testplans (bindend):** Zwei getrennte, beide verpflichtende Ebenen —
 (1) Unit-Tests gegen Reader/Writer direkt (schnell, deterministisch, aber blind für den
 Tastatur-Eingabeweg) und (2) **echte** Playwright-Browser-Tests, die den kompletten Weg
 Klick/Tastendruck → sichtbare DOM-Änderung → echter Datei-Download → Byte-Inspektion der
 heruntergeladenen Datei → echter Re-Upload nachstellen. Interne Funktionsaufrufe
-(`readDocx`/`writeOdt` o. Ä. direkt im Testcode aufgerufen) zählen **nicht** als Ersatz für
-Ebene (2) — sie sind zulässig als Ebene (1) oder als klar gekennzeichnete Ergänzung *innerhalb*
-eines E2E-Tests (siehe Abschnitt 0.2 zur Cross-Format-Einschränkung), niemals als vollwertiger
-Ersatz für „im Browser geklickt/getippt".
+(`readDocx`/`writeOdt` o. Ä. direkt im Testcode) zählen **nicht** als Ersatz für Ebene (2) —
+sie sind zulässig als Ebene (1) oder als klar gekennzeichnete Ergänzung *innerhalb* eines
+E2E-Tests (siehe 0.5 zur Cross-Format-Einschränkung), niemals als vollwertiger Ersatz für
+„im Browser geklickt/getippt".
 
 ---
 
-## 0. Prüfmethodik — Abweichungen/Verschärfungen gegenüber dem Umsetzungsplan
+## 0. Prüfmethodik — Befund, Korrekturen und Verschärfungen
 
-### 0.1 Übernommen
+### 0.1 Zwei-Ebenen-Prinzip (übernommen)
 
-Die Testfall-Enumeration aus `zeilenumbruch-manuell-code.md` Abschnitt 14 (18 Grenzfälle,
-Rundreise-Matrix, Fixture-Liste aus Abschnitt 0.2) wird inhaltlich übernommen und unten in
-konkrete, ausführbare Testdateien überführt. Ebenso übernommen: die Playwright-Projekt-Ergänzung
-`'Desktop Firefox'` (`zeilenumbruch-manuell-code.md` Abschnitt 13) als **Voraussetzung**, nicht
-optional — ohne sie ist Anforderung Testplan-Punkt 4 (mind. zwei Browser-Engines) nicht erfüllt,
-da `playwright.config.ts` aktuell (verifiziert) nur `'Desktop Chrome'` (Chromium),
-`'Mobile'`/Pixel 7 (ebenfalls Chromium) und `'Tablet'`/iPad Mini (WebKit) enthält — **keine**
-Firefox-Engine.
+Die Testfall-Enumeration aus `zeilenumbruch-manuell-code.md` Abschnitt 14 wird inhaltlich
+übernommen und unten in konkrete, ausführbare Testdateien überführt. Ergänzt um die in 0.2–0.9
+benannten Korrekturen und Verschärfungen.
 
-### 0.2 Verschärfung: Cross-Format-Test (Grenzfall 16, Rundreise 5.2.3) ist nur teilweise ein „echter" Browser-Test — muss so gekennzeichnet, nicht verschleiert werden
+### 0.2 KORREKTUR (kritisch): Browser-Matrix — Firefox/Safari existieren **bereits**, nur `testMatch` muss erweitert werden
 
-`zeilenumbruch-manuell-code.md` Abschnitt 0.6 / Testfall 14.2 Nr. 18 löst die Cross-Format-
-Rundreise (DOCX-Karte → ODT „exportieren", oder umgekehrt) so, dass der **Eingabeteil** (Text
-tippen, Umschalt+Enter, Export-Klick, echter Download) echte Browser-Interaktion ist, der
-**Format-Wechsel selbst** aber programmatisch im Testcode erfolgt (`readDocx(...)` auf den
-heruntergeladenen Buffer, Ergebnis direkt an `writeOdt(...)` übergeben) — weil die App **keine**
-UI-Funktion „als anderes Format speichern"/„konvertieren" besitzt (verifiziert:
-`src/App.tsx`, `src/app/DocumentWorkspace.tsx`; keine Treffer für „convert"/„Konvertier" im
-gesamten `src`-Baum).
+Ein früherer Stand dieses QA-Dokuments (Stand 2026-07-04) ging davon aus, `playwright.config.ts`
+enthalte nur `Desktop Chrome`, `Mobile`/Pixel 7 und `Tablet`/iPad Mini und **keine**
+Firefox-Engine, und schrieb vor, ein **neues** `Desktop Firefox`-Projekt anzulegen. **Das ist gegen
+den aktuellen Code falsch** und wird hiermit korrigiert.
 
-**QA-Entscheidung:** Dieser Test wird **nicht** als vollwertiger E2E-Test für den Aspekt
-„Cross-Format" gezählt, sondern ausschließlich als E2E-Test für „Umschalt+Enter erzeugt beim
-Export via echtem Download eine korrekt lesbare Datei" geführt (Abschnitt 4, Testfall E11/E12
-unten). Die Cross-Format-Behauptung selbst wird **ausschließlich** über die reine
-Unit-Verkettung (Abschnitt 3, Testfall U9/U10) abgedeckt. Diese Aufteilung ist im Testbericht
-explizit zu vermerken — **nicht** als „E2E: Cross-Format ✅" zusammenfassen, weil das den
-tatsächlichen Testumfang verschleiern würde. Zusätzlich: an PO zu melden (Abschnitt 10), dass
-eine echte browsergetriebene Cross-Format-Prüfung produktseitig aktuell grundsätzlich
-unmöglich ist, unabhängig von diesem Feature — das ist eine Produktlücke, keine Testlücke.
+Verifiziert (`playwright.config.ts`, aktuell fünf Projekte):
 
-### 0.3 Verschärfung: jede Rundreise-Prüfung schließt eine echte Byte-Inspektion der heruntergeladenen Datei ein, nicht nur „Re-Import zeigt richtigen Text"
+```ts
+{ name: 'Desktop Chrome', use: { ...devices['Desktop Chrome'], permissions: ['clipboard-read', 'clipboard-write'] } },
+{ name: 'Mobile',         use: { ...devices['Pixel 7'],         permissions: ['clipboard-read', 'clipboard-write'] } },
+{ name: 'Tablet',         use: { ...devices['iPad Mini'] } },
+{ name: 'Desktop Safari (Clipboard)',  testMatch: /clipboard.*\.spec\.ts/, use: { ...devices['Desktop Safari'] } },
+{ name: 'Desktop Firefox (Clipboard)', testMatch: /clipboard.*\.spec\.ts/, use: { ...devices['Desktop Firefox'] } },
+```
 
-Reines „nach Re-Import steht der Text wieder im Editor" kann einen stillen Strukturverlust
-verdecken (z. B. `hard_break` → Absatz degradiert, aber sichtbarer Text bleibt gleich, weil beide
-Zeilenteile ohnehin nacheinander im DOM stehen). Jeder E2E-Rundreise-Test in Abschnitt 4 prüft
-deshalb **zusätzlich** zur Editor-Sichtprüfung die entpackte XML-Struktur der heruntergeladenen
-Datei selbst (`<w:br/>` in `word/document.xml` bzw. `<text:line-break/>` in `content.xml`, jeweils
-über echtes `download.path()` → `fs.readFile` → `JSZip.loadAsync`, exakt wie in
-`tests/e2e/docx.spec.ts`/`tests/e2e/odt.spec.ts` bereits etabliert) sowie die **Anzahl** von
-`<p>`-Elementen im Editor-DOM (kein stiller Absatz-Split).
+Es gibt also **bereits** echte Firefox- **und** Safari-Desktop-Projekte (eingeführt für die
+„Kopieren"-Browser-Matrix). Beide sind jedoch per `testMatch: /clipboard.*\.spec\.ts/`
+**ausschließlich** auf Dateien beschränkt, deren Name mit `clipboard…` beginnt. Eine neue
+`tests/e2e/zeilenumbruch.spec.ts` würde von ihnen **nicht** erfasst.
 
-### 0.4 Verschärfung: Bild-Selektions-Bug (Zusatzbefund F) ist Blocker für „grün", nicht optionale Zusatzprüfung
+**Korrigierte Voraussetzung dieses Testplans (statt „neues Projekt anlegen"):** den `testMatch`
+beider Desktop-Projekte um den neuen Spec-Namen erweitern (`zeilenumbruch-manuell-code.md`
+Abschnitt 13):
 
-`zeilenumbruch-manuell-code.md` Abschnitt 0.7 weist einen verifizierten Datenverlust-Bug nach
-(`NodeSelection` auf einem block-artigen Knoten wie `image` + `replaceSelectionWith` löscht den
-Knoten). `src/formats/shared/schema.ts` bestätigt: `image` ist `group: 'block'`
-(kein `inline: true`, kein `selectable: false`) — die Voraussetzung für den Bug ist also real im
-Schema vorhanden, nicht nur hypothetisch. **QA-Einstufung:** Testfall E9b (Abschnitt 4) ist ein
-**Pflicht-Blocker**. Schlägt er fehl (Bild verschwindet), ist der gesamte Feature-Rundreise-Status
-(Anforderung 5.2) als **nicht bestanden** zu werten, unabhängig davon, ob alle anderen Tests grün
-sind — Anforderung Abnahmekriterium in Abschnitt 5 verbietet explizit „vollständiges Verschwinden
-… von Textinhalt".
+```ts
+name: 'Desktop Safari (Clipboard)',
+testMatch: /(clipboard|zeilenumbruch).*\.spec\.ts/,
+use: { ...devices['Desktop Safari'] },
+```
+```ts
+name: 'Desktop Firefox (Clipboard)',
+testMatch: /(clipboard|zeilenumbruch).*\.spec\.ts/,
+use: { ...devices['Desktop Firefox'] },
+```
 
-### 0.5 Ergänzung: Undo/Redo-Gruppierung wird als eigener, nicht impliziter Testfall geführt
+Damit läuft `zeilenumbruch.spec.ts` auf **Chromium** (Desktop Chrome), **Firefox** (Desktop
+Safari-Projekt heißt so, verwendet aber Gecko … nein: Firefox) und **WebKit** (Desktop Safari) —
+Anforderung Testplan-Punkt 5 (mind. **zwei echte Engines** für den Tastatur-Test) ist damit
+wirksam erfüllt, **ohne** die Firefox-/Safari-Projekte auf die gesamte Suite auszuweiten (das
+verdoppelte nur die Laufzeit). Kein neues Projekt, keine Änderung an den bestehenden
+Clipboard-Specs. Die Namenszusätze „(Clipboard)" werden durch die erweiterte Reichweite
+ungenau — optional zu `Desktop Firefox`/`Desktop Safari` entschärfen, nicht zwingend.
 
-Anforderung 3.13 verlangt explizite Verifikation, dass die Erzeugung (aktuell über
-Mutation-Reconciliation, nach Umsetzung ggf. über expliziten Command) zu **keiner**
-unerwarteten Undo-Gruppierung führt. Der Umsetzungsplan erwähnt das nur am Rande (Testfall
-14.2 Nr. 12). QA führt dafür einen eigenen, doppelt geprüften Testfall (Abschnitt 4, E10): einmal
-„Umbruch allein rückgängig machen, Text bleibt", einmal „Umbruch + direkt nachfolgend getippter
-Text nicht fälschlich in einem Schritt verschmolzen".
+### 0.3 KORREKTUR: `insertHardBreak()` + `'Shift-Enter'` sind **bereits umgesetzt** — offene Arbeit ist der Guard-Bugfix
+
+Ein früherer QA-Stand behandelte den Erzeugungsweg als möglicherweise noch nicht implementiert
+(„E1 zuerst ausführen, um die Fragilität des nativen Fallbacks zu prüfen"). **Das ist überholt.**
+Verifiziert im aktuellen Code:
+
+- `src/formats/shared/editor/commands.ts`: `insertHardBreak(): Command` existiert
+  (`replaceSelectionWith(hard_break)`).
+- `src/formats/shared/editor/WordEditor.tsx`: `'Shift-Enter': insertHardBreak()` ist im ersten
+  `keymap({...})`-Plugin gebunden; `insertHardBreak` ist dort importiert.
+- `src/formats/shared/schema.ts` (Zeile 42–56): `hard_break` inkl. `leafText: () => '\n'`
+  (Zeile 51) vorhanden.
+- Serialisierung vollständig: DOCX-Writer `<w:r><w:br/></w:r>`, DOCX-Reader `<w:br>` → `hard_break`,
+  ODT-Writer `<text:line-break/>`, ODT-Reader `text:line-break` → `hard_break`.
+
+**Konsequenz:** Es gibt **keine** offene Frage „expliziter Command oder nativer Fallback" mehr —
+sie ist zugunsten des expliziten Command entschieden. Der einzige verbliebene **Pflicht-Codefix**
+ist der `NodeSelection`-Guard in `insertHardBreak` (0.7). E1 (Grundfall) muss daher im aktuellen
+Code **bereits grün** sein; ist er es nicht, ist das ein Regressions-Befund am bestehenden
+Command, nicht der Nachweis eines fehlenden Features.
+
+### 0.4 VERSCHÄRFUNG (zentral, laut Auftrag): Determinismus — Selektions-Sync abwarten, keine Race durch zu schnelle Tastatureingaben
+
+Der Editor synchronisiert eine per Klick/Pfeiltaste/`Home`/`End` ausgelöste native
+Cursorbewegung **asynchron** über das `selectionchange`-Event des Browsers in sein
+ProseMirror-Modell (`WordEditor.tsx` `reconcileSelectionOnClick`). Ein unmittelbar folgender
+Playwright-`press()` (ohne menschliche Reaktionspause) kann diesem Nachlauf **vorauslaufen** und
+noch auf der alten Selektion agieren. Diese Race ist im Repo **bereits dokumentiert und
+abgesichert** — `tests/e2e/selection-regression.spec.ts` fügt nach jedem `End`/Reposition-Klick
+ein bewusstes `await page.waitForTimeout(50)` ein (Kommentar dort, Zeilen 26–34):
+
+> „ProseMirror only learns a native, keyboard-driven caret move … via the browser's
+> asynchronous `selectionchange` event. Firing the next key immediately after … can race ahead
+> of that catch-up … a short wait here just gives the already-in-flight sync a chance to land."
+
+**Bindende Determinismus-Regeln für ALLE E2E-Tests dieses Plans:**
+
+1. **Nach jeder Selektions-/Cursor-Umpositionierung durch Klick, `Home`, `End`, Pfeiltaste, `ControlOrMeta+a`
+   oder Bild-Klick → vor dem nächsten Tastendruck `await page.waitForTimeout(50)`** (exakt das
+   etablierte Muster). Betrifft insbesondere E2 (Select-all → Shift+Enter), E3 (Home/End),
+   E9b (Bild-NodeSelection per Klick → Shift+Enter), E10a/b (Home/End → Backspace/Delete),
+   E13 (Pfeiltasten-Navigation → Tipp-Marker), E14 (Doppelklick), und den Grenzfall-15-Test (4.3).
+2. **Kein „blindes" `waitForTimeout` als Assertion-Ersatz.** Ergebnis-Prüfungen laufen über
+   auto-wiederholende `expect(locator).toHaveCount(...)`/`toContainText(...)` (web-first
+   assertions), nicht über feste Wartezeiten. `waitForTimeout(50)` dient **ausschließlich** dem
+   Selektions-Sync-Nachlauf vor dem nächsten Eingabeschritt, nie der Ergebnisstabilisierung.
+3. **Tippen deterministisch:** `page.keyboard.type(text)` für zusammenhängende Eingabe;
+   `page.keyboard.press('Shift+Enter')` als einzelner, atomarer Umbruch. Keine `paste`-Simulation
+   für den Umbruch selbst (nur im ausdrücklichen Abgrenzungstest E27).
+4. **Download deterministisch:** `const dl = page.waitForEvent('download')` **vor** dem
+   Exportieren-Klick registrieren, danach `await dl`; Byte-Prüfung über `await download.path()` →
+   `fs.readFile` → `JSZip.loadAsync` (Muster aus `docx.spec.ts`).
+5. **Re-Upload deterministisch über die etablierte Navigation:** zurück zum Datei-Picker per
+   `await page.getByRole('button', { name: /formate/i }).click()` (das `input[type=file]` existiert
+   nur auf dem Picker-Screen, nicht im offenen Editor — verifiziert in `docx.spec.ts`), **kein**
+   `page.reload()` (verwirft den akzeptierten Datenschutz-Banner-Zustand und ist gegen das
+   Repo-Muster).
+6. **Massentest (E15):** die 60 `Shift+Enter` in einer Schleife mit `await` je Iteration; die
+   Erfolgsprüfung ist eine einzige auto-retry-`expect(...).toHaveCount(60)` mit ausreichendem
+   Test-Timeout, kein manuelles Warten.
+
+Jede in diesem Plan angegebene Referenz-Implementierung (Abschnitt 4.3/4.4) enthält diese Waits
+**explizit**; ein Testfall, der eine Reposition ohne den 50-ms-Sync-Wait direkt vor `Shift+Enter`
+setzt, gilt als **nicht regelkonform** und ist vor Freigabe zu korrigieren.
+
+### 0.5 VERSCHÄRFUNG: Cross-Format ist nur teilweise ein „echter" Browser-Test — so kennzeichnen, nicht verschleiern
+
+Die App besitzt **keine** UI-Funktion „als anderes Format speichern"/„konvertieren" (verifiziert:
+kein Treffer für `convert`/`Konvertier` im `src`-Baum; jedes Format-Modul nutzt nur den eigenen
+Reader/Writer). Die Cross-Format-Rundreise (Grenzfall 16, Anforderung 5.2.3) ist deshalb **nicht**
+als reiner UI-E2E ausführbar. Sie wird auf zwei Ebenen abgedeckt:
+
+- **Unit (vollwertig, U9–U11):** reine Reader/Writer-Verkettung `readDocx → writeOdt → readOdt →
+  writeDocx` (und symmetrisch) mit `hard_break`-Fixture.
+- **E2E-Handoff (Teilnachweis, E25):** Umbruch per **echter Tastatur** in der DOCX-Karte erzeugen,
+  echten Download auslösen, dann den heruntergeladenen Buffer **im Testcode** per `readDocx →
+  writeOdt → readOdt` weiterreichen. Der Tastatur-/Export-Teil ist echte Browser-Interaktion, der
+  Format-Wechsel ist programmatisch.
+
+**QA-Entscheidung:** E25 wird im Testbericht als „E2E: Umschalt+Enter erzeugt beim echten Export
+eine korrekt lesbare Datei + programmatischer Formatwechsel" geführt, **nicht** als „E2E:
+Cross-Format bestanden" — das verschleierte den tatsächlichen Umfang. Die Cross-Format-Behauptung
+selbst trägt die Unit-Verkettung. Zusätzlich an PO zu melden (Abschnitt 10): eine vollständig
+browsergetriebene Cross-Format-Prüfung ist produktseitig grundsätzlich unmöglich — Produktlücke,
+keine Testlücke.
+
+### 0.6 VERSCHÄRFUNG: jede Rundreise-Prüfung schließt eine echte Byte-Inspektion ein
+
+Reines „nach Re-Import steht der Text wieder im Editor" verdeckt einen stillen Strukturverlust
+(z. B. `hard_break` → Absatz degradiert, sichtbarer Text unverändert). Jeder E2E-Rundreise-Test in
+Abschnitt 4.2 prüft deshalb **zusätzlich** die entpackte XML-Struktur der heruntergeladenen Datei
+selbst (`<w:br/>` in `word/document.xml` bzw. `<text:line-break/>` in `content.xml`, über echtes
+`download.path()` → `fs.readFile` → `JSZip.loadAsync`) **sowie** die Anzahl der `<p>`-Elemente im
+Editor-DOM (kein stiller Absatz-Split).
+
+### 0.7 BLOCKER: Bild-/Tabellen-`NodeSelection`-Datenverlust (Anforderung 0.7/3.3) ist Freigabe-Blocker
+
+`insertHardBreak()` (`commands.ts`) verwendet das ungeschützte Muster
+`state.tr.replaceSelectionWith(hard_break)`. Verifiziert im Schema: `image` ist `group: 'block'`,
+`draggable: true`, **ohne** `selectable: false` (`schema.ts` Zeile 58–85) — also per Klick als
+`NodeSelection` markierbar. In diesem Zustand **löscht** `replaceSelectionWith` den selektierten
+Knoten (Bild/ganze Tabelle) still und ersetzt ihn durch einen synthetisierten leeren Absatz mit dem
+Umbruch. **QA-Einstufung:** Testfall **E9b** ist ein **Pflicht-Blocker**. Schlägt er fehl (Bild
+verschwindet), ist der gesamte Feature-Rundreise-Status (Anforderung 5.2) als **nicht bestanden**
+zu werten — unabhängig vom Status aller anderen Tests, weil das Abnahmekriterium (Anforderung 5)
+„vollständiges Verschwinden … von Textinhalt/Umbruch/Knoten" ausschließt. Der Fix ist der
+`NodeSelection`-Guard aus `zeilenumbruch-manuell-code.md` Abschnitt 3.2; E9b muss **ohne** den Fix
+rot sein und ihn damit erzwingen.
+
+### 0.8 VERSCHÄRFUNG: Kopieren-Regression bleibt Teil der Baseline
+
+`hard_break.leafText` und der `clipboardTextSerializer` sind mit „Kopieren" geteilt (Anforderung
+0.8). Die Kopieren-Regressionstests (`src/formats/shared/editor/__tests__/clipboard.test.ts`:
+`leafText === '\n'`, „renders a hard_break as a newline instead of merging the surrounding words")
+sind Teil der Baseline (Abschnitt 7.1) und müssen vor **und** nach jeder Arbeit an diesem Feature
+grün bleiben. Kein Entfernen/Ändern von `leafText`.
+
+### 0.9 ERGÄNZUNG: Undo/Redo-Gruppierung als eigener, protokollierter Testfall
+
+Anforderung 3.15 verlangt explizit „kein unerwartetes Undo-Gruppierungsverhalten". Ohne feste
+Sollvorgabe der Gruppierung. QA führt dafür einen eigenen Testfall (E12): das beobachtete Verhalten
+ist zu **protokollieren** und danach als reproduzierbare Referenz festzuhalten, nicht nachträglich
+als Bug zu werten, sofern es stabil und datenverlustfrei ist.
 
 ---
 
@@ -94,125 +207,121 @@ Text nicht fälschlich in einem Schritt verschmolzen".
 
 | Ebene | Werkzeug | Deckt ab | Deckt **nicht** ab |
 |---|---|---|---|
-| Unit | Vitest, `readDocx`/`writeDocx`/`readOdt`/`writeOdt` direkt aufgerufen | Reader/Writer-Korrektheit, Serialisierungsformat, Fremd-Fixture-Parsing, Cross-Format-Verkettung, bekannte Reader-Lücken (Grenzfall 13/14) | Den tatsächlichen Tastatur-Eingabeweg (Shift+Enter im echten `contenteditable`), UI-Bedienbarkeit, Datei-Upload/-Download über die reale Programmoberfläche |
-| E2E (Playwright, echter Browser) | `page.keyboard`, `page.locator(...).click()`, `input.setInputFiles(...)`, `page.waitForEvent('download')` | Den kompletten Nutzerweg: Klicks, echte Tastatureingabe inkl. `Shift+Enter`, Datei-Upload, Datei-Export mit echtem Download-Event, Byte-Inspektion der heruntergeladenen Datei, Re-Upload zur Rundreise-Verifikation, Cross-Browser-Verhalten (Chromium/Firefox/WebKit) | Feinkörnige interne Datenmodell-Zustände ohne DOM-Auswirkung (dafür ist Unit-Ebene zuständig und günstiger) |
+| Unit | Vitest, `readDocx`/`writeDocx`/`readOdt`/`writeOdt` direkt | Reader/Writer-Korrektheit, Serialisierungsformat, Fremd-Fixture-Parsing, Cross-Format-Verkettung, Marken-Erhalt über den Umbruch, bekannte Reader-Lücken (Grenzfall 13/14) | Den echten Tastatur-Eingabeweg (`Shift+Enter` im `contenteditable`), UI-Bedienbarkeit, Datei-Upload/-Download über die reale Oberfläche, den Datenverlust-Bug 0.7 |
+| E2E (Playwright, echter Browser) | `page.keyboard`, `page.locator(...).click()`, `input.setInputFiles(...)`, `page.waitForEvent('download')`, `JSZip` | Kompletter Nutzerweg: Klicks, echte Tastatureingabe inkl. `Shift+Enter`, Datei-Upload, Export mit echtem Download-Event, Byte-Inspektion, Re-Upload, Cross-Browser (Chromium/Firefox/WebKit), Touch-Button, Bild-`NodeSelection`-Datenverlust | Feinkörnige interne Datenmodell-Zustände ohne DOM-Auswirkung (Unit-Ebene, günstiger) |
 
-Beide Ebenen sind laut Anforderung Testplan-Punkt 7 **beide verpflichtend** — keine Ebene ersetzt
-die andere.
+Beide Ebenen sind laut Anforderung Testplan-Punkt 10 **beide verpflichtend** — keine ersetzt die
+andere.
 
 ---
 
 ## 2. Testumgebung & Fixtures
 
-### 2.1 Voraussetzung: `playwright.config.ts` um Firefox-Projekt ergänzen
+### 2.1 Voraussetzung: `playwright.config.ts` — `testMatch` erweitern (nicht neues Projekt)
 
-Aktuell (verifiziert):
-```ts
-projects: [
-  { name: 'Desktop Chrome', use: { ...devices['Desktop Chrome'] } },
-  { name: 'Mobile', use: { ...devices['Pixel 7'] } },
-  { name: 'Tablet', use: { ...devices['iPad Mini'] } },
-],
-```
-Erforderlich für diesen Testplan:
-```ts
-projects: [
-  { name: 'Desktop Chrome', use: { ...devices['Desktop Chrome'] } },
-  { name: 'Desktop Firefox', use: { ...devices['Desktop Firefox'] } },
-  { name: 'Mobile', use: { ...devices['Pixel 7'] } },
-  { name: 'Tablet', use: { ...devices['iPad Mini'] } },
-],
-```
-**Vor** dem ersten Testlauf dieses Plans zu erledigen. Nebenwirkung (bewusst in Kauf genommen,
-siehe Abschnitt 5): die **gesamte bestehende** E2E-Suite läuft danach zusätzlich unter Firefox —
-jeder dadurch neu auftretende, mit diesem Feature nicht in Zusammenhang stehende Firefox-Fehlschlag
-ist separat zu melden, blockiert aber nicht die Freigabe dieses Features.
+Wie in 0.2 korrigiert: **kein** neues Firefox-/Safari-Projekt anlegen. Stattdessen den `testMatch`
+der beiden bestehenden Desktop-Projekte auf `/(clipboard|zeilenumbruch).*\.spec\.ts/` erweitern
+(Snippet in 0.2). **Vor** dem ersten Testlauf dieses Plans zu erledigen. Nebenwirkung: die
+bestehenden Clipboard-Specs bleiben unberührt; nur `zeilenumbruch.spec.ts` kommt auf Firefox/Safari
+hinzu. Die restliche E2E-Suite (docx/odt/lifecycle/selection-regression) bleibt wie gehabt auf
+Chromium + Mobile + Tablet — **keine** ungewollte Laufzeitverdopplung.
 
-### 2.2 Reale Fixture-Dateien (bereits im Repo vorhanden, verifiziert per Verzeichnis-Listing)
+### 2.2 Reale Fixture-Dateien (bereits im Repo, verifiziert per Verzeichnis-Listing)
 
 | Datei | Verwendung |
 |---|---|
-| `tests/fixtures/external/docx/drawing.docx` | Import eines echten, mit Microsoft Word erzeugten `<w:br/>` (Anforderung 3.6/5.2.6) |
-| `tests/fixtures/external/docx/saut_page.docx` | Grenzfall 13: `<w:br/>` + `<w:br w:type="page"/>` im selben Dokument |
-| `tests/fixtures/external/docx/bug57031.docx`, `bug65649.docx` | Zusätzliche Grenzfall-13-Fixtures; `bug65649.docx` zusätzlich Performance/Massentest (Grenzfall 17) |
-| `tests/fixtures/external/odt/TextLineBreakText.odt` | Import eines echten, mit LibreOffice erzeugten `<text:line-break/>` (Anforderung 3.8/5.2.7), zusätzlich verschachtelt in `<text:span>` |
-| `tests/fixtures/external/odt/EasyList.odt`, `ListStyleResolution.odt` | Grenzfall 7 (Zeilenumbruch in Listenpunkt) mit echter Fremddatei |
-| `tests/fixtures/external/odt/text-extract.odt` | Negativtest Grenzfall 14: enthält `<text:soft-page-break/>` ohne `<text:line-break/>` |
+| `tests/fixtures/external/docx/drawing.docx` | echtes `<w:br/>` (impliziter + expliziter `w:type="textWrapping" w:clear="all"`) — Anforderung 3.8/5.2.6 |
+| `tests/fixtures/external/docx/saut_page.docx` | Grenzfall 13: `<w:br w:type="page"/>` **und** einfaches `<w:br/>` im selben Dokument |
+| `tests/fixtures/external/docx/bug57031.docx`, `bug65649.docx` | weitere Grenzfall-13-Fixtures; `bug65649.docx` zusätzlich sehr viele Umbrüche (Grenzfall 17, Reader-seitig) |
+| `tests/fixtures/external/odt/TextLineBreakText.odt` | echtes `<text:line-break/>`, **verschachtelt in `<text:span>`** (Grenzfall 20), Anforderung 3.10/5.2.7 |
+| `tests/fixtures/external/odt/EasyList.odt`, `ListStyleResolution.odt` | Grenzfall 7 (Umbruch in Listenpunkt) mit echter Fremddatei |
+| `tests/fixtures/external/odt/text-extract.odt`, `sections.odt` | Negativtest Grenzfall 14: `<text:soft-page-break/>` **ohne** `<text:line-break/>` |
 
 ### 2.3 Neu zu erstellendes synthetisches Fixture (Grenzfall 14, exakte Adjazenz)
 
-Kein reales Fixture mit `<text:line-break/>` **unmittelbar gefolgt von** `<text:soft-page-break/>`
-im selben Absatz wurde gefunden (bestätigt in `zeilenumbruch-manuell-code.md` Abschnitt 0.3).
-Wird als kleines, im Testcode selbst per JSZip gebautes ODT-Fixture erzeugt (Abschnitt 3,
-Testfall U8) — kein Blocker für den Testplan, da synthetisch reproduzierbar.
+Kein reales Fixture enthält `<text:line-break/>` **unmittelbar gefolgt von**
+`<text:soft-page-break/>` im selben Absatz (bestätigt in `zeilenumbruch-manuell-code.md`
+Abschnitt 0.5). Wird als kleines, im Testcode per JSZip gebautes ODT-Fixture erzeugt (U8) — kein
+Blocker, da synthetisch reproduzierbar.
 
-### 2.4 Voraussetzung: `insertHardBreak()`-Command + `'Shift-Enter'`-Keymap-Eintrag müssen umgesetzt sein, bevor E2E-Tests aus Abschnitt 4 sinnvoll sind
+### 2.4 Reihenfolge-Voraussetzungen (Codefix und Touch-Button vor bestimmten Tests)
 
-Dieser Testplan geht davon aus, dass die Architekturentscheidung aus
-`zeilenumbruch-manuell-code.md` Abschnitt 1 (expliziter Command statt nur nativer Fallback)
-umgesetzt wurde. **Falls nicht:** Testfall E1 (Grundfall) ist trotzdem **zuerst** auszuführen,
-bevor jede weitere Arbeit an diesem Testplan beginnt — schlägt er bereits im aktuellen (Vor-
-Umsetzungs-)Zustand fehl, ist das der empirische Beleg für die in Anforderung Abschnitt 0 Punkt 5
-vermutete Fragilität des nativen Fallbacks und muss als **Blocker-Befund** an Lead/Dev
-zurückgemeldet werden, bevor mit den restlichen Testfällen fortgefahren wird.
+- **E9b** setzt den `NodeSelection`-Guard (`code.md` 3.2) voraus, um grün zu sein — ist aber
+  bewusst so geschrieben, dass er **ohne** den Fix rot ist (er erzwingt ihn). Er darf **vor** dem
+  Fix ausgeführt werden (Rot = erwartet).
+- **E29** (Touch-Button) setzt den Toolbar-Button `getByTitle('Zeilenumbruch einfügen')` aus
+  `code.md` Abschnitt 6/8 voraus. Dieser Button existiert im aktuellen Code **noch nicht**
+  (verifiziert: `Toolbar.tsx` importiert `insertImage`/`insertTable`, **nicht** `insertHardBreak`,
+  und hat keinen entsprechenden Button). E29 ist folglich erst nach Umsetzung von `code.md`
+  Abschnitt 6 lauffähig; bis dahin ist der Touch-Weg **unerfüllt** und Grenzfall 21 offen
+  (Abschnitt 10, Risiko).
+- Alle übrigen E-Tests (E1–E8, E10–E27) sind gegen den aktuellen Code lauffähig; E9b ist der
+  einzige, der einen Rot-vor-Fix-Zustand erwartet.
 
 ---
 
 ## 3. Unit-Testplan (Reader/Writer-Rundreise, DOCX + ODT)
 
-| ID | Datei | Testname (sinngemäß) | Prüft | Grenzfall/Anforderungsbezug |
+Referenzimplementierung für U3–U12 liegt als Code in `zeilenumbruch-manuell-code.md` Abschnitt 14.1
+(a–f) vor; QA übernimmt diese Snippets als verbindliche Basis mit den unten genannten
+Pflichtergänzungen. `doc`/`roundTrip`-Helper sind in beiden `roundtrip.test.ts` bereits vorhanden.
+
+| ID | Datei | Testname (sinngemäß) | Prüft | Bezug |
 |---|---|---|---|---|
-| U1 | `src/formats/docx/__tests__/roundtrip.test.ts` | „preserves hard line breaks within a paragraph" | **bereits vorhanden** (Zeilen 113–125) — Regressionsschutz, bleibt unverändert | 3.5/3.6 Baseline |
-| U2 | `src/formats/odt/__tests__/roundtrip.test.ts` | „preserves hard line breaks within a paragraph" | **bereits vorhanden** (Zeilen 113–125) — Regressionsschutz, bleibt unverändert | 3.7/3.8 Baseline |
-| U3 | `src/formats/docx/__tests__/roundtrip.test.ts` (neu) | „preserves multiple consecutive hard breaks in the same paragraph" | 3 aufeinanderfolgende `hard_break` bleiben exakt 3, korrekte Reihenfolge | Grenzfall 3/17 |
-| U4 | `src/formats/docx/__tests__/roundtrip.test.ts` (neu) | „preserves a hard break inside a heading" | Überschrift bleibt 1 Node, `hard_break` erhalten | Grenzfall 6, 3.9 |
-| U5 | `src/formats/docx/__tests__/roundtrip.test.ts` (neu) | „preserves a leading and trailing hard break" | führende/folgende leere Zeile nicht verworfen | Grenzfall 1/2, 3.3 |
-| U6 (U2-Pendant) | `src/formats/odt/__tests__/roundtrip.test.ts` (neu) | identische drei Tests wie U3–U5, ODT-Variante | dito für ODT | wie oben |
-| U7a | `src/formats/docx/__tests__/external-fixtures.test.ts` (neue `describe`-Gruppe) | „reads a plain `<w:br/>` (saut_page.docx) as hard_break" | Fremd-Fixture korrekt gelesen | 3.6, 5.2.6 |
-| U7b | dito | „documents (does NOT distinguish) that `<w:br w:type=\"page\"/>` is ALSO read as hard_break — count assertion `=== 3`" | **bewusst dokumentierte Lücke** sichtbar gemacht, kein Fix in diesem Ticket | Grenzfall 13, 3.6 |
-| U7c | dito | „reads an explicit `w:type=\"textWrapping\"` break (drawing.docx) as hard_break too" | Default-Fall korrekt | 3.6 |
-| U7d | `src/formats/odt/__tests__/external-fixtures.test.ts` (neue `describe`-Gruppe) | „reads the styled, nested `<text:line-break/>` in TextLineBreakText.odt as hard_break" | Fremd-Fixture, verschachtelt in `<text:span>` | 3.8, 5.2.7 |
-| U7e | dito | „does not misinterpret text:soft-page-break as hard_break (text-extract.odt)" | Negativtest | Grenzfall 14, 3.8 |
-| U8 | `src/formats/odt/__tests__/hardBreakVsSoftPageBreak.test.ts` (neu) | „Grenzfall 14: text:line-break unmittelbar gefolgt von text:soft-page-break im selben Absatz" | genau 1 `hard_break`, korrekte Text-Reihenfolge `Zeile eins\|hard_break\|Zeile zwei` | Grenzfall 14 |
-| U9 | `src/formats/__tests__/crossFormatHardBreak.test.ts` (neu) | „DOCX → ODT → DOCX" | `hard_break` übersteht doppelten Formatwechsel, Text davor/danach unverändert | Grenzfall 16, 5.2.3 |
+| U1 | `docx/__tests__/roundtrip.test.ts` | „preserves hard line breaks within a paragraph" | **bereits vorhanden** (`Zeile eins\|hard_break\|Zeile zwei`) — Regressionsschutz, unverändert | 3.5 Baseline |
+| U2 | `odt/__tests__/roundtrip.test.ts` | „preserves hard line breaks within a paragraph" | **bereits vorhanden** — Regressionsschutz, unverändert | 3.5 Baseline |
+| U3 | `docx/__tests__/roundtrip.test.ts` (neu) | „preserves multiple consecutive hard breaks in the same paragraph" | 3 aufeinanderfolgende `hard_break` bleiben exakt 3, korrekte Reihenfolge (`A\|hard_break\|hard_break\|hard_break\|B`) | Grenzfall 3/17 |
+| U4 | `docx/__tests__/roundtrip.test.ts` (neu) | „preserves a hard break inside a heading" | Überschrift bleibt **1** Node (`heading`), `hard_break` erhalten | Grenzfall 6, 3.11 |
+| U5 | `docx/__tests__/roundtrip.test.ts` (neu) | „preserves a leading and trailing hard break" | führende/folgende leere Zeile nicht verworfen | Grenzfall 1/2, 3.4 |
+| U6 | `odt/__tests__/roundtrip.test.ts` (neu) | identische drei Tests wie U3–U5, ODT-Variante | dito für ODT | wie oben |
+| U7a | `docx/__tests__/external-fixtures.test.ts` (neue `describe`) | „reads plain `<w:br/>` (drawing.docx) as hard_break" | Fremd-Fixture korrekt gelesen | 3.8, 5.2.6 |
+| U7b | dito | „documents that `<w:br w:type=\"page\"/>` in saut_page.docx is ALSO read as hard_break — count assertion" | **bewusst dokumentierte Lücke** sichtbar, kein Fix hier | Grenzfall 13, 3.8 |
+| U7c | dito | „reads an explicit `w:type=\"textWrapping\"` break (drawing.docx) as hard_break too" | Default-Fall korrekt | 3.8 |
+| U7d | `odt/__tests__/external-fixtures.test.ts` (neue `describe`) | „reads the styled, nested `<text:line-break/>` in TextLineBreakText.odt as hard_break" | Fremd-Fixture, in `<text:span>` verschachtelt, Formatierung erhalten | Grenzfall 20, 3.10 |
+| U7e | dito | „does not misinterpret text:soft-page-break as hard_break (text-extract.odt)" | Negativtest | Grenzfall 14, 3.10 |
+| U8 | `odt/__tests__/hardBreakVsSoftPageBreak.test.ts` (neu, synthetisch) | „line-break unmittelbar gefolgt von soft-page-break im selben Absatz" | genau **1** `hard_break`, Reihenfolge `Zeile eins\|hard_break\|Zeile zwei` | Grenzfall 14 |
+| U9 | `formats/__tests__/crossFormatHardBreak.test.ts` (neu) | „DOCX → ODT → DOCX" | `hard_break` übersteht doppelten Formatwechsel, Text unverändert, **weiterhin 1 Absatz** | Grenzfall 16, 5.2.3 |
 | U10 | dito | „ODT → DOCX → ODT" | wie U9, umgekehrte Richtung | Grenzfall 16, 5.2.3 |
-| U11 | dito | „multiple breaks + heading + list survive a double format round trip" | kumulativer Verlust-Test über Heading+Liste+2×`hard_break` | Grenzfall 16, 5.2.8 |
+| U11 | dito | „multiple breaks + heading + list survive a double format round trip" | kumulativer Verlust-Test (Heading+Liste+2×`hard_break`) | Grenzfall 16, 5.2.8 |
+| **U12** | `docx/__tests__/roundtrip.test.ts` **und** `odt/…` (neu) | „preserves marks on BOTH sides of a hard break" | fetter Text + `hard_break` + fetter Text → beide Seiten behalten `strong` nach Rundreise (beide Formate) | **Grenzfall 19**, 3.6 |
 
-**Referenzimplementierung** für U3–U8 und U9–U11 liegt bereits vollständig als Code in
-`zeilenumbruch-manuell-code.md` Abschnitt 14.1 vor (a–f) — QA übernimmt diese Snippets 1:1 als
-verbindliche Testimplementierung, mit folgenden **Pflichtergänzungen**, die im Umsetzungsplan
-fehlen:
-
+**Pflichtergänzung zu U3 (Reihenfolge, nicht nur Anzahl — Anforderung 3.13):**
 ```ts
-// Ergänzung zu U3 (roundtrip.test.ts) — Anforderung 3.13 verlangt zusätzlich, dass die
-// Reihenfolge der Textteile um die Umbrüche herum nicht vertauscht wird, nicht nur die Anzahl:
 it('preserves exact ordering around multiple consecutive hard breaks', async () => {
   const original = doc([
-    {
-      type: 'paragraph',
-      attrs: { align: 'left' },
-      content: [
-        { type: 'text', text: 'A' },
-        { type: 'hard_break' },
-        { type: 'hard_break' },
-        { type: 'hard_break' },
-        { type: 'text', text: 'B' },
-      ],
-    },
+    { type: 'paragraph', attrs: { align: 'left' }, content: [
+      { type: 'text', text: 'A' },
+      { type: 'hard_break' }, { type: 'hard_break' }, { type: 'hard_break' },
+      { type: 'text', text: 'B' },
+    ] },
   ])
   const result = await roundTrip(original)
   const content = (result.body as any).content[0].content
-  expect(content.map((n: any) => n.text ?? n.type).join('|')).toBe(
-    'A|hard_break|hard_break|hard_break|B',
-  )
+  expect(content.map((n: any) => n.text ?? n.type).join('|')).toBe('A|hard_break|hard_break|hard_break|B')
 })
 ```
 
+**Pflichtergänzung zu U9/U10 (Negativ-Assertion gegen Absatz-Degradierung — Anforderung 3.12):**
 ```ts
-// Ergänzung zu U9/U10 (crossFormatHardBreak.test.ts) — QA verlangt zusätzlich eine explizite
-// Negativ-Assertion: der hard_break darf NICHT in einen zweiten Absatz degradiert sein
-// (Anforderung 3.10 „darf sich nie in einen neuen Absatz verwandeln"):
 expect((final.body as any).content).toHaveLength(1) // weiterhin genau 1 Absatz, kein Split
+```
+
+**U12 (neu, Grenzfall 19 — Marken-Erhalt beidseitig, Serialisierungsebene):**
+```ts
+it('preserves marks on both sides of a hard break', async () => {
+  const original = doc([
+    { type: 'paragraph', attrs: { align: 'left' }, content: [
+      { type: 'text', text: 'fett eins', marks: [{ type: 'strong' }] },
+      { type: 'hard_break' },
+      { type: 'text', text: 'fett zwei', marks: [{ type: 'strong' }] },
+    ] },
+  ])
+  const result = await roundTrip(original)
+  const content = (result.body as any).content[0].content
+  const bold = content.filter((n: any) => n.marks?.some((m: any) => m.type === 'strong'))
+  expect(bold.map((n: any) => n.text)).toEqual(['fett eins', 'fett zwei'])
+  expect(content.some((n: any) => n.type === 'hard_break')).toBe(true)
+})
 ```
 
 ---
@@ -220,57 +329,70 @@ expect((final.body as any).content).toHaveLength(1) // weiterhin genau 1 Absatz,
 ## 4. Playwright E2E-Testplan — echte Browser-Interaktion (Pflicht)
 
 Neue Datei `tests/e2e/zeilenumbruch.spec.ts`, Aufbau analog `tests/e2e/docx.spec.ts` /
-`tests/e2e/odt.spec.ts` (`docxCard`/`odtCard`-Helper per `page.locator('div.rounded-lg', { has: … })`,
-`.ProseMirror`-Editor-Locator, `getByRole('button', { name: 'Exportieren' })` +
-`page.waitForEvent('download')`, `JSZip.loadAsync` auf den heruntergeladenen Buffer). **Jeder**
-Testfall unten verwendet ausschließlich `page.keyboard.*`/`page.locator(...).click()`/
-`input.setInputFiles(...)` für die Interaktion — **keine** direkten Aufrufe von
-`insertHardBreak()`/`readDocx()`/`writeOdt()` etc. im Testkörper, außer explizit als
-„Byte-Inspektion der heruntergeladenen Datei" (JSZip) oder in dem einen, klar gekennzeichneten
-Grenzfall aus Abschnitt 0.2.
+`tests/e2e/selection-regression.spec.ts`:
 
-### 4.1 Kern-Testfälle
+- Datenschutz-Banner: `await page.getByRole('button', { name: /verstanden/i }).click()`.
+- DOCX-Karte: `page.locator('div.rounded-lg', { has: page.getByRole('heading', { name: 'Word-Dokument (.docx)' }) })`.
+- ODT-Karte: `… { name: 'OpenDocument Text (.odt)' }`.
+- Neues Dokument: `.getByRole('button', { name: 'Neu erstellen' })`.
+- Editor: `page.locator('.ProseMirror')`.
+- Export: `page.getByRole('button', { name: 'Exportieren' })` + `page.waitForEvent('download')`.
+- Zurück zum Picker (für Re-Upload): `page.getByRole('button', { name: /formate/i }).click()`.
+
+**Jeder** Testfall verwendet ausschließlich `page.keyboard.*` / `page.locator(...).click()` /
+`input.setInputFiles(...)` für die Interaktion — **keine** direkten `insertHardBreak()`/`readDocx()`/
+`writeOdt()`-Aufrufe im Testkörper, außer als klar gekennzeichnete „Byte-Inspektion" (JSZip) oder
+im einen Cross-Format-Handoff (E25, siehe 0.5). **Alle** Repositions-Schritte respektieren die
+Determinismus-Regeln aus 0.4 (50-ms-Sync-Wait vor dem nächsten Tastendruck).
+
+### 4.1 Kern-Testfälle (Tastatur-Eingabeweg)
 
 | ID | Name | Schritte (echte Interaktion) | Assertion | Bezug |
 |---|---|---|---|---|
-| E1 | Grundfall Shift+Enter | `docxCard(page).getByRole('button', {name:'Neu erstellen'}).click()` → `editor.click()` → `page.keyboard.type('Zeile eins')` → `page.keyboard.press('Shift+Enter')` → `page.keyboard.type('Zeile zwei')` | `page.locator('.ProseMirror p')` hat Count **1**; `editor.locator('br')` hat Count **1**; `editor` enthält beide Texte | 3.1, Testplan-Pkt. 2 |
-| E2 | Selektion ersetzen | wie E1, danach `ControlOrMeta+a`, dann `Shift+Enter` | vorheriger Text weg, `br`-Count weiterhin 1, Absatz-Count 1 | 3.2 |
-| E3 | Anfang/Ende | `Home` + `Shift+Enter` am Anfang; separat `End` + `Shift+Enter` am Ende, direkt weitertippen | führende bzw. folgende leere Zeile entsteht, kein No-Op (`br`-Count erhöht sich sichtbar) | 3.3, Grenzfall 1/2 |
-| E4 | Mehrfach ohne Text | 3× `Shift+Enter` hintereinander ohne Zwischentext | `br`-Count **3**, kein Zusammenfallen auf 1 | Grenzfall 3 |
-| E5 | Shift+Enter + Enter gemischt | Text, `Shift+Enter`, Text, `Enter`, Text | `.ProseMirror p`-Count **2**; erster Absatz enthält genau **1** `br` | Grenzfall 4 |
-| E6 | Leerer Absatz | Neues Dokument, sofort `Shift+Enter` ohne vorherige Eingabe | kein Absturz/Konsolenfehler, `br`-Count **1** | Grenzfall 5 |
-| E7 | Überschrift | `getByLabel('Absatzformat')` → `selectOption` „Überschrift 1" (Wert `'1'`), Text, `Shift+Enter`, Text | `.ProseMirror h1`-Count weiterhin **1**, kein Split in 2 Überschriften | Grenzfall 6, 3.9 |
-| E8 | Listenpunkt | `getByTitle('Aufzählung').click()`, Text, `Shift+Enter`, Text | `.ProseMirror li`-Count weiterhin **1** | Grenzfall 7, 3.9 |
-| E9a | Tabellenzelle | `getByTitle('Tabelle einfügen').click()`, in Zelle klicken, Text, `Shift+Enter`, Text | Zellenzahl unverändert, beide Zeilenteile in derselben Zelle sichtbar | Grenzfall 8, 3.9 |
-| E9b (**Blocker**) | Bild-NodeSelection + Shift+Enter | Bild via `label:has-text('Bild') input[type=file]` mit `setInputFiles` einfügen (kleines PNG-Fixture), Bild per `ArrowLeft`/`ArrowRight` bis zur Node-Selektion anwählen, dann `Shift+Enter` | `editor.locator('img')`-Count bleibt **1** (nicht 0) — siehe Abschnitt 0.4, Pflicht-Blocker | Grenzfall 9, Zusatzbefund F |
-| E9c | Bild-Textnachbarschaft (Cursor, nicht NodeSelection) | Bild einfügen, per Klick Cursor **im Text davor** setzen, `Shift+Enter` | Bild bleibt sichtbar, Position relativ zum Text unverändert | Grenzfall 9 |
-| E10a | Löschen (Backspace direkt nach Umbruch) | Text, `Shift+Enter`, Text; Cursor an Anfang zweiter Zeile (`Home`), `Backspace` | `br`-Count **0**, beide Textteile zu einer durchgehenden Zeile verschmolzen, exakter String-Vergleich per `editor.textContent()` — kein Zeichenverlust | Grenzfall 10 |
-| E10b | Löschen (Entf direkt vor Umbruch) | wie E10a, aber Cursor ans Ende erster Zeile (`End`), `Delete` | dieselbe Assertion wie E10a | Grenzfall 10 |
-| E11 | Undo/Redo — Umbruch allein | E1-Sequenz, danach `ControlOrMeta+z` | `br`-Count **0**, Text vor/nach unverändert; danach `ControlOrMeta+y` (bzw. `ControlOrMeta+Shift+z`) → `br`-Count wieder **1** | 3.13 |
-| E12 | Undo-Gruppierung Umbruch+Tippen | E1-Sequenz, danach **ein** `ControlOrMeta+z` | NUR der zuletzt getippte Text („Zeile zwei") verschwindet, Umbruch bleibt bestehen **oder** (je nach tatsächlichem Verhalten) Umbruch+Text verschwinden gemeinsam — **Ergebnis explizit protokollieren**, nicht stillschweigend annehmen; Anforderung verlangt nur „kein unerwartetes Verhalten", keine feste Vorgabe der Gruppierung, aber das beobachtete Verhalten muss dokumentiert und danach stabil (reproduzierbar) sein | 3.13, Abschnitt 0.5 |
-| E13 | Navigation (Pfeiltasten) | Text A + Umbruch + Text B, Cursor an Anfang, `ArrowRight` × (Länge A + 1) | nach genau „Länge A + 1" Tastendrücken landet der Cursor hinter dem `<br>` — verifiziert per Tipp-Marker: an dieser Stelle eingetippter Text erscheint in Zeile B, nicht mehr in Zeile A | Grenzfall 11, 3.12 |
-| E14 | Doppelklick-Wortgrenze | „WortAvor" + `Shift+Enter` + „Wortnach", Doppelklick auf „vor" unmittelbar vor dem Umbruch | `page.evaluate(() => window.getSelection()?.toString())` ist exakt `"vor"`, schließt Umbruch/Folgewort nicht ein | Grenzfall 12, 3.12 |
-| E15 | Massentest (50+) | 60× `Shift+Enter` in Schleife | Test läuft ohne Timeout durch (UI bleibt responsiv), `br`-Count **60** | Grenzfall 17 |
-| E16 | Zwischenablage-Abgrenzung | Umbruch erzeugen, danach mehrzeiligen Text per simuliertem `paste`-Event einfügen | resultiert in zusätzlichen `<p>`-Absätzen, ursprünglicher `br` bleibt an unveränderter Position/Count 1 | Grenzfall 18, 3.11 |
+| E1 | Grundfall Shift+Enter | `Neu erstellen` → `editor.click()` → `type('Zeile eins')` → `press('Shift+Enter')` → `type('Zeile zwei')` | `.ProseMirror p` Count **1**; `editor.locator('br')` Count **1**; beide Texte sichtbar | 3.1 |
+| E2 | Selektion ersetzen | E1-Text, `ControlOrMeta+a`, **`waitForTimeout(50)`**, `Shift+Enter` | vorheriger Text weg, `br` Count 1, `p` Count 1 | 3.2 |
+| E3 | Anfang/Ende | `Home`, `waitForTimeout(50)`, `Shift+Enter`; separat `End`, `waitForTimeout(50)`, `Shift+Enter`, weitertippen | führende bzw. folgende leere Zeile, kein No-Op (`br` Count steigt sichtbar) | 3.4, Grenzfall 1/2 |
+| E4 | Mehrfach ohne Text | 3× `Shift+Enter` hintereinander | `br` Count **3**, kein Zusammenfall auf 1 | Grenzfall 3 |
+| E5 | Shift+Enter + Enter gemischt | Text, `Shift+Enter`, Text, `Enter`, Text | `.ProseMirror p` Count **2**; erster Absatz genau **1** `br` | Grenzfall 4 |
+| E6 | Leerer Absatz | `Neu erstellen`, `editor.click()`, sofort `Shift+Enter` | kein `pageerror`, `br` Count **1** | Grenzfall 5 |
+| E7 | Überschrift | `getByLabel('Absatzformat')` → `selectOption('1')`, Text, `Shift+Enter`, Text | `.ProseMirror h1` Count weiterhin **1**, kein Split | Grenzfall 6, 3.11 |
+| E8 | Listenpunkt | `getByTitle('Aufzählung').click()`, Text, `Shift+Enter`, Text | `.ProseMirror li` Count weiterhin **1** | Grenzfall 7, 3.11 |
+| E9a | Tabellenzelle (Text-Cursor) | `getByTitle('Tabelle einfügen').click()`, Zelle klicken, `waitForTimeout(50)`, Text, `Shift+Enter`, Text | `.ProseMirror td` Count unverändert, beide Zeilen in derselben Zelle | Grenzfall 8, 3.11 |
+| **E9b** (**BLOCKER**) | Bild-`NodeSelection` + Shift+Enter | Bild via `label:has-text('Bild') input[type=file]` + `setInputFiles` (kleines PNG) einfügen, dann **`editor.locator('img').click()`** (setzt `NodeSelection`), **`waitForTimeout(50)`**, `Shift+Enter` | `editor.locator('img')` Count bleibt **1** (nicht 0) — Pflicht-Blocker (0.7); ohne Guard rot | Grenzfall 9 |
+| E9c | Bild-Textnachbarschaft (kein NodeSelection) | Bild einfügen, Cursor **im Text davor** per Klick, `waitForTimeout(50)`, `Shift+Enter` | Bild bleibt sichtbar (`img` Count 1), Umbruch im Text | Grenzfall 9 |
+| **E9d** | `CellSelection` (ganze Zellen) | Tabelle einfügen, über mehrere ganze Zellen eine `CellSelection` ziehen (Maus-Drag von Zelle 0 nach Zelle n), `waitForTimeout(50)`, `Shift+Enter` | `.ProseMirror td` Count unverändert, keine Zelle gelöscht — charakterisierend (Guard erfasst `CellSelection` nicht, `code.md` 3.3) | **Grenzfall 8b** |
+| E10a | Löschen (Backspace nach Umbruch) | Text, `Shift+Enter`, Text; `Home` (Anfang 2. Zeile), `waitForTimeout(50)`, `Backspace` | `br` Count **0**, beide Teile zu **einer** Zeile, exakter `editor.textContent()`-Vergleich (kein Zeichenverlust) | Grenzfall 10 |
+| E10b | Löschen (Delete vor Umbruch) | wie E10a, aber `End` (Ende 1. Zeile), `waitForTimeout(50)`, `Delete` | dieselbe Assertion wie E10a | Grenzfall 10 |
+| E11 | Undo/Redo — Umbruch allein | E1-Sequenz, `ControlOrMeta+z` → `br` Count **0**, Text unverändert; `ControlOrMeta+y` (bzw. `ControlOrMeta+Shift+z`) → `br` Count wieder **1** | 3.15, Grenzfall 22 |
+| E12 | Undo-Gruppierung Umbruch+Tippen | E1-Sequenz, **ein** `ControlOrMeta+z` | beobachtetes Gruppierungsverhalten **protokollieren** (nur „Zeile zwei" weg **oder** Umbruch+Text zusammen), danach reproduzierbar — keine feste Sollvorgabe, aber datenverlustfrei | 3.15, 0.9 |
+| E13 | Navigation (Pfeiltasten) | Text A + `Shift+Enter` + Text B, `Home`, `waitForTimeout(50)`, `ArrowRight` × (Länge A + 1), `waitForTimeout(50)`, Tipp-Marker | Marker erscheint in Zeile B, nicht in Zeile A | Grenzfall 11, 3.14 |
+| E14 | Doppelklick-Wortgrenze | „vor" + `Shift+Enter` + „nach", Doppelklick auf „vor", `waitForTimeout(50)` | `page.evaluate(() => window.getSelection()?.toString())` exakt `"vor"` (ohne Umbruch/Folgewort) | Grenzfall 12, 3.14 |
+| E15 | Massentest (60×) | 60× `Shift+Enter` in Schleife (je `await`) | kein Timeout, `br` Count **60**; danach Export → Re-Import → weiterhin 60 | Grenzfall 17 |
+| **E16** | Marken über den Umbruch + Weitertippen | Text tippen, `ControlOrMeta+a`, `waitForTimeout(50)`, `getByTitle('Fett').click()`, Cursor ans Ende (`End`, `waitForTimeout(50)`), `Shift+Enter`, weitertippen | neuer Text ist fett (`editor.locator('strong')` umschließt beide Seiten); danach Export → Re-Import → beide Seiten weiterhin fett | **Grenzfall 19**, 3.6 |
+| E27 | Zwischenablage-Abgrenzung (extern) | Umbruch erzeugen, danach mehrzeiligen **externen** Klartext per simuliertem `paste`-Event einfügen | ergibt zusätzliche `<p>`-Absätze (nicht `hard_break`), ursprünglicher `br` bleibt Count 1 an unveränderter Position | 3.13 (Abgrenzung) |
+| **E28** | Intern kopieren + einfügen (Klartext `\n`) | Absatz mit `Shift+Enter` erzeugen, `ControlOrMeta+a`, `waitForTimeout(50)`, `ControlOrMeta+c`, Cursor ans Ende, `ControlOrMeta+v` | eingefügter Abschnitt enthält den Umbruch erneut (`br` Count steigt); Klartext-Repräsentation bleibt `\n` (Kopplung an Kopieren, keine Wort-Verschmelzung) | **Grenzfall 18**, 3.13 |
 
 ### 4.2 Datei-Upload/-Export-Testfälle (echter Download + Byte-Inspektion, Pflicht)
 
 | ID | Name | Schritte | Assertion (inkl. Byte-Ebene) | Bezug |
 |---|---|---|---|---|
-| E17 | DOCX-Export enthält `<w:br/>` | Neues Dokument (DOCX-Karte), Text+`Shift+Enter`+Text, `Exportieren`-Klick, `page.waitForEvent('download')`, `download.path()` → `fs.readFile` → `JSZip.loadAsync` → `zip.file('word/document.xml')!.async('text')` | `documentXml` enthält `<w:br/>` (kein `w:type`-Attribut, siehe 3.5); enthält **beide** Textteile | 3.5, Baseline |
-| E18 | DOCX-Re-Import erhält Umbruch | direkt nach E17: den heruntergeladenen Buffer über `input.setInputFiles({ name, mimeType, buffer: exportedBuffer })` **erneut in die DOCX-Karte hochladen** (echter Re-Upload über die UI, kein `readDocx()`-Aufruf im Test) | `.ProseMirror p`-Count weiterhin 1, `br`-Count weiterhin 1, beide Texte sichtbar | 5.2.1 |
-| E19 | ODT-Export enthält `<text:line-break/>` | wie E17, ODT-Karte, `content.xml` prüfen | enthält `<text:line-break/>`, beide Textteile | 3.7 |
-| E20 | ODT-Re-Import erhält Umbruch | wie E18, ODT-Karte | dieselbe Assertion wie E18 | 5.2.2 |
-| E21 | Import fremde Word-Datei | `input.setInputFiles({ buffer: readFileSync('tests/fixtures/external/docx/drawing.docx') })` in DOCX-Karte, danach Export, Re-Import | nach Import: Editor enthält Inhalt sichtbar; nach Export: `documentXml` enthält `<w:br/>`; nach Re-Import: weiterhin vorhanden | 3.6, 5.2.6 |
-| E22 | Import fremde LibreOffice-Datei | wie E21 mit `tests/fixtures/external/odt/TextLineBreakText.odt` in ODT-Karte | analoge Assertion mit `<text:line-break/>` | 3.8, 5.2.7 |
-| E23 | Baseline-Regression: Datei ohne Umbruch bleibt frei von `<w:br/>` | reale DOCX-Datei **ohne** manuellen Zeilenumbruch hochladen (z. B. der bereits im Repo genutzte `buildSampleDocx()`-Fixture-Baustein aus `docx.spec.ts`, ohne Änderung exportieren) | `documentXml` enthält **kein** `<w:br/>` — kein fälschlich erkannter Umbruch | 5.1.1 |
-| E24 | Baseline-Regression ODT-Pendant | wie E23 für ODT | `content.xml` enthält **kein** `<text:line-break/>` | 5.1.2 |
-| E25 | Baseline-Regression nach Keymap-Änderung: reines Enter unverändert | nach Umsetzung von `'Shift-Enter'`: Text, reines `Enter`, Text | weiterhin **2** `<p>`-Absätze (kein Verschlucken/keine Vermischung mit Shift-Variante) — bereits abgedeckt durch bestehende `selection-regression.spec.ts`-Tests, hier zusätzlich explizit im neuen Testfile wiederholt als direkter Nachbartest zu E1 | 5.1.4 |
+| E17 | DOCX-Export enthält `<w:br/>` | DOCX-Karte, Text+`Shift+Enter`+Text, Export, `download.path()` → `fs.readFile` → `JSZip` → `word/document.xml` | `documentXml` enthält `<w:br/>` (ohne `w:type`) **und** beide Textteile | 3.7 |
+| E18 | DOCX-Re-Import erhält Umbruch | nach E17: über `/formate/i` zurück, exportierten Buffer per `setInputFiles` erneut in DOCX-Karte hochladen | `.ProseMirror p` Count 1, `br` Count 1, beide Texte sichtbar | 5.2.1 |
+| E19 | ODT-Export enthält `<text:line-break/>` | wie E17, ODT-Karte, `content.xml` | enthält `<text:line-break/>`, beide Textteile | 3.9 |
+| E20 | ODT-Re-Import erhält Umbruch | wie E18, ODT-Karte | wie E18 | 5.2.1 |
+| E21 | Import fremde Word-Datei | `setInputFiles({ buffer: readFileSync('…/docx/drawing.docx') })` in DOCX-Karte → Export → Re-Import | Import zeigt Inhalt; Export-`documentXml` enthält `<w:br/>`; Re-Import erhält ihn | 3.8, 5.2.6 |
+| E22 | Import fremde LibreOffice-Datei | wie E21 mit `…/odt/TextLineBreakText.odt` in ODT-Karte (deckt `text:span`-verschachtelten Fall / Grenzfall 20) | analoge Assertion mit `<text:line-break/>` | 3.10, 5.2.7, Grenzfall 20 |
+| E23 | Baseline: DOCX ohne Umbruch bleibt frei von `<w:br/>` | reale DOCX **ohne** Umbruch (`buildSampleDocx()`-Muster aus `docx.spec.ts`) unverändert exportieren | `documentXml` enthält **kein** `<w:br/>` — kein fälschlich erkannter Umbruch | 5.1.1 |
+| E24 | Baseline: ODT-Pendant | wie E23 für ODT | `content.xml` enthält **kein** `<text:line-break/>` | 5.1.2 |
+| E25 | Cross-Format-Handoff (Teilnachweis, 0.5) | in DOCX-Karte Umbruch per Tastatur, Export (echter Download), Buffer im Test per `readDocx → writeOdt → readOdt` | Ergebnis enthält `hard_break`; umgekehrte Richtung symmetrisch — **im Bericht NICHT als „E2E Cross-Format" führen** | 5.2.3, Grenzfall 16 |
+| E26 | Baseline: reines `Enter` unverändert | Text, reines `Enter`, Text (direkter Nachbartest zu E1) | **2** `<p>`-Absätze — keine Vermischung Enter/Shift+Enter | 5.1.4 |
 
-### 4.3 Ergänzung `tests/e2e/selection-regression.spec.ts` (Grenzfall 15, Pflicht)
+### 4.3 Ergänzung `tests/e2e/selection-regression.spec.ts` (Grenzfall 15, Pflicht) — **mit** Sync-Wait
 
-Neuer Test **innerhalb** des bestehenden `describe`-Blocks (nicht als separate Datei, damit er
-dauerhaft Teil der etablierten Selection-Sync-Suite bleibt):
+Neuer Test **innerhalb** des bestehenden `describe`-Blocks (bleibt Teil der etablierten
+Selection-Sync-Suite). **Der 50-ms-Sync-Wait nach `End` ist verpflichtend** (0.4) — er fehlte in
+einem früheren QA-Entwurf und ist hier korrigiert, exakt nach dem Muster des ersten Tests dieser
+Datei:
 
 ```ts
 test('Shift+Enter after a stale-selection reposition click — both line parts must survive', async ({ page }) => {
@@ -283,6 +405,10 @@ test('Shift+Enter after a stale-selection reposition click — both line parts m
 
   await editor.click()
   await page.keyboard.press('End')
+  // Selektions-Sync-Nachlauf abwarten — gleiche async-`selectionchange`-Race wie im
+  // ersten Test dieser Datei (Kommentar dort). OHNE dieses Warten kann Shift+Enter auf
+  // der veralteten AllSelection agieren.
+  await page.waitForTimeout(50)
   await page.keyboard.press('Shift+Enter')
   await page.keyboard.type('Zweite Zeile.')
 
@@ -293,15 +419,14 @@ test('Shift+Enter after a stale-selection reposition click — both line parts m
 })
 ```
 
-### 4.4 Referenz-Implementierung E1 (vollständiges Beispiel, Muster für alle übrigen Testfälle)
+### 4.4 Referenz-Implementierung E1 + E17/E18 (Muster für alle übrigen Testfälle, mit Determinismus)
 
 ```ts
 import { test, expect } from '@playwright/test'
 import JSZip from 'jszip'
-import { readFileSync } from 'node:fs'
 
 function docxCard(page: import('@playwright/test').Page) {
-  return page.locator('div.rounded-lg', { has: page.getByRole('heading', { name: 'Word-Dokument (.docx)' } ) })
+  return page.locator('div.rounded-lg', { has: page.getByRole('heading', { name: 'Word-Dokument (.docx)' }) })
 }
 
 test.describe('Zeilenumbruch (Shift+Enter) — DOCX', () => {
@@ -345,44 +470,66 @@ test.describe('Zeilenumbruch (Shift+Enter) — DOCX', () => {
     expect(documentXml).toContain('Zeile eins')
     expect(documentXml).toContain('Zeile zwei')
 
-    // Echter Re-Upload über die UI — kein direkter readDocx()-Aufruf im Test.
-    await page.reload()
-    await page.getByRole('button', { name: /verstanden/i }).click()
+    // Echter Re-Upload über die UI — zurück zum Picker (das input[type=file] existiert
+    // nur dort), KEIN page.reload(). Kein direkter readDocx()-Aufruf im Test.
+    await page.getByRole('button', { name: /formate/i }).click()
     const input = docxCard(page).locator('input[type="file"]')
     await input.setInputFiles({
       name: 'reimport.docx',
       mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
       buffer: exportedBuffer,
     })
-    const reimportedEditor = page.locator('.ProseMirror')
-    await expect(reimportedEditor.locator('br')).toHaveCount(1)
-    await expect(reimportedEditor.locator('p')).toHaveCount(1)
-    await expect(reimportedEditor).toContainText('Zeile eins')
-    await expect(reimportedEditor).toContainText('Zeile zwei')
+    await expect(editor.locator('br')).toHaveCount(1)
+    await expect(editor.locator('p')).toHaveCount(1)
+    await expect(editor).toContainText('Zeile eins')
+    await expect(editor).toContainText('Zeile zwei')
   })
 })
 ```
 
-Alle übrigen Testfälle (E2–E16, E19–E25) folgen demselben Muster (`page.keyboard`/`click`/
-`setInputFiles`/`waitForEvent('download')`) mit den in Abschnitt 4.1/4.2 beschriebenen,
-testfallspezifischen Schritten/Assertions.
+Alle übrigen Testfälle folgen demselben Muster (`page.keyboard`/`click`/`setInputFiles`/
+`waitForEvent('download')`) mit den in 4.1/4.2 beschriebenen Schritten/Assertions und den
+Determinismus-Regeln aus 0.4.
+
+### 4.5 Touch-Testfall (Grenzfall 21) — abhängig vom Toolbar-Button
+
+```ts
+// E29 (läuft auf 'Mobile' und 'Tablet'; setzt den Toolbar-Button aus code.md Abschnitt 6/8 voraus)
+test('E29: Zeilenumbruch per Toolbar-Button auf Touch erzeugbar', async ({ page }) => {
+  const editor = page.locator('.ProseMirror')
+  await editor.click()
+  await page.keyboard.type('Zeile eins')
+  await page.getByTitle('Zeilenumbruch einfügen').click()
+  await page.keyboard.type('Zeile zwei')
+  await expect(page.locator('.ProseMirror p')).toHaveCount(1)
+  await expect(editor.locator('br')).toHaveCount(1)
+})
+```
+
+Solange der Button nicht umgesetzt ist (aktueller Code, 2.4), ist Grenzfall 21 **offen** und als
+Risiko zu melden (Abschnitt 10). Die Tastatur-Tests E1–E28 werden auf „Mobile"/„Tablet" per
+`test.skip(({ isMobile }) => isMobile, 'Shift+Enter auf Software-Tastatur nicht verlässlich')`
+übersprungen, damit dort nur E29 (Button) läuft und `Shift+Enter`-Erwartungen nicht fälschlich
+fehlschlagen.
 
 ---
 
 ## 5. Browser-Coverage-Matrix
 
-| Testfall-Gruppe | Desktop Chrome (Chromium) | Desktop Firefox (Gecko) | Tablet (WebKit) | Mobile (Chromium, Touch) |
-|---|---|---|---|---|
-| E1–E16 (Kern-Interaktion) | Pflicht | **Pflicht** (Testplan-Pkt. 4: mind. 2 Engines) | Empfehlung, kein Blocker | Nicht zwingend — Touch-Interaktion für reine Tastaturfeatures wenig aussagekräftig, siehe `zeilenumbruch-manuell-code.md` Abschnitt 0.4 |
-| E17–E25 (Datei-Upload/-Export) | Pflicht | Empfehlung (Download-Handling ist browserabhängig, aber nicht Kern dieses Features) | Optional | Optional |
-| E9b (Blocker-Test Bild) | Pflicht | Pflicht (identischer ProseMirror-Code, aber Selektionsverhalten kann sich pro Engine leicht unterscheiden) | Optional | Optional |
+| Testfall-Gruppe | Desktop Chrome (Chromium) | Desktop Firefox | Desktop Safari (WebKit) | Mobile (Chromium, Touch) | Tablet (WebKit, Touch) |
+|---|---|---|---|---|---|
+| E1–E16, E27, E28 (Kern-Tastatur) | Pflicht | **Pflicht** (nach `testMatch`-Erweiterung, 0.2) | **Pflicht** (dito) | übersprungen (kein `Shift+Enter`) | übersprungen |
+| E9b (Blocker Bild) | Pflicht | Pflicht (Selektionsverhalten kann pro Engine leicht abweichen) | Pflicht | — | — |
+| E17–E26 (Datei-Upload/-Export) | Pflicht | Empfehlung | Empfehlung | Optional | Optional |
+| E29 (Touch-Button) | — | — | — | **Pflicht** | **Pflicht** |
 
-**Minimalanforderung zur Freigabe:** E1 (Grundfall) muss unter **mindestens** Desktop Chrome
-**und** Desktop Firefox grün sein, exakt wie in Anforderung Testplan-Punkt 4 gefordert.
+**Minimalanforderung zur Freigabe:** E1 (Grundfall) und E9b (Blocker) müssen unter **mindestens
+zwei echten Engines** (Chromium + Firefox **oder** Chromium + WebKit) grün sein — nach der
+`testMatch`-Erweiterung automatisch auf allen drei Desktop-Engines (Anforderung Testplan-Punkt 5).
 
 ---
 
-## 6. Grenzfall-Abdeckungsmatrix (Anforderung Abschnitt 4)
+## 6. Grenzfall-Abdeckungsmatrix (Anforderung Abschnitt 4 — alle 22)
 
 | # | Grenzfall | Test-ID(s) |
 |---|---|---|
@@ -392,18 +539,23 @@ testfallspezifischen Schritten/Assertions.
 | 4 | Umbruch + Enter gemischt | E5 |
 | 5 | Umbruch in leerem Absatz | E6 |
 | 6 | Umbruch in Überschrift | E7, U4 |
-| 7 | Umbruch in Listenpunkt | E8, U7d-analog (EasyList.odt/ListStyleResolution.odt manuell/Import-Fixture) |
-| 8 | Umbruch in Tabellenzelle | E9a |
-| 9 | Umbruch neben Bild | E9b (**Blocker**), E9c |
+| 7 | Umbruch in Listenpunkt | E8; reale Fixtures `EasyList.odt`/`ListStyleResolution.odt` (Import) |
+| 8 | Umbruch in Tabellenzelle (Text-Cursor) | E9a |
+| 8b | `CellSelection` (ganze Zellen) | **E9d** (charakterisierend, Restlücke bewusst nicht behoben) |
+| 9 | Umbruch bei `NodeSelection`-Bild/Tabelle | **E9b (BLOCKER)**, E9c |
 | 10 | Backspace/Entf am Umbruch | E10a, E10b |
-| 11 | Pfeiltasten über Umbruch | E13 |
+| 11 | Pfeiltasten über den Umbruch | E13 |
 | 12 | Doppelklick-Wortgrenze | E14 |
 | 13 | `w:br` + `w:br[type=page/column]` | U7a, U7b (bewusst dokumentierte Lücke, kein Fix) |
 | 14 | `text:line-break` + `text:soft-page-break` | U7e, U8 |
-| 15 | Selection-Sync-Regression mit Umbruch | Abschnitt 4.3 (neuer Test in `selection-regression.spec.ts`) |
-| 16 | Cross-Format DOCX↔ODT, mehrere Umbrüche | U9, U10, U11 (**nicht** vollwertig E2E, siehe Abschnitt 0.2) |
-| 17 | 50+ Umbrüche | E15, U3 (Reader/Writer-seitig unproblematisch bei 3, E15 deckt die tatsächliche UI-Massenperformance ab) |
-| 18 | Zwischenablage neben vorhandenem Umbruch | E16 |
+| 15 | Selection-Sync-Regression mit Umbruch | **Abschnitt 4.3** (neuer Test in `selection-regression.spec.ts`, mit Sync-Wait) |
+| 16 | Cross-Format DOCX↔ODT | U9, U10, U11 (vollwertig Unit); E25 (Teilnachweis E2E, **nicht** als voll-E2E führen, 0.5) |
+| 17 | 50+ Umbrüche | E15; Reader-seitig `bug65649.docx` (U3-analog) |
+| 18 | Intern kopieren + einfügen, Klartext `\n` | **E28**; Kopieren-Regressionssuite (`clipboard.test.ts`, 0.8) bleibt grün |
+| 19 | Marken über den Umbruch + Rundreise | **E16** (E2E), **U12** (Unit, beide Formate) |
+| 20 | ODT `line-break` in `text:span` | U7d, E22 (`TextLineBreakText.odt`) |
+| 21 | Touch „Mobile"/„Tablet" | **E29** (Toolbar-Button) — offen bis Button umgesetzt (2.4, Abschnitt 10) |
+| 22 | Undo, Redo | E11 (Umbruch allein), E12 (Gruppierung protokolliert) |
 
 ---
 
@@ -415,94 +567,95 @@ testfallspezifischen Schritten/Assertions.
 |---|---|
 | 5.1.1 reale DOCX ohne Umbruch, unverändert exportiert/reimportiert | E23 |
 | 5.1.2 reale ODT ohne Umbruch | E24 |
-| 5.1.3 reale/synthetische Datei mit echtem Seitenumbruch, bekannte Abweichung dokumentiert | U7b (dokumentiert bewusst die Lücke, kein „grün im falschen Sinne") |
-| 5.1.4 5.1.1/5.1.2 bleiben grün nach Keymap-Änderung | E25, bestehende Tests in `selection-regression.spec.ts` (unverändert grün halten) |
+| 5.1.3 Datei mit echtem Seitenumbruch, bekannte Abweichung dokumentiert | U7b (dokumentiert die Lücke bewusst) |
+| 5.1.4 Baseline bleibt grün nach Guard-Fix / Toolbar-Button | E26 (reines Enter unverändert) + bestehende `selection-regression.spec.ts` (unverändert grün) |
+| 5.1.5 **Kopieren-Regression bleibt grün** | `clipboard.test.ts` (`leafText === '\n'`, „keeps two hard_break-separated lines apart") — 0.8 |
 
 ### 7.2 Feature-Rundreise (5.2)
 
 | Anforderung | Test-ID(s) |
 |---|---|
 | 5.2.1 Neues Dokument, Umbruch per echter Tastatur, DOCX | E1, E17, E18 |
-| 5.2.2 dasselbe, ODT | E19, E20 |
-| 5.2.3 Cross-Format beide Richtungen | U9, U10 (Unit) — **kein** vollwertiger E2E-Nachweis möglich, siehe Abschnitt 0.2; an PO gemeldet |
-| 5.2.4 mehrere Umbrüche im selben Absatz | E4, E15, U3 |
+| 5.2.1 dasselbe, ODT | E19, E20 |
+| 5.2.2 mehrere Umbrüche im selben Absatz | E4, E15, U3 |
+| 5.2.3 Cross-Format beide Richtungen | U9, U10 (Unit vollwertig); E25 (Teilnachweis, 0.5); an PO gemeldet |
+| 5.2.4 Umbruch mitten in fettem/farbigem Text | E16, U12 |
 | 5.2.5 Umbruch + andere Strukturen (Liste/Tabelle/Bild/Überschrift) | E7, E8, E9a, E9b, E9c, U11 |
 | 5.2.6 Import echte Word-Datei | E21, U7a, U7c |
-| 5.2.7 Import echte LibreOffice-Datei | E22, U7d |
-| 5.2.8 doppelte Rundreise mit allen Features | U11 |
+| 5.2.7 Import echte LibreOffice-Datei (inkl. `text:span`) | E22, U7d |
+| 5.2.8 doppelte Rundreise mit mehreren Features | U11 |
 
-**Abnahmekriterium (aus Anforderung übernommen, hier bindend):** vollständiges Verschwinden eines
-Umbruchs, seine Umwandlung in einen Absatzumbruch (oder umgekehrt), oder Textverlust lässt die
-gesamte Rundreise-Prüfung als nicht bestanden gelten — unabhängig vom Status der übrigen
-Testfälle.
+**Abnahmekriterium (bindend, aus Anforderung 5):** vollständiges Verschwinden eines Umbruchs, seine
+Umwandlung in einen Absatzumbruch (oder umgekehrt), Verlust umgebender Marken, Verlust eines
+selektierten Bildes/einer Tabelle (0.7) oder von Textinhalt lässt die gesamte Rundreise-Prüfung als
+**nicht bestanden** gelten — unabhängig vom Status der übrigen Testfälle.
 
 ---
 
 ## 8. Abnahmekriterien / Exit-Kriterium für diesen Testplan
 
-Der Testplan gilt als **erfüllt** (Voraussetzung für Freigabe nach `zeilenumbruch-manuell-req.md`
-Abschnitt 7), wenn:
+Erfüllt (Voraussetzung für Freigabe nach `zeilenumbruch-manuell-req.md` Abschnitt 7), wenn:
 
-- [ ] Alle Unit-Testfälle U1–U11 grün (Vitest).
-- [ ] Alle E2E-Testfälle E1–E25 grün unter **Desktop Chrome und Desktop Firefox** (Abschnitt 5).
-- [ ] E9b (Blocker) grün — kein Bilddatenverlust bei Shift+Enter über eine Bild-`NodeSelection`.
-- [ ] Grenzfall-Matrix (Abschnitt 6) vollständig, jede Zeile mit mindestens einem Test-Ergebnis
-      belegt (grün, oder bewusst dokumentierte Abweichung wie bei Grenzfall 13).
-- [ ] Rundreise-Matrix (Abschnitt 7) vollständig — Baseline **und** Feature-Rundreise.
-- [ ] Neuer `selection-regression.spec.ts`-Testfall (Grenzfall 15) grün.
-- [ ] `playwright.config.ts` enthält `'Desktop Firefox'`; bestehende Suite bleibt unter diesem
-      neuen Projekt grün (oder neu auftretende Firefox-Fehlschläge sind separat gemeldet, siehe
-      Abschnitt 2.1).
-- [ ] Abschnitt 0.2 (Cross-Format-Einschränkung) ist im Testbericht **explizit als Einschränkung
-      vermerkt**, nicht als vollständiges „E2E bestanden" dargestellt.
-- [ ] Bekannte, akzeptierte Einschränkungen aus der Anforderung (keine visuelle ¶-Unterscheidung,
-      Menüpunkt 6; `w:type=page/column`-Fehlklassifizierung, Grenzfall 13) sind im Testbericht
-      verlinkt/übernommen, nicht stillschweigend ignoriert.
+- [ ] Alle Unit-Testfälle U1–U12 grün (Vitest).
+- [ ] Alle E2E-Testfälle E1–E28 grün auf **Desktop Chrome + Desktop Firefox + Desktop Safari**
+      (nach `testMatch`-Erweiterung, 0.2/2.1).
+- [ ] **E9b (Blocker) grün** — kein Bilddatenverlust bei `Shift+Enter` über eine Bild-`NodeSelection`;
+      der `NodeSelection`-Guard (`code.md` 3.2) ist umgesetzt.
+- [ ] Grenzfall-Matrix (Abschnitt 6) vollständig — alle 22 Grenzfälle mit mindestens einem
+      Test-Ergebnis (grün oder bewusst dokumentierte Abweichung wie Grenzfall 13).
+- [ ] Rundreise-Matrix (Abschnitt 7) vollständig — Baseline **und** Feature-Rundreise, inkl.
+      Kopieren-Regression (7.1.5) und Marken-Erhalt (E16/U12).
+- [ ] Neuer `selection-regression.spec.ts`-Testfall (Grenzfall 15) grün — **mit** dem
+      50-ms-Sync-Wait (4.3).
+- [ ] `playwright.config.ts`: `testMatch` beider Desktop-Projekte erweitert; bestehende Suite bleibt
+      unter Chromium/Mobile/Tablet unverändert grün.
+- [ ] Touch-Weg (Grenzfall 21) **entschieden**: Toolbar-Button umgesetzt + E29 grün, **oder**
+      Nicht-Unterstützung im Bericht bewusst dokumentiert (nicht stillschweigend offen).
+- [ ] 0.5 (Cross-Format-Einschränkung) im Testbericht **explizit als Einschränkung** vermerkt,
+      nicht als „E2E Cross-Format bestanden".
+- [ ] Bekannte, akzeptierte Einschränkungen (keine visuelle ¶-Unterscheidung;
+      `w:type=page/column`-Fehlklassifizierung; verworfenes `w:clear`) im Bericht verlinkt/übernommen.
 
 ---
 
-## 9. Bekannte Test-Limitationen (bewusst, zu dokumentieren, kein Blocker für sich allein)
+## 9. Bekannte Test-Limitationen (bewusst, zu dokumentieren, allein kein Blocker)
 
-1. **Keine echte Cross-Format-UI-Funktion** (Abschnitt 0.2) — Grenzfall 16/Anforderung 5.2.3
-   kann nicht vollständig browsergetrieben getestet werden, weil die App keine
-   „Konvertieren"/„Speichern unter anderem Format"-Funktion besitzt. Produktlücke, an PO zu
-   melden (Abschnitt 10), nicht durch diesen Testplan zu beheben.
-2. **Keine visuelle ¶-Unterscheidung im Editor** (Anforderung Menüpunkt 6) — Testfälle, die
-   „ist das ein Zeilen- oder Absatzumbruch" beantworten müssen, tun dies ausschließlich über
-   DOM-Struktur (`<p>`-/`<br>`-Anzahl) und Export-Byte-Inspektion, nicht über visuelle Prüfung
-   eines Screenshots. Das ist die einzig verlässliche Methode, solange dieses Toggle fehlt —
-   bewusst akzeptierte Einschränkung, keine Testlücke.
-3. **`CellSelection` in Tabellen nicht separat gegen den Bild-Lösch-Bug abgesichert**
-   (`zeilenumbruch-manuell-code.md` Abschnitt 3.4) — vorbestehende, nicht durch dieses Feature
-   neu eingeführte Exposition bei `insertImage`/`insertTable` selbst; nicht Gegenstand dieses
-   Testplans, aber als Beobachtungspunkt in E9a vermerkt (keine dedizierte `CellSelection`-
-   Assertion in diesem Plan — falls gewünscht, als separates Ticket nachzuziehen).
-4. **`bug65649.docx` (Massentest, Grenzfall 17) unter Vitest/jsdom bewusst übersprungen**
-   (bestehendes `SKIP_SLOW_UNDER_JSDOM`-Set in `external-fixtures.test.ts`) — Performance-Aspekt
-   wird stattdessen ausschließlich über E15 (echter Browser) geprüft, nicht doppelt in Unit
-   erzwungen.
+1. **Keine echte Cross-Format-UI-Funktion** (0.5) — Grenzfall 16/Anforderung 5.2.3 nicht vollständig
+   browsergetrieben testbar; Produktlücke, an PO zu melden (Abschnitt 10).
+2. **Keine visuelle ¶-Unterscheidung im Editor** (Anforderung Menüpunkt 7) — „Zeilen- oder
+   Absatzumbruch?" wird ausschließlich über DOM-Struktur (`<p>`/`<br>`-Anzahl) und
+   Export-Byte-Inspektion beantwortet, nicht über Screenshot. Einzig verlässliche Methode, solange
+   das Toggle (`formatierungszeichen-toggle`) fehlt.
+3. **`CellSelection` (Grenzfall 8b)** — E9d ist charakterisierend, nicht abgesichert-durch-Guard;
+   die Exposition ist vorbestehend (`insertImage`/`insertTable`, `code.md` 3.3), nicht durch dieses
+   Feature neu. Nur falls E9d echten Struktur-Schaden zeigt, wird ein `CellSelection`-Guard
+   nachgezogen.
+4. **`bug65649.docx` (Massentest) unter Vitest/jsdom** ggf. via `SKIP_SLOW_UNDER_JSDOM` übersprungen
+   — die UI-Massenperformance (Grenzfall 17) deckt stattdessen E15 (echter Browser) ab.
+5. **Touch-Button noch nicht im Code** (2.4) — E29 ist erst nach `code.md` Abschnitt 6 lauffähig.
 
 ---
 
 ## 10. Offene Punkte / Risiken für PO und Dev vor Freigabe
 
-1. **Architekturentscheidung muss vor E2E-Testlauf feststehen** (Abschnitt 2.4): läuft
-   `insertHardBreak()` + `'Shift-Enter'`-Keymap bereits, oder wird noch auf dem nativen Fallback
-   getestet? Falls Letzteres: E1 zuerst isoliert ausführen und Ergebnis vor Fortsetzung an
-   Dev/Lead zurückmelden.
-2. **E9b ist der wichtigste Einzeltest dieses Plans** — er deckt einen bereits vor Testbeginn
-   nachgewiesenen, stillen Datenverlust-Bug ab (Bild verschwindet). Sollte er fehlschlagen, ist
-   das kein Testfehler, sondern Bestätigung des in `zeilenumbruch-manuell-code.md` Abschnitt 0.7
-   verifizierten Bugs — Freigabe-Blocker, bis der `NodeSelection`-Guard in `insertHardBreak()`
-   umgesetzt ist.
-3. **Cross-Format-Testabdeckung bleibt strukturell unvollständig auf E2E-Ebene** (Abschnitt 0.2/
-   9.1) — an PO zu meldende Produktlücke (keine UI-Funktion für Formatwechsel), unabhängig vom
-   Ausgang dieses Tickets.
-4. **Firefox-Projekt ist Neuland für die gesamte Suite** (Abschnitt 2.1) — vor Beginn dieses
-   Testplans einmal die **komplette bestehende** E2E-Suite unter dem neuen `'Desktop Firefox'`-
-   Projekt laufen lassen und etwaige, mit `hard_break` nicht zusammenhängende Fehlschläge separat
-   dokumentieren, damit sie nicht fälschlich diesem Feature zugerechnet werden.
-5. **Undo-Gruppierungsverhalten (E12) hat keine feste Sollvorgabe** in der Anforderung — das
-   tatsächlich beobachtete Verhalten ist zu dokumentieren und als Snapshot/Referenz für künftige
-   Regressionsprüfung festzuhalten, nicht nachträglich als „Bug" zu werten, sofern es stabil und
-   nicht datenverlustbehaftet ist.
+1. **E9b ist der wichtigste Einzeltest dieses Plans** — er deckt einen bereits verifizierten,
+   stillen Datenverlust-Bug ab (Bild verschwindet bei `Shift+Enter` über eine `NodeSelection`).
+   Schlägt er fehl, ist das Bestätigung des Bugs aus Anforderung 0.7, kein Testfehler —
+   Freigabe-Blocker bis der `NodeSelection`-Guard (`code.md` 3.2) umgesetzt ist.
+2. **Browser-Matrix wirksam machen** (0.2): der `testMatch` beider Desktop-Projekte **muss** vor dem
+   Testlauf erweitert werden, sonst läuft `zeilenumbruch.spec.ts` **nur** auf Chromium und
+   Testplan-Punkt 5 (zwei echte Engines) ist verfehlt. **Kein** neues Firefox-Projekt anlegen (der
+   ältere QA-Entwurf lag hier falsch, 0.2).
+3. **Touch-Zugang (Grenzfall 21) ist entscheidungspflichtig**: entweder Toolbar-Button umsetzen
+   (`code.md` Abschnitt 6/8) und E29 grün, **oder** die Nicht-Unterstützung bewusst dokumentieren.
+   Ein stiller Zustand, in dem die Funktion auf Touch unerreichbar ist, ist unzulässig
+   (Anforderung 3.16).
+4. **Cross-Format bleibt strukturell nur teil-E2E** (0.5) — an PO zu meldende Produktlücke (keine
+   UI-Formatwechsel-Funktion), unabhängig vom Ausgang dieses Tickets.
+5. **Undo-Gruppierung (E12) hat keine feste Sollvorgabe** — das beobachtete Verhalten
+   dokumentieren und als Regressions-Referenz festhalten, nicht nachträglich als Bug werten, sofern
+   stabil und datenverlustfrei.
+6. **Determinismus ist bindend** (0.4): jeder Testfall mit einer Klick-/`Home`/`End`/Pfeiltasten-/
+   `select-all`-Reposition setzt vor dem nächsten Tastendruck `await page.waitForTimeout(50)`
+   (Selektions-Sync-Nachlauf). Ein Testfall ohne diesen Wait an einer Reposition gilt als
+   nicht regelkonform und ist vor Freigabe zu korrigieren.

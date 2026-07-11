@@ -1,318 +1,402 @@
 # Umsetzungsplan: Feature „Absatzformat-Dropdown (Standard/Überschrift 1–6)" — Code-Abgleich und geplante Änderungen
 
 Rolle: Entwickler-Antwort auf `specs/absatzformat-dropdown-req.md`. Dieses Dokument prüft
-den **tatsächlichen** Code-Stand gegen jede Behauptung/Anforderung der Spezifikation und
-legt fest, welche Dateien wie geändert bzw. neu angelegt werden. Stil orientiert an
-`specs/fett-code.md` (Vorbild für dieses Format) und `FEATURE-SPEC-DOCX-ODT.md`. **Kein
-Punkt hier ist bereits umgesetzt — dies ist der Plan, nicht der Vollzug.**
+den **tatsächlichen** Code-Stand (Symbol- **und** zeilengenau) gegen jede Behauptung der
+Spezifikation und legt fest, welche Dateien wie geändert bzw. neu angelegt werden. Stil
+orientiert an `specs/fett-code.md`. **Kein Punkt hier ist bereits umgesetzt — dies ist der
+Plan, nicht der Vollzug.**
+
+> **Diese Fassung ersetzt eine frühere Planfassung vollständig.** Die frühere Fassung war
+> gegen einen älteren Code-/Anforderungsstand geschrieben und ist in mehreren tragenden
+> Punkten überholt (siehe Abschnitt 0.1). Wer die alte Fassung kennt: die dortige
+> Kernmaßnahme (Schema-Fix `list_item`) ist **bereits im Code** und entfällt; dafür kommt
+> die in der alten Fassung **komplett fehlende** Ebenen-Begrenzung (Befund 6) neu hinzu.
 
 ---
 
 ## 0. Kurzfassung
 
-Die Ist-Stand-Tabelle aus `absatzformat-dropdown-req.md` Abschnitt 0 ist gegen den
-tatsächlichen Code geprüft und in **allen neun Zeilen sachlich und zeilengenau exakt**
-(siehe Abschnitt 1 — kein anderes bisher geprüftes `-req.md` in diesem Repo war so
-präzise). Die drei offenen Design-Fragen (Mehrfachselektion 2.3, Ausrichtungserhalt 2.5,
-Listen-Inkonsistenz 2.6) werden in Abschnitt 3 verbindlich beantwortet.
+Das Feature existiert real und funktioniert im Grundpfad (Ebene 1/2 erzeugen, auf
+Standard zurück, rendern, DOCX/ODT exportieren) — und ist dort, anders als bei vielen
+anderen „vorhanden"-Einträgen, **bereits end-to-end getestet** (`clipboard.spec.ts`,
+`clipboard-roundtrip.spec.ts`). Die Ist-Stand-Tabelle der Anforderung (Abschnitt 0,
+Befunde 1–13) ist gegen den tatsächlichen Code geprüft und **inhaltlich in allen 13
+Zeilen korrekt** (Symbolnamen treffen; Zeilennummern der Anforderung stimmen im aktuellen
+Baum, siehe Abschnitt 1). **Korrektur gegenüber einer früheren Fassung dieses Plans:**
+Abschnitt 1 prüfte dort nur Befunde 1–10 und ließ die Befunde 11 (fehlende visuelle
+Abstufung), 12 (`AllSelection`/Strg+A-No-Op) und 13 (Bild-`NodeSelection`-No-Op)
+unverifiziert und ohne Fix-/Testzuordnung liegen — obwohl Abnahmekriterium 3 (Anforderung
+Abschnitt 7) explizit verlangt, dass die beiden Sonderfälle 12/13 **eigenständig**
+entschieden und getestet werden, und Abnahmekriterium 10 eine explizite Entscheidung zu
+Befund 11 fordert. Beide Lücken sind unten geschlossen (3.1 bzw. 3.6/4.9).
 
-Die eigentliche Code-Prüfung deckt aber **sechs zusätzliche, in der Anforderung nicht
-benannte Befunde** auf — zwei davon korrigieren die in der Anforderung selbst vermutete
-Fehlerursache, einer davon ist ein empirisch reproduzierter **Absturz** mit einer echten
-Datei aus dem bereits im Repo vorhandenen Testkorpus:
+Zu behebende Punkte, in Reihenfolge des Aufwands/Risikos (Kernarbeit zuerst):
 
-1. **Finding A** — Die in Grenzfall 2.7 vermutete Ursache („unterschiedliche Elternknoten
-   je Zelle, `sameParent` ist `false`") für den `CellSelection`-No-Op ist **empirisch
-   widerlegt**: `sameParent` ist bei einer `CellSelection` tatsächlich immer `true`
-   (verifiziert gegen `prosemirror-tables@1.8.5`/`prosemirror-state`). Die wirkliche
-   Ursache ist eine andere Zeile im selben Befund (`alignableTypes.has(parent.type.name)`
-   scheitert an `table_cell`, nicht an unterschiedlichen Eltern). Das beobachtbare
-   Verhalten (No-Op) stimmt mit der Anforderung überein, die Fix-Konstruktion muss aber
-   auf der richtigen Ursache aufbauen.
-2. **Finding B** — Aus Finding A folgt ein **eigenständiger, bereits produktiv
-   ausgelieferter Bug in `setAlign`** (Ausrichtungs-Buttons): Bei einer `CellSelection`
-   über mehrere Zellen wirkt `setAlign` nachweislich nur auf die **eine** „Kopf"-Zelle der
-   Selektion, alle anderen sichtbar mitselektierten Zellen bleiben still unverändert.
-   Außerhalb des Geltungsbereichs dieser Datei (gehört zu `ausrichtung-*-req.md`), aber
-   entscheidend dafür, wie der `setHeading`-Fix **nicht** gebaut werden darf (siehe
-   Abschnitt 3.1).
-3. **Finding C** — Abschnitt 2.9 der Anforderung übernimmt aus `fett-req.md` die
-   Behauptung, Überschriften erschienen im Editor bereits über CSS
-   (`.ProseMirror h1/h2/h3 { font-weight: 600 }`) fett. Das ist bereits in
-   `fett-code.md` §1/§2.4 widerlegt und hier direkt gegen `src/index.css` erneut
-   bestätigt: Diese Regel existiert nicht (Zeile 60 ist `.ProseMirror th`, keine
-   `h1`–`h6`-Regel vorhanden). Überschriften sind im Editor aktuell **nicht** fett
-   dargestellt.
-4. **Finding D** — `docx/reader.ts` (`parseStylesXml`/`headingLevelForStyle`) liest
-   `<w:basedOn>` nirgends. Grenzfall 16 ist damit eine **bestätigte, nicht nur
-   theoretische** Lücke.
-5. **Finding E** — `list_item.content = 'paragraph block*'` (statt `block+` wie bei
-   `table_cell`) ist nicht nur die Ursache von Befund 5, sondern auch von zwei weiteren,
-   unabhängig verifizierten Fehlern:
-   - **E2:** `toggleList` (Button „• Liste") auf eine markierte Überschrift ist heute ein
-     stiller No-Op (per Vitest-Testaufbau empirisch nachgewiesen).
-   - **E3 (schwerwiegend):** Ein Nutzer, der die im Repo bereits vorhandene reale
-     ODF-Toolkit-Testdatei `tests/fixtures/external/odt/listStyleId.odt` importiert (sie
-     enthält `<text:list-item><text:h ...>…</text:h></text:list-item>` — eine Überschrift
-     als **einziges/erstes** Kind eines Listenpunkts) und danach am Ende dieser
-     Überschrift **Enter** drückt (`WordEditor.tsx:75`, `splitListItem`), löst einen
-     **echten, reproduzierten Absturz** aus: `RangeError: Called contentMatchAt on a node
-     with invalid content`. Empirisch nachgestellt (siehe Abschnitt 3.3) — kein
-     theoretisches Risiko.
-6. **Finding F** — `docx/writer.ts` `blockToDocx`, Fall `'heading'` (Zeile 106–111),
-   ignoriert den `listNumId`-Parameter, den derselbe Funktionsaufruf für Listeneinträge
-   erhält (Zeile 116). Jede Überschrift innerhalb eines Listenpunkts verliert beim
-   DOCX-Export ihre Listenzugehörigkeit (`<w:numPr>` fehlt), unabhängig davon, ob sie
-   Kind 1 oder Kind 2+ ist. Der ODT-Writer hat dieses Problem **nicht** (ODF modelliert
-   Listenzugehörigkeit rein strukturell durch Verschachtelung, keine `numId`-Referenz
-   nötig) — verifiziert durch Codelesen.
+1. **Befund 3 — Mehrblock-No-Op** (`setHeading`, `commands.ts:45`): Selektion über mehrere
+   Blöcke → stiller No-Op. **Entscheidung: erweitern** (alle erfassten Blöcke umwandeln),
+   siehe 3.1/4.1. Dieselbe Konstruktion (Zielsuche per `nodesBetween` statt
+   `sameParent`/Eltern-Tiefe) löst als **Nebeneffekt, hier explizit gemacht und getestet**,
+   auch Befund 12 (`AllSelection`/Strg+A) und Befund 13 (Bild-`NodeSelection`) — siehe 3.1.
+2. **Befund 4 — Ausrichtungsverlust** (`commands.ts:43`, hartes `align: 'left'`):
+   **Entscheidung: Ausrichtung erhalten** (Direktformatierung überlebt den Stilwechsel),
+   siehe 3.2/4.1.
+3. **Befund 6 — Ebenen > 6** (kein Clamp an irgendeiner Stelle; DOCX-Rundreise-Datenverlust):
+   **Entscheidung: beim Import auf 1–6 klemmen** — verlustfreie, formatsymmetrische
+   Rundreise statt stillem Absturz-auf-Standard (DOCX). Siehe 3.4/4.4/4.5. **In der
+   früheren Planfassung vollständig fehlend.**
+4. **Befund 7 — ODT `office:styles`** (`odt/reader.ts`, nur `office:automatic-styles`
+   gelesen): benannte/vererbte Formatvorlagen werden ignoriert → Ausrichtungsverlust beim
+   Import. **Entscheidung: beheben**, abgestimmt mit `fett-code.md` §4.8 (dieselbe
+   Funktion), siehe 3.5/4.5.
+5. **Befund 8 — DOCX `w:basedOn`** (`docx/reader.ts:69`, Regex/`outlineLvl` ohne
+   Vererbung): geerbte Überschriften-Vorlagen ohne eigenes `outlineLvl` → als Standard
+   importiert. **Entscheidung: beheben** (Kette auflösen), siehe 4.4.
+6. **Befund 11 — fehlende visuelle Abstufung der Überschriften im Editor**
+   (`index.css:29-37`, nur `margin`, keine `font-size`/`font-weight`): **Entscheidung:
+   beheben** — gestaffelte `font-size` je Ebene, abgestimmt mit den Export-Schriftgrößen
+   (`HEADING_FONT_SIZES`). **In der bisherigen Planfassung vollständig fehlend** (Abnahme
+   10 war unadressiert) — siehe 3.6/4.9. **Muss mit `fett-code.md` §4.5 koordiniert werden**
+   (dieselbe CSS-Regel `.ProseMirror h1…h6`).
+7. **Deaktivierter Zustand** (Anforderung Abschnitt 1 Zeile 7 / Abnahme 8): Dropdown bei
+   nicht anwendbarer Selektion sichtbar deaktivieren statt wirkungslosen Klick zulassen,
+   siehe 4.2.
+8. **Optional, kein Blocker**: Tastenkürzel `Mod-Alt-0…6` (Anforderung 1.3), siehe 4.8.
 
-Finding E führt dazu, dass die Empfehlung zu Grenzfall 2.6 in Abschnitt 3.3 **von der
-naheliegenden ersten Intuition abweicht**: Nicht „Überschrift in Listen einheitlich
-verbieten", sondern „einheitlich erlauben" (Schema-Fix `list_item.content: 'block+'`) —
-weil zwei im Repo bereits vorhandene, echte ODF-Toolkit-Fixtures (`ListHeading.odt`,
-`ListHeading2.odt`) beweisen, dass reale Werkzeuge genau dieses Konstrukt bereits
-erzeugen, und ein Verbot vorhandene importierte Inhalte nicht mehr reparierbar machen
-würde.
+Zusätzlich **eigene Code-Befunde** über die Anforderung hinaus (Abschnitt 2):
+Finding A/B (`CellSelection`-Semantik — betrifft, wie der `setHeading`-Fix **nicht**
+gebaut werden darf), Finding C (Überschriften sind im Editor **nicht** per CSS fett —
+korrigiert Anforderung 2.9), Finding F (`docx/writer.ts` verliert `<w:numPr>` bei
+Überschrift-in-Liste) **und Finding F2** (`docx/reader.ts` streift die
+Listenzugehörigkeit einer Überschrift beim **Reimport** wieder ab — der Writer-Fix
+allein reicht für eine funktionierende Rundreise **nicht**, siehe 2.5a/4.6).
 
----
+### 0.1 Was sich gegenüber der früheren Planfassung geändert hat (Pflichtlektüre für QA/Lead)
 
-## 1. Verifikation der Ist-Stand-Tabelle aus `absatzformat-dropdown-req.md` Abschnitt 0
-
-| # | Fundstelle laut Anforderung | Ergebnis der Prüfung |
+| Punkt | Frühere Fassung | Aktueller, verifizierter Stand |
 |---|---|---|
-| 1 | `Toolbar.tsx:116-131` natives `<select aria-label="Absatzformat">` | **Bestätigt, zeilengenau exakt.** `<select>` Zeile 116, schließendes `</select>` Zeile 131. |
-| 2 | `Toolbar.tsx:87-95` `currentHeadingLevel()` | **Bestätigt, zeilengenau exakt.** |
-| 3 | `commands.ts:40-55` `setHeading`, `$from.sameParent($to)` bricht bei Mehrfachselektion ab; Vergleich mit `setAlign` (`commands.ts:13-27`, `nodesBetween`) | **Bestätigt, zeilengenau exakt** in der Diagnose der Asymmetrie. **Aber:** die in Grenzfall 2.7 daraus abgeleitete Erklärung für den `CellSelection`-Fall ist nicht ganz richtig — siehe Finding A. |
-| 4 | `commands.ts:42-43` `attrs = level === null ? undefined : { level, align: 'left' }` | **Bestätigt, zeilengenau exakt.** Verifiziert außerdem: DOCX-/ODT-Reader und -Writer geben `align` bereits heute in **beiden** Richtungen korrekt durch (`JC_TO_ALIGN`/`JC_BY_ALIGN` in `docx/reader.ts`/`writer.ts`, `paragraphAligns`/`headingStyleName(level, align)` in `odt/reader.ts`/`writer.ts`) — der Verlust passiert **ausschließlich** in dieser einen Editor-Command-Zeile, nicht beim Import/Export. Der Fix ist entsprechend auf `commands.ts` beschränkt (siehe Abschnitt 4.1). |
-| 5 | `schema.ts:98-104` (`list_item.content = 'paragraph block*'`) vs. `tableNodes({ cellContent: 'block+' })` (`schema.ts:106`) | **Bestätigt, zeilengenau exakt.** Geht laut eigener Prüfung noch weiter als beschrieben — siehe Finding E. |
-| 6 | `odt/reader.ts:245-246` vs. `:252-256`, nur `office:automatic-styles` wird gelesen | **Bestätigt, zeilengenau exakt**, inklusive der genauen Zeile des `readOfficeTextChildren`-Aufrufs (Zeile 248, wie in der Anforderung referenziert). |
-| 7 | `docx/reader.ts:48-75` `parseStylesXml`/`headingLevelForStyle`, Erkennung über `w:outlineLvl` oder Regex `^Heading\s?([1-6])$` | **Bestätigt, zeilengenau exakt.** `w:basedOn` wird nirgends gelesen — Finding D bestätigt die in der Anforderung nur als „ungetestet" markierte Vermutung als **tatsächliche Lücke**. |
-| 8 | `docx/styleDefs.ts:9-30`, `odt/styleRegistry.ts:77-93`, feste Fett-Deklaration auf Formatvorlagen-Ebene | **Bestätigt.** `styleDefs.ts` Zeile 9–30 exakt; `styleRegistry.ts` `headingStyleDefs` liegt auf Zeile 84–93, die referenzierten Zeilen 77–93 schließen die vorangehenden Konstantendeklarationen (`HEADING_FONT_SIZES`, `ALIGNS`) mit ein — inhaltlich korrekt, keine Abweichung. |
-| 9 | `tests/e2e/docx.spec.ts:99`, `tests/e2e/odt.spec.ts:80`, keine Dropdown-Bedienung in Tests | **Bestätigt, zeilengenau exakt.** Suche nach `Absatzformat`/`getByLabel`/`selectOption` in `tests/` bestätigt: keine Treffer. |
-
-**Fazit Abschnitt 1:** Alle neun Fundstellen der Anforderung sind sachlich zutreffend.
-Einzige Einschränkung: die in Zeile 3/Grenzfall 2.7 unterstellte Fehlerursache für den
-`CellSelection`-Fall ist unpräzise (Finding A).
+| **Schema `list_item`** | „muss von `'paragraph block*'` auf `'block+'` geändert werden" (eigener Abschnitt, mehrere Findings, Umsetzungsschritt 1) | **Bereits im Code**: `schema.ts:147` ist `content: 'block+'` (mit erklärendem Kommentar zu realen verschachtelten Fixtures). Die Anforderung bestätigt das selbst in Befund 5 („Korrektur gegenüber früherer Fassung"). → Kein Fix mehr nötig; die damals darauf gestützten „Findings E/E2/E3" (Absturz, `wrapInList`-No-Op) sind **bereits gelöst**. Nur noch als **Regressions-Sperre** testabgesichert, siehe 2.4/5.5. |
+| **Dropdown-Testabdeckung** | „kein einziger Test bedient das Dropdown" (§1 Zeile 9) | **Falsch/überholt.** `clipboard.spec.ts:174/179` und `clipboard-roundtrip.spec.ts:38/43/90/95` bedienen `getByLabel('Absatzformat').selectOption(...)`. Anforderung Befund 10 dokumentiert das. → Neue Tests bauen **darauf auf**, duplizieren nicht. |
+| **Ebenen > 6 (Befund 6)** | **fehlt komplett** | Neu aufgenommen als Kern-Entscheidung (Clamp auf 1–6), siehe 3.4/4.4/4.5. |
+| **Zeilennummern** | pre-„Ausschneiden"-Toolbar (z. B. `<select>` bei 116–131) | Aktualisiert auf den heutigen Baum (z. B. `<select>` bei **165–180**), siehe Abschnitt 1. |
+| **Finding F Fix** | `numPr` mit hartem `w:ilvl w:val="0"`, Parameter „`listNumId`" | Korrigiert: der reale Parameter heißt `listContext` (`{numId, level}`); der Fix muss `listContext.level`/`listContext.numId` nutzen und `pStyle` **vor** `numPr` setzen, siehe 4.6. |
+| **Finding F2 (neu)** | fehlte — Finding F wurde als reiner Writer-Fix behandelt | **Neu belegt:** `docx/reader.ts:476` streift den Listenmarker jeder Nicht-Paragraph-Zeile (also auch der Überschrift) beim Reimport ab → der Writer-Fix allein ergibt keine funktionierende Rundreise. Reader muss `'heading'` mit aufnehmen. Siehe 2.5a/4.6-Teil-2; Test 5.6(b). |
+| **`WordEditor.tsx`-Zeilen** | (nicht adressiert) | Anforderung nennt `keymap` bei Z. 77–99 und `forceRender` bei Z. 123; im heutigen Baum: erster `keymap`-Block **85–107**, `dispatchTransaction` **125**, `forceRender` **131**. Korrigiert in §1 (Befund 2) und §4.8. |
+| **Befund 11 (visuelle Abstufung) / Abnahme 10** | **Fehlte vollständig** — §1 verifizierte nur Befunde 1–10, §3/§4 hatten keine Entscheidung, §4.7 erklärte `index.css` explizit für „keine Änderung", §5/§6 erwähnten Test 19/Abnahme 10 der Anforderung nirgends. | **Nachgetragen:** Entscheidung 3.6 (gestaffelte `font-size`, koordiniert mit `fett-code.md` §4.5), Fix 4.9, Test 5.1(18), DoD-Zeile 10 in §6. |
+| **Befund 12/13 (`AllSelection`/Bild-`NodeSelection`) / Abnahme 3** | **Fehlte vollständig** — kein einziges Vorkommen von „Befund 12", „Befund 13", „AllSelection" oder „NodeSelection" in der vorigen Fassung, obwohl die Anforderung diese als per Test verifizierte, eigenständig abzunehmende Sonderfälle führt (Abnahme 3 verlangt ausdrücklich, dass eine Mehrblock-Entscheidung, die diese beiden Fälle ausspart, **nicht** als vollständig gilt). | **Nachgetragen:** 3.1 macht explizit, dass die gewählte `nodesBetween`-Konstruktion (nicht `sameParent`) beide Fälle als Konsequenz mitlöst, mit dem jeweils erwarteten Verhalten; Tests 5.1(19a/19b), 5.2. |
 
 ---
 
-## 2. Bestehende Code-Bausteine, die für den Fix relevant sind (Referenz)
+## 1. Verifikation der Ist-Stand-Tabelle (`absatzformat-dropdown-req.md` Abschnitt 0)
 
-- `src/formats/shared/editor/commands.ts` — `setAlign`, `setHeading`, `alignableTypes`,
-  `isInTable`.
-- `src/formats/shared/schema.ts` — `list_item.content`, `tableNodes({ cellContent: 'block+' })`.
-- `src/formats/shared/editor/Toolbar.tsx` — `<select aria-label="Absatzformat">`,
-  `currentHeadingLevel()`.
-- `src/formats/shared/editor/WordEditor.tsx` — `keymap({ Enter: splitListItem(...), ... })`.
-- `src/formats/docx/reader.ts` — `parseStylesXml`, `headingLevelForStyle`.
-- `src/formats/docx/writer.ts` — `blockToDocx` (Fälle `'paragraph'`, `'heading'`,
-  `'bullet_list'`/`'ordered_list'`).
-- `src/formats/odt/reader.ts` — `parseAutomaticStyles`, `elementToBlocks`,
-  `paragraphToBlocks`.
-- Testfixtures bereits im Repo, die für diese Anforderung besonders relevant sind (alle
-  unter `tests/fixtures/external/odt/` bzw. `.../docx/`, ODF-Toolkit-/Apache-POI-Korpus):
-  - `MyHeading1.odt` — `<text:h text:style-name="Heading2" ...>`, wobei `Heading2`
-    **ausschließlich** in `office:styles` (nicht `office:automatic-styles`) deklariert
-    ist. Direkter Beleg für Befund 6/Grenzfall 15.
-  - `ListHeading.odt`, `ListHeading2.odt` — `<text:list-item>` mit **zwei** Kindern:
-    zuerst `<text:p>`, danach `<text:h ... text:outline-level="1">…Line2 - first list
-    item</text:h>` (Kommentar im Original-Testdatennamen weist selbst auf den Grenzfall
-    hin). Direkter Beleg für Befund 5 („2. Kind eines Listenpunkts funktioniert bereits
-    heute").
-  - `listStyleId.odt` — enthält u. a. `<text:list-item><text:h
-    text:outline-level="3" ...>…</text:h></text:list-item>`, also eine Überschrift als
-    **einziges/erstes** Kind eines Listenpunkts. Grundlage für Finding E3.
-  - `heading123.docx` — einfache Rundreise-Kandidatin für Abnahme 4.1.7.
+Alle Zeilen gegen den heutigen Baum geprüft. „Symbol ✓ / Zeile ✓" heißt: Symbolname trifft
+und die in der Anforderung genannte Zeile stimmt im aktuellen Code.
+
+| Befund | Fundstelle (Anforderung) | Ergebnis der Prüfung |
+|---|---|---|
+| 1 | `Toolbar.tsx` `<select aria-label="Absatzformat">` (Z. 165–180) | **Symbol ✓ / Zeile ✓.** `<select>` Z. 165, `value={currentHeadingLevel()}` Z. 167, `onChange` → `setHeading(value === 'normal' ? null : Number(value))` Z. 168–171, Optionen Standard + 1–6 Z. 174–179. |
+| 2 | `Toolbar.tsx` `currentHeadingLevel()` (Z. 114–122); Re-Render via `WordEditor.tsx` `dispatchTransaction`→`forceRender` (Anforderung nennt Z. 123) | **Symbol ✓ / Zeile korrigiert.** Tiefensuche `$from.node(depth)`, `'normal'` bei `paragraph`, sonst `String(node.attrs.level)`. Die Anforderung nennt für den `forceRender`-Aufruf Z. 123; im **heutigen** Baum sitzt `dispatchTransaction` bei `WordEditor.tsx:125` und `forceRender((n)=>n+1)` bei **:131** (Aufruf bei **jeder** Transaktion; ein zweiter Aufruf beim Mount, :136). Nur der Symbolname war maßgeblich (Anforderung Abschnitt 0-Hinweis) — Verhalten unverändert bestätigt. Für `level > 6` gibt es keine passende `<option>` (nur 1–6, `Toolbar.tsx:175`) → `<select>` zeigt nichts an. Bestätigt. |
+| 3 | `setHeading` `if (!$from.sameParent($to)) return false` (`commands.ts:45`); Vergleich `setAlign` `nodesBetween` (`commands.ts:13-27`) | **Symbol ✓ / Zeile ✓.** No-Op bei Mehrblock. `setAlign` iteriert per `state.doc.nodesBetween(from, to, …)` (Z. 17) über alle Blöcke. Asymmetrie bestätigt. |
+| 4 | `setHeading` `const attrs = level === null ? undefined : { level, align: 'left' }` (`commands.ts:43`) | **Symbol ✓ / Zeile ✓.** Bei Wechsel zu Überschrift hart `align: 'left'`; bei Wechsel zu Standard `attrs === undefined` → `setBlockType` nimmt Node-Default, der laut `alignAttr` (`schema.ts:4`) ebenfalls `'left'` ist. Verlust bestätigt. Zusatzprüfung: DOCX-/ODT-Reader **und** -Writer geben `align` in beiden Richtungen korrekt durch (`JC_TO_ALIGN`/`JC_BY_ALIGN`, `paragraphAligns`/`headingStyleName(level, align)`); der Verlust entsteht **ausschließlich** in dieser Editor-Zeile. |
+| 5 | `list_item` `content: 'block+'` (`schema.ts:146-152`); `tableNodes({ cellContent: 'block+' })` (Z. 154) | **Symbol ✓ / Zeile ✓.** `list_item.content` ist `'block+'` (Z. 147). Überschrift an jeder Position im Listenpunkt erzeugbar; die frühere „erster vs. weiterer Absatz"-Inkonsistenz existiert nicht mehr. Offen bleibt nur die **Export**-Rundreise (Finding F, Abschnitt 4.6). |
+| 6 | `heading.attrs.level` `{ default: 1, validate: 'number' }` (`schema.ts:29`); DOCX `outlineLvl+1` (`docx/reader.ts:72`); ODT `Number(outline-level) \|\| 1` (`odt/reader.ts:257`) | **Symbol ✓ / Zeile ✓.** Keine Begrenzung auf 1–6. `toDOM` (`schema.ts:35`) erzeugt `h${level}` → `h7`…`h10`. DOCX schreibt `Heading7` (undefiniert, `styleDefs.ts` kennt nur 1–6) → Reimport verliert Ebene; ODT behält sie über `text:outline-level`. Asymmetrie + DOCX-Verlust bestätigt. **Fix: Abschnitt 3.4/4.4/4.5.** |
+| 7 | `odt/reader.ts` `parseAutomaticStyles` (Z. 37–78) nur mit `office:automatic-styles` aufgerufen (Content Z. 363–364; Chrome Z. 373–374); Heading-Align `styles.paragraphAligns.get(styleName) \|\| 'left'` (Z. 259) | **Symbol ✓ / Zeile ✓.** `office:styles` (benannte Stile in `styles.xml`) wird nirgends ausgewertet; `style:parent-style-name` nirgends aufgelöst. Ausrichtungsverlust bei realen LibreOffice-Dateien bestätigt. **Fix: 4.5, abgestimmt mit `fett-code.md` §4.8 (Lücke B, dieselbe Funktion).** |
+| 8 | `docx/reader.ts` `parseStylesXml` (Z. 53–67) + `headingLevelForStyle` (Z. 69–76), `w:outlineLvl` **oder** Regex `^Heading\s?([1-6])$` | **Symbol ✓ / Zeile ✓.** `w:basedOn` wird nirgends gelesen → Vererbung ungelöst. Bestätigte (nicht nur theoretische) Lücke. **Fix: 4.4.** |
+| 9 | Export `headingStylesXml` (`docx/styleDefs.ts:9-30`, `<w:b/>`+`<w:sz>`), `headingStyleDefs` (`odt/styleRegistry.ts:84-93`, `font-weight="bold"`+`font-size`) | **Symbol ✓ / Zeile ✓.** Beide je Ebene 1–6 fest Fett + Größe auf Stil-Ebene. Wechsel „Überschrift → Standard" entfernt die stilgebundene Fettung korrekt (Node-Typ + Stilreferenz wechseln). Keine Änderung nötig (siehe 4.7). |
+| 10 | `clipboard.spec.ts:170–194`; `clipboard-roundtrip.spec.ts` R-1/R-2; `docx.spec.ts`/`odt.spec.ts` | **Bestätigt.** Grep nach `Absatzformat`/`selectOption`: Treffer in `clipboard.spec.ts:174,179` und `clipboard-roundtrip.spec.ts:38,43,90,95`. Grundpfad Ebene 1/2 (erzeugen/zurück/rendern/Export) **ist** end-to-end getestet. Neue Tests erweitern gezielt die Grenzfälle. |
+| 11 | `src/index.css`, `.ProseMirror h1…h6` (Z. 29–37, **nur** `margin`); `.ProseMirror th` (Z. 58–60, `font-weight: 600`) | **Symbol ✓ / Zeile ✓.** Gegen die Datei geprüft: der `h1`–`h6`-Block (Z. 29–37) enthält ausschließlich `margin: 0 0 0.6em`, keine `font-size`/`font-weight`-Deklaration; die einzige `font-weight`-Regel im Stylesheet ist `.ProseMirror th { font-weight: 600 }` (Z. 60), nicht auf Überschriften anwendbar. Überschriften sind im Editor damit optisch praktisch identisch zu einem Standard-Absatz. **In der vorigen Planfassung nicht verifiziert, keine Entscheidung getroffen — nachgeholt in 3.6/4.9.** |
+| 12 | `setHeading` (`commands.ts:44-47`), `AllSelection` (`prosemirror-state`) | **Symbol ✓, Verhalten bestätigt (durch Code-Lektüre, nicht durch erneuten Ad-hoc-`vitest`-Lauf).** Eine `AllSelection` hat `$from = doc.resolve(0)`, Tiefe 0, `$from.parent === doc`; `alignableTypes.has('doc')` ist `false` → `setHeading` liefert `false`, unabhängig von der Blockanzahl — auch im Ein-Absatz-Dokument. `currentHeadingLevel()` (`Toolbar.tsx:116-121`) durchläuft bei Tiefe 0 nur `doc`, findet weder `heading` noch `paragraph` → deterministisch `'normal'`. Beide Teilbefunde bestätigt. **In der vorigen Planfassung nicht verifiziert, kein Fix/Test zugeordnet — nachgeholt in 3.1/5.1(19a)/5.2.** |
+| 13 | `setHeading` (`commands.ts:44-47`), `NodeSelection` auf `image` (`schema.ts:58-85`, `group: 'block'`, kein `content`) | **Symbol ✓, Verhalten bestätigt.** Eine `NodeSelection` auf einem atomaren `image`-Knoten hat `$from`/`$to` mit Elternknoten `doc` (bzw. `table_cell`) — nie `paragraph`/`heading`; `alignableTypes.has(...)` liefert `false` → `setHeading` liefert `false`, unabhängig von der gewählten Ebene, ohne Rückmeldung. **In der vorigen Planfassung nicht verifiziert, kein Fix/Test zugeordnet — nachgeholt in 3.1/5.1(19b)/5.2.** |
+
+**Fazit Abschnitt 1:** Die Anforderung ist sachlich und zeilengenau zutreffend — inklusive
+der Befunde 11–13, die eine frühere Fassung dieses Plans überhaupt nicht geprüft hatte
+(siehe 0.1). Keine der 13 Fundstellen musste korrigiert werden.
 
 ---
 
-## 3. Design-Entscheidungen (beantwortet Abnahmekriterien 3–6 der Anforderung)
+## 2. Zusätzliche Code-Befunde über die Anforderung hinaus
 
-### 3.1 Abschnitt 2.3/Grenzfall 2 — Mehrfachselektion über mehrere Blöcke
+### 2.1 Finding A — `CellSelection`-Semantik (bestimmt die Fix-Konstruktion)
 
-**Entscheidung: Erweitern, analog zu `setAlign`, aber *nicht* durch Kopieren von dessen
-Implementierungsmuster.**
+`prosemirror-tables` modelliert eine `CellSelection` als **eine `SelectionRange` pro
+Zelle** (`selection.ranges`). Der von `Selection` geerbte `selection.from`/`selection.to`
+leitet sich aber nur aus `ranges[0]` ab und deckt daher **nur die erste (Anker-)Zelle**
+ab. Konsequenz: Ein `state.doc.nodesBetween(selection.from, selection.to, …)` — exakt das
+Muster von `setAlign` (`commands.ts:17`) — erreicht bei einer Mehrzellen-`CellSelection`
+nur die erste Zelle, nicht alle sichtbar markierten. Der `setHeading`-Fix (4.1) muss
+daher über `selection.ranges` iterieren, **nicht** naiv `setAlign` kopieren.
 
-Begründung: `setAlign` ist als Vorbild in der Anforderung selbst genannt. Es gibt aber
-zwei Gründe, es nicht 1:1 zu kopieren:
+Die Anforderung nennt in Grenzfall 2.7 als Ursache des `CellSelection`-No-Op
+„unterschiedliche Elternknoten je Zelle, `sameParent` ist `false`". Das ist unpräzise:
+Bei einer `CellSelection` liegen `$from`/`$to` in **derselben** Kopf-Zelle, `sameParent`
+ist `true`. Der heutige No-Op entsteht über die **nächste** Zeile, `commands.ts:47`
+(`alignableTypes.has(parent.type.name)` — `parent` ist `table_cell`, nicht
+`paragraph`/`heading`). Beobachtbares Verhalten (No-Op) deckt sich mit der Anforderung;
+nur die Begründung ist zu korrigieren.
 
-1. **Finding A/B (empirisch verifiziert, siehe unten):** `state.selection.from`/`.to`
-   entsprechen bei einer `CellSelection` **nicht** der gesamten selektierten Fläche,
-   sondern ausschließlich dem Bereich der „Kopf"-Zelle
-   (`prosemirror-state`: `get $from() { return this.ranges[0].$from }`;
-   `prosemirror-tables`: `CellSelection`-Konstruktor baut `ranges[0]` immer aus
-   `$headCell`). Ein `doc.nodesBetween(selection.from, selection.to, …)`-Aufruf —
-   genau das Muster von `setAlign` — träfe bei einer Mehrzellen-`CellSelection` daher
-   nur die zuletzt gezogene Zelle.
-   - **Verifiziert per Vitest-Skript** (temporär angelegt unter
-     `src/formats/shared/editor/__tests__/_scratch-cellselection.test.ts`, nach der
-     Prüfung wieder entfernt — Ergebnis hier dokumentiert, da es sonst nirgends
-     festgehalten wäre): Bei einer 2×2-`CellSelection` über vier Zellen mit Text
-     `A1/B1/A2/B2` (Anker `A1`, Kopf `B2`) ergab sich
-     `selection.from=23, selection.to=27`, `$from.parent.type === $to.parent.type ===
-     'table_cell'`, `$from.sameParent($to) === true` und
-     `doc.nodesBetween(selection.from, selection.to, …)` traf **ausschließlich** den
-     Text `'B2'` — die drei anderen selektierten Zellen wurden nicht erreicht. Ein
-     Durchlauf über `selection.ranges` (ein `SelectionRange` pro Zelle) traf dagegen
-     korrekt alle vier: `['B2', 'A1', 'B1', 'A2']`.
-   - **Konsequenz für Finding A:** `sameParent` ist damit tatsächlich `true` (beide
-     Punkte liegen in derselben Kopf-Zelle), nicht `false` wie in Grenzfall 2.7
-     vermutet. Der heutige `setHeading`-No-Op für **jede** `CellSelection`
-     (unabhängig von 1 oder N Zellen!) entsteht über die **nächste** Zeile,
-     `alignableTypes.has(parent.type.name)` (`commands.ts:47`) — `parent` ist dort
-     `table_cell`, nicht `paragraph`/`heading`, und `table_cell` ist nicht in
-     `alignableTypes`. Beobachtbares Verhalten (No-Op) deckt sich mit der Erwartung der
-     Anforderung; die **Begründung** in Grenzfall 2.7 ist zu korrigieren.
-   - **Finding B (Nebenbefund, nicht Teil dieser Datei, aber dokumentationspflichtig):**
-     Da `setAlign` exakt dieses `nodesBetween(selection.from, selection.to, …)`-Muster
-     bereits produktiv verwendet, hat der Button „Ausrichtung" **heute schon** denselben
-     Fehler: Bei einer Mehrzellen-`CellSelection` wird nur die Kopf-Zelle
-     zentriert/ausgerichtet, alle anderen sichtbar markierten Zellen bleiben
-     unverändert — ein stiller Teil-Fehlschlag, der gegen
-     `FEATURE-SPEC-DOCX-ODT.md` Abschnitt 20.4 verstößt. Gehört fachlich zu
-     `ausrichtung-links-req.md`/`ausrichtung-zentriert-req.md`/etc., nicht zu dieser
-     Datei — hier nur als Präzedenzfall dafür vermerkt, **warum** der `setHeading`-Fix
-     nicht einfach `setAlign` kopieren darf.
-2. **Code-Geruch in `setAlign` selbst** (`commands.ts:13-27`): Bei mehreren
-   qualifizierenden Knoten ruft `setAlign` `dispatch(...)` **mehrmals** innerhalb eines
-   einzigen `nodesBetween`-Durchlaufs auf, jedes Mal erneut von `state.tr` (dem
-   **ursprünglichen**, nicht dem zwischenzeitlich aktualisierten State) ausgehend. Das
-   funktioniert nur, weil `setNodeAttribute` **größenerhaltend** ist (keine
-   Struktur-/Positionsverschiebung) — ein fragiles, unübliches Muster, das bei einer
-   strukturverändernden Operation (wie `setBlockType`, das `setHeading` braucht) nicht
-   mehr verlässlich funktionieren würde und zudem **mehrere separate Transaktionen**
-   statt einer atomaren erzeugt. Für `setHeading` wird stattdessen **eine** Transaktion
-   akkumuliert und **einmal** dispatcht (siehe Abschnitt 4.1) — sauberer, ein
-   garantierter Undo-Schritt, kein Rennen mit zwischenzeitlich veraltetem State.
+Dieselbe `parent.type.name`-Prüfung ist auch die gemeinsame Ursache der beiden in der
+Anforderung als eigenständig verifiziert geführten Befunde 12 (`AllSelection`/Strg+A) und
+13 (Bild-`NodeSelection`) — bei beiden ist der unmittelbare Elternknoten `doc` bzw.
+`table_cell`, nie `paragraph`/`heading`, strukturell identisch zum `CellSelection`-Fall
+hier. Die in 3.1 gewählte Fix-Konstruktion (Zielsuche über `nodesBetween` statt über
+`parent`/`sameParent`) behebt daher alle drei Fälle mit demselben Mechanismus — siehe 3.1
+für das im Einzelnen erwartete Verhalten je Fall.
 
-**Ergebnis:** Eine Selektion über mehrere Absätze/Überschriften wandelt **alle**
-erfassten, geeigneten Blöcke auf einmal um (nicht nur den ersten, nicht gar keinen).
-Jeder Block behält dabei seine **eigene** vorherige Ausrichtung (siehe 3.2), nicht eine
-global auf die gesamte Selektion angewandte. Für eine `CellSelection` gilt das
-konsequent auch über mehrere Zellen hinweg (siehe 3.1 Finding A/B oben) — das ändert das
-in der Anforderung für Testfall 5.8/Grenzfall 2.7 erwartete Ergebnis von „No-Op" zu
-„alle selektierten Zellen erhalten das gewählte Format", **exakt wie von der
-Anforderung selbst als konsistente Fortführung von 2.3 vorgezeichnet**
-(„konsistent mit dem generellen Verhalten aus 2.3").
+### 2.2 Finding B — `setAlign` hat denselben `CellSelection`-Teilfehler (außerhalb Scope)
 
-### 3.2 Abschnitt 2.5/Grenzfall 8-9 — Erhalt der Ausrichtung beim Formatwechsel
+Weil `setAlign` (`commands.ts:13-27`) bereits produktiv `nodesBetween(selection.from,
+selection.to, …)` nutzt, richtet der Ausrichtungs-Button bei einer Mehrzellen-
+`CellSelection` heute nur die Kopf-Zelle aus; die übrigen markierten Zellen bleiben still
+unverändert (Verstoß gegen `FEATURE-SPEC-DOCX-ODT.md` Abschnitt 20 „kein stiller
+Fehlschlag"). Gehört fachlich zu `ausrichtung-*-req.md`, **nicht** zu dieser Datei — hier
+nur als Präzedenzfall dokumentiert, **warum** `setHeading` nicht `setAlign` kopieren darf.
+`setAlign` bleibt in diesem Plan unverändert (nur ein Cross-Reference-Kommentar, 4.1).
 
-**Entscheidung: Ausrichtung bleibt erhalten (Direktformatierung überlebt den
-Stilwechsel), analog zu Word/LibreOffice.**
+### 2.3 Finding C — Überschriften sind im Editor **nicht** per CSS fett
 
-Begründung: Wie in Abschnitt 1 dieser Datei verifiziert, geben **beide** Import-/
-Export-Pfade (DOCX und ODT, Lese- **und** Schreibrichtung) den `align`-Wert eines
-`heading`- oder `paragraph`-Knotens bereits vollständig korrekt durch — der einzige
-Ort, an dem Ausrichtung heute verloren geht, ist die hartcodierte `align: 'left'` in
-`commands.ts:43`. Der Fix ist ein reiner Editor-Command-Fix, keine Reader-/Writer-
-Änderung nötig. Damit ist auch Grenzfall 9 (kumulativer Verlust über zwei Wechsel)
-gelöst: Da jeder Wechsel die tatsächliche `align` des Quellknotens fortschreibt statt
-sie zu verwerfen, geht auch nach beliebig vielen aufeinanderfolgenden Wechseln nichts
-verloren.
+Die Anforderung übernimmt in 2.9 aus `fett-req.md` die Annahme, Überschriften erschienen
+im Editor „bereits über CSS/Editor-Styling fett". Gegen `src/index.css` geprüft: Es gibt
+eine Regel `.ProseMirror h1…h6` (Z. 29–37), sie setzt aber **nur** `margin`, **kein**
+`font-weight`. Das einzige `font-weight: 600` (Z. 60) steht in `.ProseMirror th`
+(Tabellenkopf), nicht bei Überschriften. Im Editor sind Überschriften also aktuell
+**nicht** fett dargestellt — die in 2.9/Grenzfall 14 beschriebene optische Verwechslungs-
+gefahr mit einem `strong`-Mark besteht **im Editor** so nicht (im **Export** dagegen
+schon, dort trägt die Stilvorlage Fett, Befund 9). Kein Fix in dieser Datei; nur als
+Korrektur der Anforderungsprämisse dokumentiert (deckt sich mit `fett-code.md`).
 
-### 3.3 Abschnitt 2.6/Grenzfall 4-5 — Überschrift innerhalb eines Listenpunkts
+### 2.4 Finding D (früher „Finding E") — Schema-Fix bereits erledigt, nur noch zu sichern
 
-**Entscheidung (weicht von der ersten Intuition ab): Einheitlich *erlauben*, nicht
-einheitlich verbieten — per Schema-Fix `list_item.content: 'paragraph block*'` →
-`'block+'`, exakt wie bereits bei `table_cell` (`schema.ts:106`).**
+Die frühere Planfassung wollte `list_item.content` von `'paragraph block*'` auf `'block+'`
+ändern und stützte darauf drei Findings (u. a. einen reproduzierten Absturz beim
+`splitListItem` auf eine Überschrift-als-einziges-Kind, und einen `wrapInList`-No-Op).
+**Der Code ist bereits `'block+'`** (`schema.ts:147`); beide Fehlerbilder sind damit
+**schon behoben**. Es bleibt nur die Pflicht, das nicht unbemerkt zu regredieren:
+- **Regressions-Sperre 1 (E2E):** reale Fixture `listStyleId.odt` (Überschrift als
+  einziges Kind eines Listenpunkts) importieren, Cursor ans Ende, **Enter**, weiter tippen
+  → kein Absturz. Siehe 5.5.
+- **Regressions-Sperre 2 (Unit):** `wrapInList` auf eine einzelne Überschrift liefert
+  `true`. Siehe 5.2.
 
-Ein Verbot (die naheliegendere erste Idee, da Word/LibreOffice das UI-seitig auch nicht
-vorsehen) scheitert an drei konkreten, verifizierten Gegenbefunden:
+### 2.5 Finding F — `docx/writer.ts` verliert `<w:numPr>` bei Überschrift-in-Liste
 
-1. **Reale Fremddateien beweisen den Anwendungsfall.** `tests/fixtures/external/odt/
-   ListHeading.odt` und `ListHeading2.odt` (beide bereits im Repo, ODF-Toolkit-Korpus)
-   enthalten strukturell exakt Befund 5's Grenzfall: ein `<text:list-item>` mit zuerst
-   `<text:p>Line1</text:p>`, danach `<text:h ...>Line2 - first list item</text:h>` —
-   der Dateiname des Testinhalts selbst weist auf genau diesen Grenzfall hin. Ein
-   Verbot würde bereits importierte, real erzeugte Inhalte dieser Art nicht mehr
-   korrigierbar machen (Nutzer könnte „Line2" nicht mehr zurück zu „Standard" wandeln).
-2. **Der Schema-Fix behebt einen weiteren, unabhängig verifizierten Bug (Finding E2):**
-   Mit der aktuellen Regel scheitert auch `wrapInList` (Button „• Liste"/„1. Liste"),
-   wenn eine **Überschrift** (nicht ein Absatz) in eine neue Liste gewickelt werden soll
-   — strukturell verboten, da eine Überschrift nicht als erstes/einziges Kind eines
-   `list_item` zulässig ist. Verifiziert per Vitest-Vergleich zweier lokaler
-   Testschemata: `wrapInList(bullet_list)` auf eine einzelne Überschrift lieferte mit
-   `list_item.content: 'paragraph block*'` `false` (No-Op), mit `'block+'` `true`
-   (funktioniert). Das ist ein bisher nirgends dokumentierter, zusätzlicher stiller
-   Fehlschlag (verwandt mit, aber unabhängig von `aufzaehlungsliste-req.md`/
-   `nummerierte-liste-req.md`).
-3. **Finding E3 (schwerwiegend, empirisch reproduziert): ein echter Absturz.**
-   `tests/fixtures/external/odt/listStyleId.odt` enthält (u. a., innerhalb tief
-   verschachtelter Listen) einen Listenpunkt, dessen **einziges** Kind eine
-   Überschrift ist (`<text:list-item><text:h text:outline-level="3" ...>…</text:h>
-   </text:list-item>`). Import via `readOdt` liefert dafür anstandslos JSON zurück
-   (`Node.fromJSON`/`Fragment.fromJSON` validieren die Content-Ausdrücke **nicht** —
-   das ist ein bewusster Kompromiss von ProseMirror für performantes
-   Deserialisieren, kein Fehler dieses Projekts), und auch das Mounten einer
-   `EditorView` mit diesem Dokument gelingt zunächst anstandslos. Der Bruch passiert
-   erst beim **nächsten Bearbeitungsversuch in der Nähe**: Ein Cursor in dieser
-   Überschrift und ein Aufruf von `splitListItem` (also exakt das, was
-   `WordEditor.tsx:75`'s `Enter`-Bindung auslöst) wirft
-   `RangeError: Called contentMatchAt on a node with invalid content` — verifiziert
-   per temporärem Vitest-Testaufbau (jsdom + echte `EditorView`-Instanz + echte
-   `readOdt`-Ausgabe dieser realen Datei, danach wieder entfernt). Das ist ein
-   **echter, reproduzierbarer Absturz** für reale Dokumente mit gliederungsnummerierten
-   Überschriften (ein in Word/LibreOffice völlig gängiges Muster: „1. Einleitung",
-   „1.1 Hintergrund" als nummerierte Gliederungs-Überschriften) — kein Rand-, sondern
-   ein Zuverlässigkeitsproblem.
+`blockToDocx` (`docx/writer.ts:105-156`) bekommt für Kinder eines Listenpunkts einen
+`listContext` (`{numId, level}`) durchgereicht (Listen-Fall Z. 125–140, `nextContext`
+Z. 134–136). Der `'paragraph'`-Fall (Z. 112–118) wertet ihn aus und schreibt `<w:numPr>`
+(Z. 114–117); der `'heading'`-Fall (Z. 119–124) **ignoriert** ihn. Folge: Eine
+Überschrift innerhalb eines Listenpunkts (durch das `block+`-Schema an **jeder** Position
+möglich, und über reale ODT-Fixtures `ListHeading.odt`/`ListHeading2.odt` real
+vorkommend) verliert beim **DOCX**-Export ihre Listenzugehörigkeit. Der **ODT**-Writer hat
+das Problem nicht (ODF bildet Listenmitgliedschaft rein strukturell durch Verschachtelung
+ab; `blockToOdt`-Listen-Fall Z. 99–109 reicht jedes Kind unverändert weiter). **Fix: 4.6.**
 
-**Konsequenz:** Der Schema-Fix ist nicht nur die konsistentere, sondern die einzige
-Lösung, die alle drei Befunde gleichzeitig behebt, ohne bereits importierbare reale
-Inhalte unreparierbar zu machen. Er erfordert als Kehrseite eine kleine Ergänzung in
-`docx/writer.ts` (Finding F, Abschnitt 4.6), da sonst eine neu erlaubte
-Überschrift-als-erstes-Kind beim DOCX-Export ihre Listenzugehörigkeit verlöre (ein
-für ODT nicht bestehendes Problem, da ODF Listenmitgliedschaft rein strukturell durch
-Verschachtelung abbildet, nicht über eine `numId`-Referenz).
+### 2.5a Finding F2 (neu, in der bisherigen Planfassung fehlend) — `docx/reader.ts` streift die Listenzugehörigkeit einer Überschrift beim Reimport ab
 
-### 3.4 Befund 6/Grenzfall 15 — ODT `office:styles` (gemeinsame/benannte Formatvorlagen)
+**Der Writer-Fix (4.6) allein genügt nicht.** `readBodyChildren` (`docx/reader.ts:464-485`)
+baut die Liste über `groupLists` aus einem `marker` je Block auf. Die entscheidende Zeile
+`docx/reader.ts:476` lautet:
 
-**Entscheidung: Beheben — `office:styles` zusätzlich zu `office:automatic-styles`
-auswerten, inklusive `style:parent-style-name`-Kette.**
+```ts
+items.push({ marker: block.type === 'paragraph' ? marker : { numId: null, ilvl: 0 }, block })
+```
 
-Diese exakte Codestelle (`odt/reader.ts:36-77`, `parseAutomaticStyles`) ist **bereits**
-Gegenstand eines Fixes in `fett-code.md` §4.8 (dort für die `text`-Familie/Marks
-relevant, Lücke B jener Datei). Diese Anforderung braucht **dieselbe** Funktion
-zusätzlich für die `paragraph`-Familie (Ausrichtung). Da beide Pläne dieselbe
-Codestelle anfassen, siehe Abschnitt 4.7 für die kombinierte, abgestimmte
-Umsetzung (**nicht** unabhängig voneinander implementieren — sonst überschreibt eine
-Änderung die andere).
+Der von `listMarkerFor` gelesene `numPr`-Marker wird also **nur** an `'paragraph'`-Blöcke
+gehängt; jeder Nicht-Paragraph — insbesondere ein `'heading'` — bekommt zwangsweise
+`{ numId: null, ilvl: 0 }`, wird damit in `groupLists` (Z. 410–414) als
+listenfremd behandelt, schließt die offene Liste und landet als **eigenständiger** Block
+außerhalb. Konsequenz: Selbst **nach** dem Writer-Fix (4.6) — der `<w:numPr>` korrekt auf
+die Überschrift schreibt — geht die Listenzugehörigkeit beim **Reimport** wieder verloren.
+Der `<w:numPr>`-Nachweis auf XML-Ebene wäre grün, die **echte Rundreise** (Editor →
+DOCX → Editor) aber nicht — genau der Typ „stiller Datenverlust“, den Abnahme 9 verbietet.
+Der Grund für die bestehende Guard-Bedingung ist real: ein einzelnes `<w:p>` kann über
+`paragraphToBlocks` **mehrere** Blöcke erzeugen (Bild-/`unsupported`-Runs, Z. 257–279), und
+ein aus einem Absatz herausgelöster Bild-/Objektblock darf den Listenmarker **nicht** erben.
+Ein `'heading'` entsteht aber ausschließlich im `!hasBlockRun`-Zweig (Z. 253) und ist dann
+der **einzige** Block des Absatzes — für ihn ist die Markerübernahme sicher. **Fix: 4.6
+(Teil 2, Reader).**
+
+---
+
+## 3. Design-Entscheidungen (beantwortet Abnahmekriterien 3–6)
+
+### 3.1 Abschnitt 2.3 / Grenzfall 2 — Mehrblock-/`CellSelection`-Selektion
+
+**Entscheidung: Erweitern — alle erfassten geeigneten Blöcke auf einmal umwandeln**
+(nicht nur den ersten, nicht gar keinen), in **einer** akkumulierten Transaktion (ein
+Undo-Schritt). Umsetzung **nicht** durch Kopieren von `setAlign` (Finding A/B), sondern:
+- Zielsuche über `selection.ranges` (deckt `CellSelection` korrekt über alle Zellen ab);
+  für Nicht-`CellSelection` genau ein Range (`selection.from`/`.to`).
+- **Eine** Transaktion, auf die `tr.setBlockType(pos, pos+nodeSize, type, attrs)` mehrfach
+  angewandt wird. Sicher, weil `paragraph ↔ heading` **größenerhaltend** ist (beide sind
+  `inline*`-Textblöcke): vorab gesammelte `pos`-Werte bleiben über die ganze Schleife
+  gültig, auch über mehrere Tabellenzellen hinweg.
+
+Das ändert das erwartete Ergebnis für Grenzfall 2.7 / Testfall 5.8 von „No-Op" zu „alle
+selektierten Zellen erhalten das Format" — genau die von der Anforderung selbst als
+konsistente Fortführung von 2.3 vorgezeichnete Linie (PO-Empfehlung: an `setAlign`
+angleichen).
+
+**Explizite Konsequenz für Befund 12/13 (Abnahme 3 verlangt das ausdrücklich, siehe 0.1):**
+Weil `collectHeadingTargets` über `state.doc.nodesBetween(from, to, …)` sucht — und
+`nodesBetween` unabhängig von der Tiefe/dem unmittelbaren Elternknoten der
+Selektionsgrenzen jeden im Bereich liegenden Nachfahrknoten besucht, nicht nur
+Geschwister eines gemeinsamen Elternknotens —, sind beide strukturell verwandten
+Sonderfälle aus der Anforderung durch **dieselbe** Konstruktion mitgelöst, nicht durch
+einen zusätzlichen Fix:
+- **Grenzfall 21/Befund 12 (`AllSelection`/Strg+A):** `selection.from = 0`,
+  `selection.to = doc.content.size`. `nodesBetween(0, doc.content.size, …)` findet **jeden**
+  `paragraph`/`heading`-Knoten im gesamten Dokument, unabhängig von dessen Tiefe —
+  einschließlich solcher, die in Listenpunkten oder Tabellenzellen verschachtelt sind. Für
+  das in der Anforderung geschilderte Ein-Absatz-Dokument liefert das genau **ein** Target
+  → der Absatz wird zur gewählten Überschrift, `canSetHeading` ist `true`, das Dropdown
+  zeigt korrekt den neuen Zustand (löst zugleich die in Befund 12 zusätzlich beschriebene
+  Anzeige-Falschmeldung, weil `currentHeadingLevel` in 4.2 dieselbe Zielsuche nutzt). Bei
+  einem größeren Dokument werden **konsequent alle** gefundenen Absätze/Überschriften
+  überall im Dokument umgewandelt — bewusst in Kauf genommene, dokumentierte Konsequenz der
+  „erweitern"-Entscheidung oben, nicht ein Sonderfall mit eigener Regel: Strg+A markiert
+  strukturell das gesamte Dokument, und „alle erfassten Blöcke umwandeln" gilt hierfür
+  genauso wie für eine Mehrblock-Selektion per Maus.
+- **Grenzfall 22/Befund 13 (Bild-`NodeSelection`):** `selection.from`/`.to` umschließen
+  exakt den atomaren `image`-Knoten (kein eigener Inhalt, `schema.ts:58-85`).
+  `nodesBetween` besucht dabei nur den `image`-Knoten selbst (kein `paragraph`/`heading`
+  darin, nichts davor/danach im Bereich) → **keine** Targets, `canSetHeading` ist `false`
+  → das Dropdown wird deaktiviert (4.2) statt einen wirkungslosen Klick zuzulassen. Anders
+  als bei Befund 12 ändert sich das Ergebnis gegenüber heute nicht („kein Format
+  anwendbar" bleibt richtig), aber die Rückmeldung wird von stillem No-Op auf sichtbare
+  Deaktivierung verbessert — das ist der eigentliche, in Abnahme 3/9 geforderte Fix.
+
+Beide Fälle brauchen **keinen** eigenen Code-Pfad — nur einen eigenen, expliziten
+Testnachweis (5.1 Testfälle 19a/19b, 5.2), weil sie in der Anforderung als per Test
+verifiziert und laut Abnahme 3 als eigenständig abzunehmen geführt werden, nicht weil der
+Fix selbst unterschiedlich wäre.
+
+### 3.2 Abschnitt 2.5 / Grenzfall 8–9 — Erhalt der Ausrichtung
+
+**Entscheidung: Ausrichtung bleibt erhalten** (Direktformatierung überlebt den
+Stilwechsel, wie in Word/LibreOffice). Da beide Import-/Export-Pfade `align` bereits
+korrekt durchreichen (Abschnitt 1, Befund 4), ist es ein reiner Editor-Command-Fix:
+`setHeading` übernimmt je Block dessen **eigenes** vorhandenes `align`-Attribut statt hart
+`'left'`. Damit ist auch der kumulative Verlust aus Grenzfall 9 gelöst. Bei
+Mehrblock-Umwandlung behält jeder Block seine individuelle vorherige Ausrichtung (pro
+Block aufgelöst, nicht global).
+
+### 3.3 Abschnitt 2.6 / Grenzfälle 4–5 — Überschrift im Listenpunkt
+
+**Entscheidung: Einheitlich erlauben** — und zwar ohne Schema-Änderung, weil
+`list_item.content` bereits `'block+'` ist (Finding D/2.4). Reale Fixtures
+(`ListHeading.odt`, `ListHeading2.odt`, `listStyleId.odt`) beweisen den Anwendungsfall;
+ein nachträgliches Verbot würde bereits importierbare reale Inhalte unreparierbar machen.
+Kehrseite: die DOCX-**Rundreise** muss die Listenzugehörigkeit einer solchen Überschrift
+erhalten — und zwar auf **beiden** Seiten: Writer (`<w:numPr>` schreiben, Finding F) **und**
+Reader (den Marker beim Reimport nicht abstreifen, Finding F2). Fix beider in 4.6. ODT
+braucht dafür nichts (Listenmitgliedschaft strukturell; der ODT-Reader baut das list_item
+aus den Kindern von `<text:list-item>` auf, `elementToBlocks`-Listen-Fall
+`odt/reader.ts:286-299`, und behandelt `<text:h>` dort wie jedes andere Kind).
+
+### 3.4 Befund 6 / Grenzfall 11 — Ebenen > 6 (neu; Abnahme 6)
+
+**Entscheidung: Beim Import auf 1–6 klemmen** (`Math.min(level, 6)`, untere Grenze
+`Math.max(1, …)`), an **beiden** Reader-Grenzen (DOCX `headingLevelForStyle`, ODT
+`elementToBlocks`-Fall `'h'`). Begründung:
+- Beseitigt den **stillen DOCX-Datenverlust** (Ebene 7 → aktuell Standard-Absatz) und
+  macht die Rundreise **formatsymmetrisch** und **verlustfrei innerhalb des unterstützten
+  Bereichs** (7–10 werden einheitlich zu 6, in DOCX **und** ODT gleich).
+- Hält `toDOM` (`schema.ts:35`, `h${level}`) immer bei gültigem `h1`…`h6`; das Dropdown
+  hat für jeden importierten Zustand eine passende Option (behebt Befund 2 für diesen Fall).
+- Die App unterstützt bewusst nur Ebene 1–6 (Toolbar, Export-Stilvorlagen `styleDefs.ts`/
+  `styleRegistry.ts` definieren nur 1–6). Der Editor selbst erzeugt ohnehin nie > 6.
+
+Trade-off, ausdrücklich dokumentiert: die Unterscheidung „Ebene 7/8/9/10" geht gegenüber
+dem Originaldokument verloren (auf 6 normalisiert). Das ist der bewusst gewählte Preis für
+eine verlustfreie, formatunabhängige Rundreise im unterstützten Bereich und für „kein
+stiller Fehlschlag". Alternative (Ebenen > 6 durchreichen + „nur 1–6 unterstützt"
+dokumentieren) wird **verworfen**, weil sie den DOCX-Datenverlust bestehen ließe.
+
+Kein Schema-Zwang nötig: `heading.attrs.level` bleibt `{ default: 1, validate: 'number' }`
+(ein klemmendes `validate` ist in ProseMirror nicht ausdrückbar — es würde werfen statt
+normalisieren; Klemmung gehört an die Import-Grenze). Optionale Härtung: `toDOM` und
+`HEADING_STYLE_ID` defensiv mit `Math.min(level, 6)` (4.3/4.6), damit ein etwaiger
+Fremd-Pfad nie ungültiges HTML/undefinierte Stil-IDs erzeugt.
+
+### 3.5 Befund 7 / Grenzfall 16 — ODT `office:styles` (benannte/vererbte Vorlagen)
+
+**Entscheidung: Beheben** — `office:styles` zusätzlich zu `office:automatic-styles`
+auswerten, inkl. `style:parent-style-name`-Kette. **Wichtig:** Exakt dieselbe Funktion
+(`odt/reader.ts` `parseAutomaticStyles`, Z. 37–78) ist bereits Gegenstand von
+`fett-code.md` §4.8 (Lücke B, dort für die `text`-Familie/Marks). Diese Anforderung
+braucht dieselbe Kaskade zusätzlich für die `paragraph`-Familie (Ausrichtung). **Beide
+Änderungen müssen in einer gemeinsamen Umsetzung landen**, nicht nacheinander unabhängig,
+sonst überschreibt eine die andere. Details 4.5.
+
+### 3.6 Abschnitt 2.11 / Grenzfall 20 / Befund 11 — sichtbare Darstellung der Überschriften im Editor (neu; Abnahme 10)
+
+**Bisher unentschieden** (siehe 0.1) — die vorige Planfassung verifizierte Befund 11 in §1
+nicht einmal und erklärte `index.css` in §4.7 pauschal für „keine Änderung", ohne
+Abnahmekriterium 10 der Anforderung zu adressieren. Abnahme 10 verlangt ausdrücklich
+entweder eine sichtbar gestaffelte Darstellung **oder** eine bewusst dokumentierte
+Einschränkung — „stillschweigend belassen" ist explizit ausgeschlossen.
+
+**Entscheidung: Beheben, per gestaffelter `font-size`.** `.ProseMirror h1`…`h6`
+(`index.css:29-37`) erhält je Ebene eine eigene `font-size`, exakt aus den bereits für den
+**Export** genutzten Werten übernommen (`HEADING_FONT_SIZES` — `docx/styleDefs.ts:3`:
+`{1:48,2:40,3:36,4:32,5:28,6:26}` Halbpunkte; `odt/styleRegistry.ts:77`:
+`{1:24,2:20,3:18,4:16,5:14,6:13}` Punkte — beide Tabellen sind bereits identisch, `48`
+Halbpunkte = `24`pt). CSS kennt `pt` als reguläre absolute Längeneinheit, daher lässt sich
+derselbe Zahlenwert **unverändert** übernehmen (`h1 { font-size: 24pt }` usw.) — kein
+Umrechnungsschritt, kein Rundungsrisiko, und exakt der von der Anforderung geforderte
+Gleichlauf „Editor-Anzeige und Export laufen nicht optisch auseinander" (2.11,
+PO-Empfehlung). Details und Diff: 4.9.
+
+**Bewusst ausgeklammert: `font-weight` (Fettung).** Die Anforderung selbst trennt in 2.11
+die geforderte **Unterscheidbarkeit** (mindestens Schriftgröße, Pflicht) von der Frage, ob
+Überschriften zusätzlich fett dargestellt werden sollen (das berührt `fett-*`, nicht
+diese Datei). **Kritischer Befund bei der Prüfung dieses Plans:** `fett-code.md` §4.5
+plant bereits einen eigenen Fix für **dieselbe** CSS-Regel `.ProseMirror h1…h6` — dort
+soll `font-weight: 700` ergänzt werden (Defekt D, Überschriften im Editor nicht fett).
+Beide Änderungen betreffen exakt denselben Selektor-Block in derselben Datei und **müssen
+als eine gemeinsame Bearbeitung landen** (identisches Koordinationsmuster wie 3.5/`odt/
+reader.ts`) — sonst überschreibt, wer zuletzt commitet, den anderen Fix ersatzlos. Der
+kombinierte Block ist in 4.9 bereits so ausgeschrieben, dass er beide Anforderungen in
+einem Schritt erfüllt; wird `fett-code.md` §4.5 unabhängig zuerst umgesetzt, muss diese
+Datei dessen `font-weight: 700`-Zeile **erhalten**, nicht überschreiben, wenn `font-size`
+ergänzt wird (und umgekehrt).
+
+Kein Eingriff in `docx/styleDefs.ts`/`odt/styleRegistry.ts` nötig — beide `HEADING_FONT_
+SIZES`-Tabellen sind bereits die Quelle der Wahrheit, nur `index.css` zieht bisher nicht
+nach.
 
 ---
 
 ## 4. Dateigenauer Umsetzungsplan
 
-### 4.1 `src/formats/shared/editor/commands.ts` (geändert)
+### 4.1 `src/formats/shared/editor/commands.ts` (geändert) — Kernarbeit
 
-Neuer Import (Zeile 3, nach den bestehenden Importen):
+Import ergänzen (Z. 3, `CellSelection` zusätzlich zum bereits importierten `isInTable`):
 
 ```ts
 import { isInTable, CellSelection } from 'prosemirror-tables'
 ```
 
-(`isInTable` wird bereits importiert und re-exportiert, Zeile 3/6 — hier nur um
-`CellSelection` als benannten Typ-Import ergänzt.)
-
-`setHeading` (aktuell Zeile 40–55) wird ersetzt durch eine gemeinsame Hilfsfunktion plus
-zwei Exporte:
+`setHeading` (aktuell Z. 40–55) durch eine geteilte Zielsuche plus drei Exporte ersetzen:
 
 ```ts
 interface HeadingTarget {
   pos: number
-  node: ReturnType<typeof wordSchema.nodes.paragraph.create>
+  node: Parameters<typeof wordSchema.nodes.paragraph.create>[1] extends never ? never : import('prosemirror-model').Node
 }
 
 /**
- * Collects every paragraph/heading block reachable from the current selection that is
- * eligible for a Standard <-> Überschrift switch. A CellSelection needs its own branch:
- * `selection.from`/`selection.to` (and therefore a naive
- * `doc.nodesBetween(selection.from, selection.to, ...)` walk, as `setAlign` below still
- * does) only ever cover the *head* cell of a CellSelection, never the full selected
- * rectangle — verified empirically against prosemirror-tables@1.8.5/prosemirror-state
- * (see absatzformat-dropdown-code.md §3.1, Finding A/B). Iterating `selection.ranges`
- * instead visits every selected cell correctly. List items are intentionally *not*
- * excluded here — see absatzformat-dropdown-code.md §3.3 for why the list_item content
- * rule itself is relaxed (schema.ts) instead of special-cased here.
+ * Sammelt jeden von der Selektion erfassten paragraph/heading-Block, der für einen
+ * Standard<->Überschrift-Wechsel geeignet ist. Eine CellSelection braucht einen eigenen
+ * Zweig: selection.from/.to (und damit ein naives nodesBetween(selection.from,
+ * selection.to, ...) wie in setAlign) deckt nur die Kopf-Zelle ab, nie das ganze
+ * markierte Rechteck (prosemirror-tables: eine SelectionRange pro Zelle in
+ * selection.ranges — siehe absatzformat-dropdown-code.md §2.1, Finding A/B). Listenpunkte
+ * werden bewusst NICHT ausgeschlossen (list_item ist bereits 'block+', §3.3).
+ *
+ * AllSelection/NodeSelection (Strg+A bzw. ein markiertes Bild) brauchen dagegen KEINEN
+ * eigenen Zweig: nodesBetween(selection.from, selection.to, ...) im else-Zweig unten
+ * findet für eine AllSelection ohnehin jeden paragraph/heading im ganzen Dokument (siehe
+ * absatzformat-dropdown-code.md §3.1, Befund 12) und für eine bild-NodeSelection
+ * korrekt keinen (Befund 13) — ein zusätzlicher instanceof-Check dafür wäre unnötig.
  */
 function collectHeadingTargets(state: EditorState): HeadingTarget[] {
   const { selection } = state
@@ -330,15 +414,14 @@ function collectHeadingTargets(state: EditorState): HeadingTarget[] {
   return targets
 }
 
-/** Whether `setHeading` has *any* eligible target for the current selection — drives the
- *  toolbar's `disabled` state (FEATURE-SPEC-DOCX-ODT.md §20.4, "kein stiller Fehlschlag"). */
+/** Gibt es für die aktuelle Selektion überhaupt ein Ziel? Treibt den disabled-Zustand
+ *  des Dropdowns (FEATURE-SPEC-DOCX-ODT.md §20, „kein stiller Fehlschlag"). */
 export function canSetHeading(state: EditorState): boolean {
   return collectHeadingTargets(state).length > 0
 }
 
-/** Also exported for Toolbar.tsx's display logic (see §4.2) — reuses the exact same
- *  target collection so the displayed value and the enabled/disabled state can never
- *  disagree with what a click would actually do. */
+/** Auch für Toolbar.tsx (Anzeige, §4.2) — nutzt exakt dieselbe Zielsuche, damit Anzeige
+ *  und tatsächliches Verhalten nie auseinanderlaufen. */
 export function headingTargetsInSelection(state: EditorState): HeadingTarget[] {
   return collectHeadingTargets(state)
 }
@@ -351,10 +434,8 @@ export function setHeading(level: number | null): Command {
     if (dispatch) {
       let tr = state.tr
       for (const { pos, node } of targets) {
-        // Preserve each block's own existing alignment (direct formatting survives a
-        // style/type switch, matching Word/LibreOffice — see §3.2). Resolved once per
-        // block, not once for the whole selection, so a multi-block conversion keeps
-        // each paragraph's individual prior alignment.
+        // Jeder Block behält seine eigene bisherige Ausrichtung (Direktformatierung
+        // überlebt den Typwechsel, §3.2). Pro Block aufgelöst, nicht global.
         const attrs = level === null ? { align: node.attrs.align } : { level, align: node.attrs.align }
         tr = tr.setBlockType(pos, pos + node.nodeSize, type, attrs)
       }
@@ -365,53 +446,36 @@ export function setHeading(level: number | null): Command {
 }
 ```
 
-Wichtig: `tr.setBlockType` wird **mehrfach auf dieselbe, einmal akkumulierte
-Transaktion** angewendet, nicht mehrfach `dispatch`t wie in `setAlign` (Abschnitt 3.1,
-Punkt 2). Das ist sicher, weil ein Absatz-↔-Überschrift-Wechsel die Knotengröße nicht
-verändert (nur Typ/Attribute) — bereits vor dem ersten `setBlockType`-Aufruf gesammelte
-`pos`-Werte bleiben über die gesamte Schleife hinweg gültig, auch wenn sie aus mehreren
-Tabellenzellen (`CellSelection.ranges`) stammen.
+Hinweise:
+- `HeadingTarget.node` ist ein `prosemirror-model`-`Node`; die obige Typkonstruktion nur
+  zur Illustration — in der Umsetzung schlicht `import type { Node as PMNode } from
+  'prosemirror-model'` und `node: PMNode` verwenden.
+- **Eine** Transaktion, mehrfach `setBlockType`, **einmal** `dispatch` — garantiert einen
+  Undo-Schritt und kein Rennen mit zwischenzeitlich veraltetem State (anders als `setAlign`,
+  das je Knoten neu vom Ursprungs-`state.tr` dispatcht; das funktioniert dort nur, weil
+  `setNodeAttribute` größenerhaltend ist — für `setBlockType` wäre Mehrfach-Dispatch
+  fragil).
+- Direkter Ebenenwechsel (z. B. 2 → 5) fällt automatisch mit ab: `setBlockType` auf einen
+  bestehenden `heading` mit neuen `attrs` genügt, kein Zwischenschritt über Standard.
 
-`setAlign` (Zeile 13–27) und `isAlignActive` (Zeile 29–38) bleiben **unverändert** — der
-in Finding B beschriebene `CellSelection`-Bug dort ist bewusst nicht Teil dieser Datei
-(gehört zu `ausrichtung-*-req.md`), wird aber als Cross-Reference-Kommentar direkt über
-`setAlign` ergänzt:
+`setAlign` (Z. 13–27) und `isAlignActive` (Z. 29–38) bleiben **unverändert**; nur ein
+Cross-Reference-Kommentar direkt über `setAlign`:
 
 ```ts
-// TODO(ausrichtung-*-req.md): setAlign teilt mit setHeading (vor dessen Fix in
-// absatzformat-dropdown-code.md §3.1) den Bug, dass eine CellSelection über mehrere
-// Zellen hier nur die Kopf-Zelle erreicht (selection.from/.to decken nur ranges[0] ab).
-// Siehe absatzformat-dropdown-code.md Finding A/B für die Verifikation.
+// TODO(ausrichtung-*-req.md): setAlign erreicht bei einer CellSelection über mehrere
+// Zellen nur die Kopf-Zelle (selection.from/.to = ranges[0]). Siehe
+// absatzformat-dropdown-code.md §2.1/§2.2 (Finding A/B). Bewusst nicht in dieser Datei
+// gefixt; setHeading (oben) umgeht das über selection.ranges.
 ```
 
 ### 4.2 `src/formats/shared/editor/Toolbar.tsx` (geändert)
 
-Import ergänzen (Zeile 5–17):
+Import (Z. 6–20) um `canSetHeading` und `headingTargetsInSelection` ergänzen.
 
-```tsx
-import {
-  applyMarkColor,
-  clearMarkColor,
-  insertImage,
-  insertTable,
-  isAlignActive,
-  isInTable,
-  liftFromList,
-  setAlign,
-  setHeading,
-  canSetHeading,
-  headingTargetsInSelection,
-  toggleList,
-  type Align,
-} from './commands'
-```
-
-`currentHeadingLevel()` (Zeile 87–95) wird vereinfacht und nutzt dieselbe
-Zielsuche wie `setHeading` selbst — Anzeige und tatsächliches Verhalten können dadurch
-nie auseinanderlaufen (behebt nebenbei eine kleinere Ungenauigkeit: die alte,
-tiefenbasierte Suche zeigte für eine `CellSelection` immer „Standard", unabhängig vom
-tatsächlichen Inhalt der Zelle(n), weil `$from` bei einer `CellSelection` innerhalb der
-`table_cell`-Grenze selbst liegt, siehe §3.1 Finding A):
+`currentHeadingLevel()` (Z. 114–122) auf dieselbe Zielsuche umstellen — Anzeige und
+Verhalten können nie divergieren; behebt nebenbei, dass die alte Tiefensuche für eine
+`CellSelection` (deren `$from` innerhalb der `table_cell`-Grenze liegt) immer „Standard"
+zeigte:
 
 ```tsx
 function currentHeadingLevel(): string {
@@ -421,15 +485,12 @@ function currentHeadingLevel(): string {
 }
 ```
 
-Bei einer Selektion, die mehrere unterschiedliche Blocktypen/-ebenen umfasst
-(Grenzfall 3), zeigt das Dropdown den Typ des **ersten** erfassten Blocks — bewusste,
-dokumentierte Tie-Break-Regel für Abnahmekriterium 2 der Anforderung („definiertes,
-nicht-widersprüchliches Verhalten"), kein zusätzlicher „gemischt"-Zustand (das native
-`<select>` hat dafür ohnehin keine saubere Darstellung ohne einen künstlichen
-Platzhalter-Eintrag, der selbst wählbar wäre — das würde neue Verwirrung stiften statt
-Klarheit).
+Bei gemischter Selektion (Grenzfall 3) zeigt das Dropdown den Typ des **ersten** erfassten
+Blocks — bewusste, dokumentierte Tie-Break-Regel (Abnahme 2, „definiertes, nicht-
+widersprüchliches Verhalten"), kein künstlicher „gemischt"-Eintrag.
 
-`<select>`-Element (Zeile 116–131) erhält `disabled` und ein erklärendes `title`:
+`<select>` (Z. 165–180) erhält `disabled` + erklärendes `title` (Anforderung 1 Zeile 7,
+Abnahme 8):
 
 ```tsx
 <select
@@ -443,68 +504,37 @@ Klarheit).
   }}
   className="text-sm rounded border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-950 px-1 py-1 disabled:opacity-50 disabled:cursor-not-allowed"
 >
-  ...
+  {/* Optionen unverändert Z. 174–179 */}
 </select>
 ```
 
-Damit ist Abschnitt 1 Zeile 7 der Anforderung („Deaktivierter Zustand bei nicht
-anwendbarer Selektion") und Abnahmekriterium 8 („kein stiller Fehlschlag") erfüllt: ein
-deaktiviertes, sichtbar ausgegrautes `<select>` mit erklärendem `title` ist eine
-sichtbare Rückmeldung, kein Klick, der wirkungslos verpufft.
+Damit ist der No-Op durch eine sichtbare Deaktivierung ersetzt; der in Anforderung 2.3
+beschriebene „falscher Wert bleibt bis zur nächsten Transaktion stehen"-Effekt entfällt,
+weil bei aktivierter Selektion der Klick jetzt tatsächlich wirkt (Mehrblock-Umwandlung)
+und bei nicht anwendbarer Selektion das Element gar nicht bedienbar ist.
 
-### 4.3 `src/formats/shared/schema.ts` (geändert)
+### 4.3 `src/formats/shared/schema.ts` (nur optionale Härtung)
 
-Zeile 99, `list_item`:
+**Keine `list_item`-Änderung** — bereits `'block+'` (Z. 147, siehe 2.4). Optionale
+Defense-in-Depth für Befund 6 (nach dem Import-Clamp aus 4.4/4.5 theoretisch nicht mehr
+nötig, aber billig):
 
 ```diff
-   list_item: {
--    content: 'paragraph block*',
-+    content: 'block+',
-     parseDOM: [{ tag: 'li' }],
-     toDOM() {
-       return ['li', 0]
+   heading: {
+     ...
+     toDOM(node) {
+-      return [`h${node.attrs.level}`, { style: `text-align: ${node.attrs.align}` }, 0]
++      const level = Math.min(Math.max(1, Number(node.attrs.level) || 1), 6)
++      return [`h${level}`, { style: `text-align: ${node.attrs.align}` }, 0]
      },
    },
 ```
 
-Einzeiliger Fix, siehe Abschnitt 3.3 für die vollständige Begründung (behebt Befund 5,
-Finding E2 und den empirisch reproduzierten Absturz aus Finding E3). Risiko: minimal —
-`createAndFill()` für einen neu angelegten, leeren Listenpunkt liefert unverändert einen
-einzelnen leeren Absatz (da `paragraph` weiterhin als erster Kandidat ohne
-Pflicht-Attribute in der `block`-Gruppe registriert ist, exakt wie bei `table_cell`
-bereits heute), der bestehende Verhalten für den Normalfall (Text tippen, Enter,
-`splitListItem`) ändert sich nicht.
+### 4.4 `src/formats/docx/reader.ts` (geändert) — Befund 8 (`w:basedOn`) + Befund 6 (Clamp)
 
-### 4.4 `src/formats/shared/editor/WordEditor.tsx` (optional, kein Blocker)
-
-Laut Anforderung Abschnitt 1 Zeile 3 **kein Blocker** für den Status „vorhanden", aber
-als bewusst fehlende Komfortfunktion zu dokumentieren. Empfehlung: trotzdem ergänzen, da
-sehr geringer Aufwand und 1:1-Wiederverwendung von `setHeading`:
-
-```ts
-import { setHeading } from './commands'
-```
-
-In `keymap({...})` (Zeile 71–79) ergänzen:
-
-```ts
-'Mod-Alt-0': setHeading(null),
-'Mod-Alt-1': setHeading(1),
-'Mod-Alt-2': setHeading(2),
-'Mod-Alt-3': setHeading(3),
-'Mod-Alt-4': setHeading(4),
-'Mod-Alt-5': setHeading(5),
-'Mod-Alt-6': setHeading(6),
-```
-
-Falls diese Ergänzung **nicht** umgesetzt wird, muss das (wie von der Anforderung
-verlangt) explizit im Backlog als bewusst fehlende Komfortfunktion vermerkt bleiben,
-nicht stillschweigend übergangen werden.
-
-### 4.5 `src/formats/docx/reader.ts` (geändert)
-
-`HeadingInfo`/`parseStylesXml`/`headingLevelForStyle` (Zeile 48–75) um eine
-`w:basedOn`-Kette erweitern (Finding D, Grenzfall 16):
+`HeadingInfo` (Z. 49–51) um `basedOnByStyleId` erweitern; `parseStylesXml` (Z. 53–67)
+zusätzlich `w:basedOn` einsammeln; `headingLevelForStyle` (Z. 69–76) die Vererbungskette
+auflösen und das Ergebnis auf 1–6 klemmen:
 
 ```ts
 interface HeadingInfo {
@@ -532,8 +562,8 @@ function parseStylesXml(stylesDoc: Document | null): HeadingInfo {
   return { outlineLvlByStyleId, basedOnByStyleId }
 }
 
-// Same guard pattern as MAX_TABLE_NESTING_DEPTH further down this file — a malformed or
-// cyclic w:basedOn chain must not hang/crash the import.
+// Gleiches Schutzmuster wie MAX_TABLE_NESTING_DEPTH weiter unten — eine fehlerhafte oder
+// zyklische w:basedOn-Kette darf den Import nicht aufhängen/abstürzen lassen.
 const MAX_STYLE_INHERITANCE_DEPTH = 25
 
 function headingLevelForStyle(styleId: string | null, info: HeadingInfo): number | null {
@@ -543,64 +573,49 @@ function headingLevelForStyle(styleId: string | null, info: HeadingInfo): number
   for (let depth = 0; current && depth < MAX_STYLE_INHERITANCE_DEPTH && !seen.has(current); depth++) {
     seen.add(current)
     const fromStyles = info.outlineLvlByStyleId.get(current)
-    if (fromStyles !== undefined) return fromStyles + 1
-    const match = /^Heading\s?([1-6])$/i.exec(current)
-    if (match) return Number(match[1])
+    // Befund 6: auf 1–6 klemmen, mit unterer Grenze (symmetrisch zum ODT-Clamp 4.5, der
+    // Math.max(1, …) nutzt) — ein fehlerhaftes negatives w:outlineLvl darf kein h0/h-1 ergeben.
+    if (fromStyles !== undefined) return Math.max(1, Math.min(fromStyles + 1, 6))
+    const match = /^Heading\s?([1-9])$/i.exec(current)               // 1-9 statt 1-6, dann klemmen,
+    if (match) return Math.max(1, Math.min(Number(match[1]), 6))    // damit „Heading7..9" erkannt statt verworfen wird
     current = info.basedOnByStyleId.get(current) ?? null
   }
   return null
 }
 ```
 
-Löst Grenzfall 16: eine Formatvorlage, die per `w:basedOn` von „Heading N" erbt, ohne
-selbst ein `w:outlineLvl` zu deklarieren, wird jetzt korrekt als Überschrift der
-geerbten Ebene erkannt statt fälschlich als „Standard" importiert zu werden.
+Wirkung: (a) Grenzfall 16 — geerbte „Heading N"-Vorlage ohne eigenes `outlineLvl` wird
+korrekt erkannt statt als Standard importiert; (b) Befund 6 — eine Ebene 7 (`outlineLvl`
+6 → 7, oder Style-ID „Heading7") wird zu 6 geklemmt statt (bei undefinierter Stilvorlage)
+beim Reimport ganz verloren zu gehen. Der Editor/Writer erzeugt danach `Heading6`
+(definiert) → verlustfreie Rundreise auf Ebene 6.
 
-### 4.6 `src/formats/docx/writer.ts` (geändert — Finding F)
+### 4.5 `src/formats/odt/reader.ts` (geändert) — Befund 7 (`office:styles`) + Befund 6 (Clamp), abgestimmt mit `fett-code.md` §4.8
 
-`blockToDocx`, Fall `'heading'` (Zeile 106–111), muss wie der Fall `'paragraph'`
-(Zeile 101–105) den `listNumId`-Parameter auswerten:
+**(a) Clamp (isoliert, unabhängig von der Kaskade):** `elementToBlocks`-Fall `'h'`
+(Z. 256–262), Zeile 257:
 
 ```diff
-     case 'heading': {
-       const level = Number(node.attrs?.level ?? 1)
-       const align = (node.attrs?.align as string) ?? 'left'
--      const styleTag = `<w:pStyle w:val="${HEADING_STYLE_ID(level)}"/>`
-+      const numPr = listNumId ? `<w:numPr><w:ilvl w:val="0"/><w:numId w:val="${listNumId}"/></w:numPr>` : ''
-+      const styleTag = `<w:pStyle w:val="${HEADING_STYLE_ID(level)}"/>${numPr}`
-       return `<w:p>${paragraphPropsXml(align, styleTag)}${inlineToRuns(node.content)}</w:p>`
-     }
+-    const level = Number(el.getAttributeNS(ODF_NAMESPACES.text, 'outline-level') ?? '1') || 1
++    const level = Math.min(Math.max(1, Number(el.getAttributeNS(ODF_NAMESPACES.text, 'outline-level') ?? '1') || 1), 6)
 ```
 
-Ohne diesen Fix würde jede Überschrift innerhalb eines Listenpunkts (nach dem
-Schema-Fix aus 4.3 jetzt auch als **erstes** Kind möglich, vorher nur als zweites+)
-beim DOCX-Export ihre Listenzugehörigkeit verlieren (`<w:numPr>` fehlt, Absatz wird zu
-einer freistehenden, nicht nummerierten Überschrift). `odt/writer.ts` braucht **keine**
-entsprechende Änderung — ODF bildet Listenmitgliedschaft rein strukturell durch
-Verschachtelung ab (`blockToOdt`s `'bullet_list'`/`'ordered_list'`-Fall reicht jedes
-Kind, unabhängig vom Typ, unverändert an `blockToOdt` weiter, Zeile 75–85), es gibt
-keine separate `numId`-Referenz, die verloren gehen könnte — verifiziert durch
-Codelesen, keine Änderung nötig.
+Als Kontrast zu DOCX (4.4) belegt das Grenzfall/Testfall 4.2.6: ODT behielt die Ebene
+bisher (verlor sie nicht), wird jetzt aber **ebenfalls** auf 6 normalisiert → beide
+Formate verhalten sich identisch.
 
-### 4.7 `src/formats/odt/reader.ts` (geändert, abgestimmt mit `fett-code.md` §4.8)
-
-`parseAutomaticStyles` (Zeile 36–77) wird durch eine kombinierte Kaskaden-Funktion
-ersetzt, die **beide** Pläne gemeinsam bedient (diese Datei: `paragraph`-Familie/
-Ausrichtung; `fett-code.md` §4.8: `text`-Familie/Marks) — **wichtig: beide Änderungen
-müssen in derselben Umsetzung landen, nicht nacheinander unabhängig, da sie dieselbe
-Funktion ersetzen.**
+**(b) `office:styles` + `parent-style-name` (gemeinsam mit `fett-code.md` §4.8):**
+`parseAutomaticStyles` (Z. 37–78) zu einer Kaskade erweitern, die **beide** Familien und
+**beide** Container bedient. `ParsedStyles` (Z. 23–27) bekommt ein Feld
+`parentByName: Map<string, string>`. Skizze der geteilten Funktion (die `text`-Familie
+liefert `fett-code.md`, die `paragraph`-Familie diese Datei):
 
 ```ts
-interface ParsedStyles {
-  textStyles: Map<string, RunStyle>
-  paragraphAligns: Map<string, string>
-  listKinds: Map<string, 'bullet' | 'ordered'>
-}
-
 function collectStyleFamilies(
   containerEl: Element | null,
   textStyles: Map<string, RunStyle>,
   paragraphAligns: Map<string, string>,
+  listKinds: Map<string, 'bullet' | 'ordered'>,
   parentByName: Map<string, string>,
 ): void {
   if (!containerEl) return
@@ -610,16 +625,15 @@ function collectStyleFamilies(
     if (!name) continue
     const parent = styleEl.getAttributeNS(ODF_NAMESPACES.style, 'parent-style-name')
     if (parent && !parentByName.has(name)) parentByName.set(name, parent)
-
     if (family === 'text' && !textStyles.has(name)) {
-      // ... unverändert aus der heutigen parseAutomaticStyles-Logik für family === 'text'
-      // (fo:font-weight, fo:font-style, style:text-underline-style, ..., siehe fett-code.md §4.8)
+      /* ... bestehende family==='text'-Logik (fo:font-weight, ..., fett-code.md §4.8) ... */
     } else if (family === 'paragraph' && !paragraphAligns.has(name)) {
       const props = firstChildNS(styleEl, ODF_NAMESPACES.style, 'paragraph-properties')
       const align = props?.getAttributeNS(ODF_NAMESPACES.fo, 'text-align')
       if (align) paragraphAligns.set(name, align)
     }
   }
+  // list-style-Verarbeitung (Z. 70–75) unverändert übernehmen.
 }
 
 const MAX_STYLE_PARENT_DEPTH = 25
@@ -641,249 +655,348 @@ function resolveParagraphAlign(
 }
 ```
 
-`readOdt` (Zeile 239 ff.) ruft `collectStyleFamilies` für **automatische** Stile
-**zuerst** auf (Vorrang bei Namenskollision, wie in `fett-code.md` §4.8 gefordert),
-danach für `office:styles` aus **beiden** Teilen (`content.xml`, falls dort
-ausnahmsweise vorhanden, und `styles.xml`, der übliche Ort für gemeinsame Stile):
+`readOdt` (Z. 357–409) sammelt Stile mit klarer Vorrangordnung: **automatische zuerst**
+(Namensvorrang), dann `office:styles` aus `content.xml` (falls vorhanden) und `styles.xml`.
+Der `office:styles`-Container aus `styles.xml` (`stylesDoc`) wird dort bereits geladen
+(Z. 372), aber bisher nur dessen `automatic-styles` (Z. 373) genutzt:
 
 ```ts
 const textStyles = new Map<string, RunStyle>()
 const paragraphAligns = new Map<string, string>()
+const listKinds = new Map<string, 'bullet' | 'ordered'>()
 const parentByName = new Map<string, string>()
-collectStyleFamilies(contentAutomaticStyles, textStyles, paragraphAligns, parentByName)
-// ... stylesAutomaticStyles analog ...
+collectStyleFamilies(contentAutomaticStyles, textStyles, paragraphAligns, listKinds, parentByName)
+// stylesAutomaticStyles (Chrome) analog ...
 const contentOfficeStyles = contentDoc.getElementsByTagNameNS(ODF_NAMESPACES.office, 'styles')[0] ?? null
 const stylesOfficeStyles = stylesDoc?.getElementsByTagNameNS(ODF_NAMESPACES.office, 'styles')[0] ?? null
-collectStyleFamilies(contentOfficeStyles, textStyles, paragraphAligns, parentByName)
-collectStyleFamilies(stylesOfficeStyles, textStyles, paragraphAligns, parentByName)
+collectStyleFamilies(contentOfficeStyles, textStyles, paragraphAligns, listKinds, parentByName)
+collectStyleFamilies(stylesOfficeStyles, textStyles, paragraphAligns, listKinds, parentByName)
 ```
 
-`paragraphToBlocks`/`elementToBlocks` (Zeile 123–157, 164–206) ändern sich **nicht**
-inhaltlich — beide rufen weiterhin `styles.paragraphAligns.get(styleName)` auf; nur
-dass diese Map jetzt zusätzlich `office:styles`-Einträge (mit aufgelöster
-`parent-style-name`-Kette) enthält, muss über `resolveParagraphAlign(...)` statt eines
-reinen `.get(...)` erfolgen:
+`paragraphToBlocks` (Z. 175–213, Align Z. 178) und `elementToBlocks`-Fall `'h'`
+(Z. 256–262, Align Z. 259) lösen die Ausrichtung nun über die Kette auf:
 
 ```diff
 - const align = (styleName && styles.paragraphAligns.get(styleName)) || 'left'
 + const align = (styleName && resolveParagraphAlign(styleName, styles.paragraphAligns, styles.parentByName)) || 'left'
 ```
 
-(zwei Fundstellen: `paragraphToBlocks` Zeile 126, `elementToBlocks`-Fall `'h'` Zeile
-173 — jeweils analog anzupassen; `ParsedStyles` bekommt dafür ein zusätzliches Feld
-`parentByName: Map<string, string>`).
+Wirkung: Eine Überschrift, deren Ausrichtung über eine gemeinsame/benannte Vorlage in
+`office:styles` (ggf. per `parent-style-name` vererbt) kommt, verliert sie beim Import
+nicht mehr still (Befund 7, Grenzfall 16). `MyHeading1.odt` (Stil `Heading2` nur in
+`office:styles`) belegt die **strukturelle** Seite; für den quantitativen
+Ausrichtungs-Nachweis dient eine synthetische Fixture (5.3), da `MyHeading1.odt`s
+`Heading2` selbst kein `fo:text-align` deklariert.
 
-Löst Befund 6/Grenzfall 15: Eine Überschrift, deren Formatierung über eine
-gemeinsame/benannte Formatvorlage aus `office:styles` bezogen wird (wie in
-`MyHeading1.odt` bereits real vorhanden — `Heading2` ist dort **nur** in `styles.xml`s
-`office:styles` definiert, nicht in `office:automatic-styles`), verliert ihre
-Ausrichtung beim Import nicht mehr still.
+### 4.6 `src/formats/docx/writer.ts` + `src/formats/docx/reader.ts` (geändert) — Finding F **und** F2
 
-### 4.8 Keine Änderung erforderlich (verifiziert, zur Vollständigkeit dokumentiert)
+**Beide Änderungen sind zwingend gemeinsam nötig** — der Writer-Fix allein erzeugt nur ein
+`<w:numPr>` auf XML-Ebene, das der Reader danach wieder wegwirft (Finding F2/2.5a). Erst
+zusammen entsteht eine funktionierende Rundreise.
 
-- `src/formats/docx/styleDefs.ts`, `src/formats/odt/styleRegistry.ts` — Export-seitige
-  Formatvorlagen-Definitionen sind korrekt (siehe Abschnitt 1, Zeile 8); die
-  Fett-Deklaration auf Stil-Ebene ist laut `fett-code.md` §5 bereits als bewusst
-  akzeptiertes Verhalten dokumentiert, hier nicht erneut zu ändern.
-- `src/formats/odt/writer.ts` — bereits korrekt (Finding F betrifft ausschließlich
-  `docx/writer.ts`, siehe Abschnitt 4.6).
-- `src/formats/shared/editor/commands.ts` `setAlign`/`isAlignActive` — bewusst
-  unverändert, siehe Abschnitt 4.1 (Finding B ist Cross-Reference, kein Fix hier).
+**Teil 1 — Writer (`docx/writer.ts`, Finding F):** `blockToDocx`-Fall `'heading'`
+(Z. 119–124) den durchgereichten `listContext` genauso auswerten wie der `'paragraph'`-Fall
+(Z. 114–117), `pStyle` **vor** `numPr` (OOXML-`pPr`-Reihenfolge):
+
+```diff
+     case 'heading': {
+       const level = Number(node.attrs?.level ?? 1)
+       const align = (node.attrs?.align as string) ?? 'left'
+-      const styleTag = `<w:pStyle w:val="${HEADING_STYLE_ID(level)}"/>`
+-      return `<w:p>${paragraphPropsXml(align, styleTag)}${inlineToRuns(node.content)}</w:p>`
++      const styleTag = `<w:pStyle w:val="${HEADING_STYLE_ID(Math.min(level, 6))}"/>`
++      const numPr = listContext
++        ? `<w:numPr><w:ilvl w:val="${listContext.level}"/><w:numId w:val="${listContext.numId}"/></w:numPr>`
++        : ''
++      return `<w:p>${paragraphPropsXml(align, styleTag + numPr)}${inlineToRuns(node.content)}</w:p>`
+     }
+```
+
+(`Math.min(level, 6)` ist reine Härtung — nach dem Import-Clamp aus 4.4/4.5 ist `level`
+bereits ≤ 6.) `odt/writer.ts` bleibt unverändert (Finding F betrifft nur DOCX, siehe 2.5).
+
+**Teil 2 — Reader (`docx/reader.ts`, Finding F2):** In `readBodyChildren`
+(`docx/reader.ts:464-485`) die Markerbedingung `docx/reader.ts:476` so erweitern, dass auch
+ein `'heading'` seinen Listenmarker behält — Bild-/`unsupported`-Blöcke aber **weiterhin
+nicht** (deren Guard ist der eigentliche Zweck der Zeile, siehe 2.5a):
+
+```diff
+       for (const block of paragraphToBlocks(child, headingInfo, imageRels)) {
+-        items.push({ marker: block.type === 'paragraph' ? marker : { numId: null, ilvl: 0 }, block })
++        // Ein 'heading' aus paragraphToBlocks entsteht nur im !hasBlockRun-Zweig und ist
++        // dann der einzige Block des <w:p> — er darf, wie ein 'paragraph', den numPr-Marker
++        // seines Absatzes behalten (Finding F2). Nur aus einem Absatz herausgelöste
++        // image/unsupported_block-Blöcke dürfen ihn NICHT erben.
++        const carriesMarker = block.type === 'paragraph' || block.type === 'heading'
++        items.push({ marker: carriesMarker ? marker : { numId: null, ilvl: 0 }, block })
+       }
+```
+
+Nachweis, dass beide Teile zusammenwirken: Rundreise-Test 5.6 wird auf **Reimport** verschärft
+(nicht nur XML-Assertion): Editor-Dokument mit Überschrift innerhalb eines Listenpunkts →
+`writeDocx` → `readDocx` → die Überschrift liegt wieder **innerhalb** eines
+`bullet_list`/`ordered_list` (nicht als Top-Level-Block daneben). Dieser Test schlägt mit
+**nur** Teil 1 fehl und wird erst mit Teil 2 grün. (Bekannte, inhärente DOCX-Grenze, die er
+**nicht** prüft: ein ODT-`list_item` mit mehreren Kindern — z. B. `[paragraph, heading]` aus
+`ListHeading.odt` — wird beim DOCX-Export in getrennte flache Listenzeilen zerlegt, weil
+OOXML pro `<w:p>` genau eine Listenzeile kennt; entscheidend ist nur, dass die Überschrift
+**überhaupt** Listenmitglied bleibt.)
+
+### 4.7 Keine Änderung (verifiziert, zur Vollständigkeit)
+
+- `src/formats/docx/styleDefs.ts` (`HEADING_FONT_SIZES` Z. 3 nur 1–6; `headingStylesXml`
+  Z. 9–30) und `src/formats/odt/styleRegistry.ts` (`HEADING_FONT_SIZES` Z. 77 nur 1–6;
+  `headingStyleDefs` Z. 84–93) — korrekt und **konsistent mit der Clamp-Entscheidung 3.4**
+  (nur 1–6 definiert). Die stilgebundene Fettung ist laut `fett-code.md` bewusst
+  akzeptiert.
+- `src/formats/odt/writer.ts` — korrekt (Listenmitgliedschaft strukturell, kein `numId`).
+
+**Korrektur gegenüber der vorigen Planfassung:** `src/index.css` stand hier bisher fälschlich
+als „keine Änderung" — das war nur für die **Fettung** zutreffend (Finding C ist eine reine
+Prämissenkorrektur; *ob* Überschriften zusätzlich fett dargestellt werden, gehört zu
+`fett-*`). Die **Schriftgrößen-Abstufung** (Befund 11/Abnahme 10) ist dagegen Gegenstand
+dieser Anforderung selbst und **erfordert** eine Änderung — siehe 4.9.
+
+### 4.8 `src/formats/shared/editor/WordEditor.tsx` (optional, kein Blocker)
+
+Anforderung 1 Zeile 3: Tastenkürzel fehlen, **kein** Blocker, aber nicht stillschweigend
+zu übergehen. Empfehlung wegen minimalen Aufwands ergänzen — in den bestehenden ersten
+`keymap({...})`-Block (`WordEditor.tsx:85-107`; die Anforderung nennt veraltet Z. 77–99),
+`setHeading` in den `./commands`-Import (`WordEditor.tsx:12`,
+`import { cutSelection, insertHardBreak } from './commands'`) aufnehmen:
+
+```ts
+'Mod-Alt-0': setHeading(null),
+'Mod-Alt-1': setHeading(1),
+// ... bis
+'Mod-Alt-6': setHeading(6),
+```
+
+Falls **nicht** umgesetzt: als bewusst fehlende Komfortfunktion im Backlog vermerken,
+nicht stillschweigend übergehen.
+
+### 4.9 `src/index.css` (geändert) — Befund 11 / Abnahme 10, koordiniert mit `fett-code.md` §4.5
+
+Nach dem `h1`–`h6`-Margin-Block (Z. 29–37) ergänzen. **Dieser Block muss sowohl die
+`font-size`-Staffelung dieser Anforderung als auch das `font-weight: 700` aus
+`fett-code.md` §4.5 enthalten** (3.6) — unabhängig davon, welcher der beiden Fixes zuerst
+umgesetzt wird, darf die jeweils andere Deklaration beim Zusammenführen nicht verloren
+gehen:
+
+```css
+.ProseMirror h1 { font-size: 24pt; }
+.ProseMirror h2 { font-size: 20pt; }
+.ProseMirror h3 { font-size: 18pt; }
+.ProseMirror h4 { font-size: 16pt; }
+.ProseMirror h5 { font-size: 14pt; }
+.ProseMirror h6 { font-size: 13pt; }
+
+.ProseMirror h1,
+.ProseMirror h2,
+.ProseMirror h3,
+.ProseMirror h4,
+.ProseMirror h5,
+.ProseMirror h6 {
+  font-weight: 700; /* fett-code.md §4.5, Defekt D — hier nur mitgeführt, nicht neu entschieden */
+}
+```
+
+Werte 1:1 aus `HEADING_FONT_SIZES` übernommen (`docx/styleDefs.ts:3` Halbpunkte ÷ 2,
+`odt/styleRegistry.ts:77` Punkte — beide bereits identisch, siehe 3.6); `pt` ist eine
+gültige CSS-Längeneinheit, daher keine Umrechnung nötig. Wirkung: Der Formatwechsel im
+Dropdown wird im Editor jetzt **sichtbar** (Testfall 5.1/18, `getComputedStyle`-Vergleich
+gegen einen benachbarten `<p>`), nicht mehr nur am exportierten Ergebnis ablesbar — behebt
+Befund 11 und erfüllt Abnahme 10 durch tatsächliche Abstufung (nicht durch dokumentierte
+Einschränkung).
+
+Keine Änderung an `docx/styleDefs.ts`/`odt/styleRegistry.ts` — deren `HEADING_FONT_SIZES`
+sind bereits die Quelle der hier übernommenen Werte.
 
 ---
 
-## 5. Testplan (Zuordnung zu Abschnitt 5 der Anforderung)
+## 5. Testplan (Zuordnung zu Anforderung Abschnitt 5)
 
-### 5.1 Neue Datei: `tests/e2e/absatzformat.spec.ts` (neu)
+### 5.1 Neu: `tests/e2e/absatzformat.spec.ts`
 
-Analog zur in `fett-code.md` §6.1 für „Fett" empfohlenen `bold.spec.ts` — dediziert per
-`page.getByLabel('Absatzformat')`/`selectOption`, nicht über direkte Command-Aufrufe:
+Durchgehend `page.getByLabel('Absatzformat')` + `selectOption`, echter `filechooser`-
+Upload/`waitForEvent('download')` — **baut auf** der bestehenden Abdeckung (Befund 10) auf,
+statt sie zu duplizieren; Fokus auf die bisher ungetesteten Grenzfälle:
 
-1. Cursor in neu getippten Absatz, „Überschrift 1" wählen → `<h1>` im DOM, Dropdown
-   zeigt weiterhin „Überschrift 1" (Testfall 5.1).
-2. Direkt danach „Überschrift 4" ohne Zwischenschritt → `<h4>`, kein Zwischenzustand
-   (Testfall 5.2/Grenzfall 10).
-3. „Standard" wählen → wieder `<p>`, echte Node-Typ-Änderung, nicht nur visuell
-   (Testfall 5.3/Abschnitt 2.4).
-4. Zwei Zeilen per Maus-Drag markieren, „Überschrift 2" wählen → **beide** werden zu
-   `<h2>` (neues Ergebnis gemäß Entscheidung 3.1, ersetzt die in der Anforderung noch
-   offene Erwartung aus Testfall 5.4).
-5. Cursor in ersten Absatz eines Listenpunkts, „Überschrift 1" wählen → funktioniert
-   jetzt (neues Ergebnis gemäß Entscheidung 3.3, ersetzt „aktuell: kein sichtbarer
-   Effekt" aus Testfall 5.5/Grenzfall 4).
-6. Cursor in zweiten Absatz desselben Listenpunkts (Umschalt+Enter), „Überschrift 1"
-   wählen → funktioniert weiterhin (Testfall 5.6/Grenzfall 5) — **jetzt konsistent**
-   mit Test 5, nicht mehr die in der Anforderung dokumentierte Inkonsistenz.
-7. Cursor in Tabellenzelle, „Überschrift 2" → Zelle zeigt `<h2>`, Rest unverändert
-   (Testfall 5.7).
-8. Mehrere Tabellenzellen markieren (`CellSelection`), Format wählen → **alle**
-   selektierten Zellen erhalten das Format (neues Ergebnis gemäß Entscheidung 3.1
-   Finding A, ersetzt „No-Op" aus Testfall 5.8/Grenzfall 2.7/7).
-9. Absatz zentrieren, danach „Überschrift 1" → Ausrichtung bleibt `center` erhalten
-   (neues Ergebnis gemäß Entscheidung 3.2, ersetzt den in Grenzfall 8 als „potenzieller
-   Fehler" markierten Zustand).
-10. Enter am Ende einer Überschrift → neuer Block ist `<p>`, keine weitere Überschrift
-    (Testfall 5.10/Abschnitt 2.8, bisher komplett ungetestet).
-11. Enter mitten in einer Überschrift → beide Hälften bleiben `<hN>` derselben Ebene
-    (Testfall 5.11/Abschnitt 2.8).
-12. Undo direkt nach Formatwechsel → vorheriger Node-Typ **und** Ausrichtung
-    wiederhergestellt (dank 3.2 jetzt auch die Ausrichtung, nicht nur der Typ); Redo
-    stellt beides erneut her (Testfall 5.12/Abschnitt 2.10).
-13. **Neuer Pflichttest, Regression:** Datei `listStyleId.odt` hochladen (oder eine
-    kleinere, gezielt gebaute Kopie desselben Konstrukts — Überschrift als einziges
-    Kind eines Listenpunkts), Cursor ans Ende dieser Überschrift setzen, **Enter**
-    drücken, weiter tippen → Editor bleibt bedienbar, kein JS-Fehler in der Konsole,
-    Dokument bleibt konsistent. Direkter Regressionstest für Finding E3 — **muss vor
-    dem Schema-Fix aus 4.3 fehlschlagen und danach grün sein**, sonst ist der Fix nicht
-    wirksam.
-14. Analog zu Grenzfall 14/Testfall 5.13 der Anforderung: Tippen → Absatzformat setzen
-    → Klick zur Neupositionierung → Enter → weiter tippen → Dokument bleibt konsistent
-    (Selection-Sync-Regression, analog `selection-regression.spec.ts`, jetzt mit
-    Absatzformat-Wechsel als auslösendem Schritt statt Fett).
-15. Vollständige Rundreisetests je Format (4.1/4.2 der Anforderung) über echten
-    Datei-Upload/-Download (Testfall 5.14).
-16. Cross-Format-Rundreise DOCX→ODT→DOCX und ODT→DOCX→ODT (Testfall 5.15).
-17. Reale Fremddatei-Tests: `MyHeading1.odt` (Befund 6/Grenzfall 15 — Text und Ebene
-    bleiben erhalten; Ausrichtung wird nach dem Fix aus 4.7 ebenfalls korrekt gelesen,
-    sofern die betroffene reale Formatvorlage `fo:text-align` deklariert — bei
-    `MyHeading1.odt`s `Heading1`/`Heading2` selbst ist das **nicht** der Fall, die
-    Fixture beweist daher nur die **strukturelle** Seite des Bugs, nicht sichtbar die
-    Ausrichtung; für einen deterministischen Ausrichtungs-Nachweis zusätzlich eine
-    **synthetische** ODT-Datei bauen, siehe 5.3), `ListHeading.odt`/`ListHeading2.odt`
-    (Grenzfall 4/5 — Text/Ebene bleiben erhalten, Konvertierbarkeit an beiden
-    Positionen jetzt konsistent), `heading123.docx` (einfache Rundreise, Abnahme
-    4.1.7). (Testfall 5.16)
-18. Mobile/Tablet: Testfälle 1–3 auf allen drei `playwright.config.ts`-Projekten
-    (Desktop Chrome, Mobile/Pixel 7, Tablet/iPad Mini) (Testfall 5.17).
+1. Neuer Absatz → „Überschrift 1" → `h1` im DOM, Dropdown zeigt „Überschrift 1".
+2. Direkt „Überschrift 4" ohne Zwischenschritt → `h4` (Grenzfall 10).
+3. „Standard" → wieder `p` (echte Node-Typ-Änderung, 2.4).
+4. Zwei Zeilen per Maus-Drag markieren, „Überschrift 2" → **beide** werden `h2`
+   (Ergebnis gemäß 3.1 — ersetzt die offene Erwartung aus Testfall 5.4).
+5. Cursor im (einzigen) Absatz eines Listenpunkts, „Überschrift 1" → funktioniert (`h1`
+   in `li`), gemäß 3.3/Grenzfall 4.
+6. Cursor im zweiten Block desselben Listenpunkts → funktioniert ebenfalls, **konsistent**
+   mit 5 (Grenzfall 5).
+7. Cursor in Tabellenzelle, „Überschrift 2" → Zelle `h2`, Rest unverändert.
+8. Mehrere Tabellenzellen (`CellSelection`), Format wählen → **alle** selektierten Zellen
+   erhalten das Format (Ergebnis gemäß 3.1/Finding A — ersetzt „No-Op" aus 5.8).
+9. Absatz zentrieren, dann „Überschrift 1" → Ausrichtung bleibt `center` (3.2/Grenzfall 8);
+   danach „Standard" → immer noch `center` (Grenzfall 9, kumulativ).
+10. Enter am Ende einer Überschrift, weiter tippen → neuer Block ist `p`, **ohne**
+    manuelles `selectOption('normal')` (2.8).
+11. Enter mitten in einer Überschrift → beide Hälften bleiben `hN` derselben Ebene.
+12. Undo direkt nach Formatwechsel → vorheriger Node-Typ **und** Ausrichtung wieder da;
+    Redo stellt beides her; Kette mehrerer Wechsel einzeln rückgängig (2.10).
+13. **Ebene > 6 (Befund 6/Grenzfall 11):** DOCX-Fixture mit „Heading 7" hochladen → nach
+    Clamp `h6` im DOM, Dropdown zeigt „Überschrift 6"; exportieren/reimportieren → Ebene
+    bleibt 6 (kein Abfall auf Standard). ODT-Variante (`text:outline-level="7"`) → ebenfalls
+    `h6`. **Muss vor dem Clamp aus 4.4/4.5 fehlschlagen (DOCX: Standard), danach grün.**
+14. **Selection-Sync-Regression mit Absatzformat als Auslöser** (Grenzfall 15): Tippen →
+    „Überschrift 1" → Klick zur Neupositionierung → Enter → weiter tippen → beide Absätze
+    erhalten (analog `selection-regression.spec.ts`, jetzt mit Absatzformat statt Fett).
+    Pflichttest.
+15. Vollständige Rundreise je Format (4.1/4.2), inkl. Ebene 3–6, echter Upload/Download.
+16. Cross-Format-Rundreise (4.3): DOCX→ODT→DOCX und ODT→DOCX→ODT.
+17. Dropdown-Bedienung auf allen drei `playwright.config.ts`-Projekten (Desktop Chrome,
+    Mobile/Pixel 7, Tablet/iPad Mini) → Kernfunktion 1–3 je Projekt.
+18. **Sichtbare Darstellung (Befund 11/Grenzfall 20/Abnahme 10, neu — in der vorigen
+    Planfassung komplett gefehlt, siehe 0.1):** Neuen Absatz eingeben, „Überschrift 1"
+    wählen → `getComputedStyle` der resultierenden `h1` gegen einen benachbarten `<p>`
+    vergleichen, `fontSize` muss messbar größer sein (nach 4.9: `24pt`/`32px` vs.
+    Fließtext-Größe); Ebene 6 gegen Ebene 1 (`13pt` < `24pt`) zur Kontrolle der Staffelung;
+    ergänzend ein Screenshot-Vergleich auf dem Desktop-Chrome-Projekt. **Muss vor 4.9
+    fehlschlagen** (Editor-`h1` hat dieselbe berechnete `font-size` wie `<p>`), **danach
+    grün**.
+19. **Strukturell verwandte, eigenständig zu testende Sonderfälle (Befund 12/13,
+    Grenzfall 21/22, Abnahme 3 — in der vorigen Planfassung komplett gefehlt, siehe 0.1):**
+    - (a) Neues Dokument mit genau einem Absatz, Text eingeben, `Strg+A`/`Cmd+A`, dann
+      „Überschrift 1" wählen → der Absatz wird `h1` (Ergebnis gemäß 3.1: die
+      „erweitern"-Entscheidung gilt für `AllSelection` genauso wie für Mehrblock); Dropdown
+      zeigt währenddessen **nicht** fälschlich „Standard" (behebt die in Befund 12
+      zusätzlich beschriebene Anzeige-Falschmeldung). Ergänzend: dieselbe Bedienung in
+      einem Mehr-Absatz-Dokument → **alle** Absätze/Überschriften werden zur gewählten
+      Ebene (bewusste, in 3.1 dokumentierte Konsequenz — kein Sonderfall-Ausschluss).
+    - (b) Ein Bild einfügen, per Klick markieren (`NodeSelection`), „Überschrift 1"
+      wählen → Dropdown ist deaktiviert (4.2), kein Effekt, keine JS-Exception (behebt den
+      stillen No-Op aus Befund 13 durch sichtbare Deaktivierung statt stillschweigenden
+      Fehlschlags).
 
-### 5.2 `src/formats/shared/editor/__tests__/commands.test.ts` (neu — geteilt mit `fett-code.md` §6.2)
+### 5.2 `src/formats/shared/editor/__tests__/commands.test.ts` (ergänzt)
 
-**Koordinationshinweis:** `fett-code.md` §6.2 plant bereits eine Datei mit exakt diesem
-Pfad (für `isMarkActive`). Beide Testgruppen müssen in **derselben** Datei
-zusammengeführt werden (z. B. je ein `describe`-Block), nicht als zwei konkurrierende
-Dateien mit demselben Namen entstehen.
+Datei existiert (bisher `canCut`/`cutSelection`). Neuer `describe`-Block für
+`collectHeadingTargets`/`canSetHeading`/`setHeading` (Vitest, ohne DOM):
+- Collapsed Cursor in Absatz/Überschrift → genau ein Target.
+- Selektion über zwei Absätze → zwei Targets; `setHeading` wandelt beide, jeder behält
+  seine eigene `align`; genau ein `tr` (`tr.docChanged`, ein Undo-Schritt).
+- `CellSelection` über 2×2 Zellen → vier Targets, alle in **einer** Transaktion umgewandelt.
+- `CellSelection` über eine reine Bild-Zelle → keine Targets, `canSetHeading === false`.
+- Cursor im ersten **und** im zweiten Kind eines Listenpunkts → je ein Target
+  (Regressions-Sperre für den bereits vorhandenen `block+`-Zustand, 2.4).
+- **`wrapInList` auf eine einzelne Überschrift liefert `true`** (Regressions-Sperre für
+  Finding D/2.4 — schlägt mit dem alten `'paragraph block*'`-Schema fehl).
+- Direkter Ebenenwechsel (2 → 5) → funktioniert, `align` bleibt.
+- **`AllSelection` über ein Ein-Absatz-Dokument** (Befund 12, neu) → genau ein Target;
+  `setHeading(1)` liefert `true` und wandelt den Absatz um (Gegenprobe zum alten
+  Verhalten, das hier laut Anforderung nachweislich `false` lieferte). Zusätzlich:
+  `AllSelection` über ein Mehr-Absatz-Dokument (inkl. eines Absatzes in einem Listenpunkt)
+  → ein Target je gefundenem `paragraph`/`heading`, unabhängig von der Tiefe.
+- **`NodeSelection` auf einem `image`-Knoten** (Befund 13, neu) → keine Targets,
+  `canSetHeading` liefert `false`, `setHeading(1)` liefert `false` ohne zu dispatchen.
 
-Unit-Tests (Vitest, ohne DOM/E2E) für `collectHeadingTargets`/`canSetHeading`/
-`setHeading` aus Abschnitt 4.1:
+**Koordinationshinweis:** `fett-code.md` §6.2 plant eine Datei desselben Pfads (für
+`isMarkActive`). Beide Testgruppen in **derselben** Datei zusammenführen (je ein
+`describe`), nicht zwei konkurrierende Dateien.
 
-- Collapsed Cursor in einem Absatz/einer Überschrift → genau ein Target.
-- Selektion über zwei Absätze → zwei Targets, `setHeading` konvertiert beide, jeder
-  behält seine eigene vorherige `align`.
-- `CellSelection` über 2×2 Zellen (Aufbau wie in Abschnitt 3.1 beschrieben) →
-  vier Targets (einer je Zelle), `setHeading` konvertiert alle vier in einer einzigen
-  Transaktion (`tr.docChanged`, genau ein Undo-Schritt).
-- `CellSelection` über eine leere Bild-Zelle (kein Absatz/keine Überschrift als
-  Content) → keine Targets, `canSetHeading` liefert `false`.
-- Cursor im ersten **und** im zweiten Kind eines Listenpunkts → beide liefern ein
-  Target (Regressionstest für den Schema-Fix aus 4.3 — vorher lieferte nur die zweite
-  Position ein strukturell gültiges Ergebnis).
-- Direkter Ebenenwechsel (Level 2 → Level 5 in einem Aufruf) → funktioniert, `align`
-  bleibt erhalten.
+### 5.3 Neu: `src/formats/odt/__tests__/reader-edge-cases.test.ts`
 
-### 5.3 `src/formats/odt/__tests__/reader-edge-cases.test.ts` (neu)
+Hand-gebaute minimale ODT-Zips (Muster: `odt.spec.ts`s `buildSampleOdt()`, hier per JSZip
+auf Unit-Ebene):
+- `<text:h text:style-name="Common1">` mit `Common1` **nur** in `office:styles`, explizit
+  `fo:text-align="center"` → nach 4.5 wird `align: 'center'` gelesen (**vor dem Fix
+  fehlschlagend, danach grün**).
+- Dieselbe Konstruktion mit `style:parent-style-name`-Kette (A erbt von B, nur B hat
+  `fo:text-align`) → über die Kette aufgelöst.
+- `text:outline-level="8"` → nach 4.5 `level: 6` (Clamp).
 
-Hand-gebaute, minimale ODT-Zips (Muster: `tests/e2e/odt.spec.ts`s `buildSampleOdt()`,
-aber auf Unit-Ebene mit JSZip direkt) für deterministische, synthetische Fälle, die die
-reale Fixture-Korpus nicht in der benötigten Präzision liefert:
+### 5.4 Neu: `src/formats/docx/__tests__/reader-edge-cases.test.ts`
 
-- `<text:h text:style-name="Common1" ...>` mit `Common1` **ausschließlich** in
-  `office:styles` (nicht `office:automatic-styles`) definiert, mit explizitem
-  `fo:text-align="center"` → nach Fix aus 4.7 wird `align: 'center'` korrekt gelesen
-  (vor dem Fix: `'left'`, stiller Verlust — dieser Test **muss vor dem Fix fehlschlagen
-  und danach grün sein**).
-- Dieselbe Konstruktion mit einer `style:parent-style-name`-Kette (Stil A erbt von
-  Stil B, nur B deklariert `fo:text-align`) → Ausrichtung wird über die Kette
-  aufgelöst.
-- Real-Fixture-Smoke-Tests (ergänzt in `external-fixtures.test.ts`, siehe 5.5):
-  `MyHeading1.odt`, `ListHeading.odt`, `ListHeading2.odt`, `listStyleId.odt` — gezielte
-  Assertions statt nur „importiert ohne Absturz" (Text und `outline-level` je Fixture
-  konkret geprüft, siehe 5.5).
-
-### 5.4 `src/formats/docx/__tests__/reader-edge-cases.test.ts` (neu)
-
-- Hand-gebauter `styles.xml`-Ausschnitt: Stil `CustomHeading` mit
-  `<w:basedOn w:val="Heading1"/>`, ohne eigenes `w:outlineLvl` → `readDocx` erkennt
-  Level 1 (Regressionstest für Finding D/Grenzfall 16 — **muss vor dem Fix aus 4.5
-  fehlschlagen und danach grün sein**).
-- Zyklischer `w:basedOn` (A basiert auf B, B auf A) → kein Hang/Absturz, Rückgabe
-  `null` (Level unbekannt), analog zum bereits bestehenden
-  `MAX_TABLE_NESTING_DEPTH`-Muster in derselben Datei.
-- `heading123.docx` (reale Fixture) → Level und Text korrekt erkannt (Abnahme 4.1.7).
+- `styles.xml`-Ausschnitt: Stil `CustomHeading` mit `<w:basedOn w:val="Heading1"/>`, ohne
+  eigenes `w:outlineLvl` → `readDocx` erkennt Level 1 (**vor 4.4 fehlschlagend, danach
+  grün** — Finding D/Grenzfall 16).
+- Zyklischer `w:basedOn` (A↔B) → kein Hang/Absturz, `null`.
+- Stil-ID „Heading7" bzw. `outlineLvl`-8-Vorlage → Level 6 (Clamp, Befund 6).
+- `heading123.docx` (reale Fixture, existiert) → Level/Text korrekt (Abnahme 4.1.7).
 
 ### 5.5 `src/formats/odt/__tests__/external-fixtures.test.ts` (ergänzt)
 
-Aktuell nur „importiert ohne Absturz" (siehe Abschnitt 1 dieser Datei). Ergänzen um:
-
-- `listStyleId.odt`: **zusätzlich zum reinen Crash-Test** eine Schema-Validitäts-
-  Prüfung — `wordSchema.nodeFromJSON(doc.body)` gefolgt vom Versuch, `EditorView` zu
-  mounten **und** `splitListItem` an der betroffenen Position dry-run auszuführen
-  (`command(state, undefined)`), darf **nicht** werfen. Dieser Test deckt exakt die
-  Lücke ab, die der bisherige „importiert ohne Absturz"-Test **nicht** sieht (er prüft
-  nur `readOdt` selbst, nie das Ergebnis gegen das Schema oder gegen
-  Bearbeitungs-Commands) — siehe Finding E3.
-- `MyHeading1.odt`: `Heading2`-Überschrift korrekt als `level: 2` erkannt trotz
-  ausschließlicher Definition in `office:styles`.
-- `ListHeading.odt`/`ListHeading2.odt`: `list_item` mit zwei Kindern
-  (`paragraph`, `heading`) korrekt erkannt.
+- `listStyleId.odt`: **über den reinen „importiert ohne Absturz"-Test hinaus** —
+  `wordSchema.nodeFromJSON(doc.body)`, `EditorView` mounten, `splitListItem` an der
+  Überschrift-im-Listenpunkt-Position als Dry-Run (`command(state, undefined)`) darf
+  **nicht** werfen. Regressions-Sperre für den bereits behobenen Absturz (2.4).
+- `MyHeading1.odt`: `Heading2`-Überschrift trotz Definition nur in `office:styles` als
+  `level: 2` erkannt.
+- `ListHeading.odt`/`ListHeading2.odt`: `list_item` mit zwei Kindern (`paragraph`,
+  `heading`) korrekt.
 
 ### 5.6 `src/formats/docx/__tests__/roundtrip.test.ts` (ergänzt)
 
-- Bestehende Gruppe „preserves heading alignment" (aktuell nur `align: 'center'`, ein
-  Fall) zu `it.each(['left', 'center', 'right', 'justify'])` erweitern, analog zur
-  bereits vorhandenen Parametrisierung für Absätze (Zeile 49) — schließt die Lücke,
-  dass bisher nur eine von vier Ausrichtungen für Überschriften geprüft wird.
-- Neuer Fall: Level 3–6 (bisher nur 1/2 abgedeckt).
-- Neuer, unabhängigerer Struktur-Test (ergänzt, ersetzt nicht die bestehenden
-  Fidelity-Tests): nach `writeDocx` das rohe `word/document.xml` direkt per Regex/
-  `DOMParser` auf `<w:pStyle w:val="Heading3"/>` prüfen (Muster aus `docx.spec.ts`s
-  E2E-Tests, hier auf Unit-Ebene) — erfüllt Abnahme 4.1.2 wörtlicher als der bisherige
-  reine Round-Trip-über-die-eigene-Reader-Test.
-- Neuer Fall: Wechsel „Heading3" → kein `w:pStyle` mehr (Standard-Absatz), erfüllt
-  Abnahme 4.1.3.
-- Neuer Fall: Überschrift **innerhalb eines Listenpunkts** → `<w:numPr>` bleibt
-  erhalten (Regressionstest für Finding F/Fix aus 4.6 — **muss vor dem Fix
-  fehlschlagen und danach grün sein**).
+Bestehend: `describe('DOCX round trip: headings')` (Z. 32) mit „preserves heading levels
+and text" (Ebene 1/2, Z. 33) und „preserves heading alignment" (nur `center`, Z. 47).
+Ergänzen:
+- „preserves heading alignment" auf `it.each(['left','center','right','justify'])` erweitern
+  (analog Absatz-Parametrisierung Z. 55).
+- Ebene 3–6 (bisher nur 1/2).
+- Struktur-Assertion: nach `writeDocx` das rohe `word/document.xml` direkt auf
+  `<w:pStyle w:val="Heading3"/>` prüfen (Abnahme 4.1.2); Wechsel „Heading3 → Standard" →
+  kein `w:pStyle` mehr (Abnahme 4.1.3).
+- **Überschrift innerhalb eines Listenpunkts — zwei getrennte Assertions** (Finding F **und**
+  F2, 4.6):
+  - (a) XML-Ebene: nach `writeDocx` enthält das `<w:p>` der Überschrift ein `<w:numPr>`
+    (schlägt ohne Writer-Teil-1 fehl).
+  - (b) **Rundreise-Ebene (entscheidend, deckt F2 auf):** `writeDocx` → `readDocx` → die
+    Überschrift liegt wieder **innerhalb** eines `bullet_list`/`ordered_list`, nicht als
+    Top-Level-Block daneben. Diese Assertion bleibt **rot, solange nur Writer-Teil-1**
+    umgesetzt ist (der Reader streift den Marker ab), und wird erst mit Reader-Teil-2 grün.
+    Ohne diesen Test bliebe der stille Reimport-Verlust unbemerkt (Abnahme 9).
+- Ebene-7-Import (Fixture/synthetisch) → Rundreise landet verlustfrei auf Ebene 6 (Befund 6).
 
 ### 5.7 `src/formats/odt/__tests__/roundtrip.test.ts` (ergänzt)
 
-Analog zu 5.6: alle vier Ausrichtungen für Überschriften, Level 3–6, Wechsel zurück zu
-`<text:p>` (Abnahme 4.2.2/4.2.3), Überschrift innerhalb eines Listenpunkts (hier ohne
-Gegenstück zu Finding F nötig, siehe Abschnitt 4.6 — nur zur Vollständigkeit
-mitgetestet).
+Analog 5.6: alle vier Ausrichtungen für Überschriften, Ebene 3–6, Wechsel zurück zu
+`<text:p>` (Abnahme 4.2.2/4.2.3), Überschrift im Listenpunkt (ohne Finding-F-Gegenstück
+nötig, nur zur Vollständigkeit), Ebene-7-Import → Ebene 6 (Clamp, Kontrast zu 5.6).
 
 ---
 
-## 6. Zuordnung zu den Abnahmekriterien (Abschnitt 7 der Anforderung)
+## 6. Zuordnung zu den Abnahmekriterien (Anforderung Abschnitt 7)
 
-| DoD-Punkt | Abdeckung durch diesen Plan |
+| DoD | Abdeckung |
 |---|---|
-| 1. Alle Testfälle aus Abschnitt 5 real im Browser ausgeführt | Abschnitt 5.1 dieser Datei (neue `absatzformat.spec.ts`, 18 Punkte) |
-| 2. Rundreise-Anforderungen (Abschnitt 4) per unabhängigem Parser/Re-Import bestätigt | Abschnitt 5.1 Punkte 15–17 + 5.6/5.7 |
-| 3. Design-Frage Mehrfachselektion (2.3/Grenzfall 2) entschieden | Abschnitt 3.1 dieser Datei: **erweitern**, mit `CellSelection`-sicherer Umsetzung |
-| 4. Design-Frage Ausrichtungserhalt (2.5/Grenzfall 8-9) entschieden | Abschnitt 3.2 dieser Datei: **erhalten** |
-| 5. Listen-Inkonsistenz (2.6/Grenzfall 4-5) aufgelöst | Abschnitt 3.3 dieser Datei: **Schema-Fix, einheitlich erlauben** (nicht verbieten — Begründung inkl. zweier realer Fixtures und eines reproduzierten Absturzes) |
-| 6. ODT-`office:styles`-Befund (6/Grenzfall 15/Testfall 4.2.7) an realer Fremddatei nachvollzogen | Abschnitt 3.4 + 4.7 dieser Datei; `MyHeading1.odt` als reale Fixture, zusätzliche synthetische Fixture für den quantitativen Ausrichtungs-Nachweis (Abschnitt 5.3) |
-| 7. Selection-Sync-Regressionstest × Absatzformat geschrieben, grün, dauerhaft Teil der Suite | Abschnitt 5.1 Punkt 14 |
-| 8. Kein Testfall zeigt stillen Datenverlust/JS-Exception | Abschnitt 4.2 (`disabled`-Zustand), 4.1 (Ausrichtung/Undo atomar), 5.1 Punkt 13 (Finding E3, jetzt mit Regressionstest abgesichert) |
-| 9. Backlog-Status-Korrektur | Nicht Gegenstand dieser Datei (ändert `absatzformat-dropdown-req.md`/`FEATURE-BACKLOG.md` nicht selbst) — nach Umsetzung von Abschnitt 4 und grünem Abschnitt 5 kann der Status von „teilweise" auf „vorhanden" zurückgestuft/bestätigt werden. |
+| 1. Testfälle Abschnitt 5 real im Browser, inkl. Ebene 3–6 | 5.1 (`absatzformat.spec.ts`, 19 Punkte) |
+| 2. Rundreise (Abschnitt 4) per unabhängigem Parser/Reimport | 5.1 (15–16) + 5.6/5.7 |
+| 3. Mehrblock-Selektion entschieden, **einschließlich** `AllSelection` (Befund 12) und Bild-`NodeSelection` (Befund 13) | 3.1: **erweitern** (Ranges-sicher, eine Transaktion), mit explizit ausformuliertem Verhalten für `AllSelection` (wandelt alle gefundenen Blöcke) und `NodeSelection` (kein Target, deaktiviert); Tests 5.1(19a/19b), 5.2. **In der vorigen Planfassung nicht erfüllt — Abnahme 3 verlangt beide Sonderfälle ausdrücklich, siehe 0.1.** |
+| 4. Ausrichtungserhalt entschieden | 3.2: **erhalten** |
+| 5. Überschrift in Liste/Zelle entschieden + getestet | 3.3: **erlauben** (Schema bereits `block+`); + Finding-F/F2-Fix 4.6 (Writer **und** Reader); Tests 5.1/5.5/5.6 (inkl. Reimport-Assertion) |
+| 6. Ebenen > 6 entschieden, DOCX-Verlust beseitigt | 3.4: **Clamp auf 1–6** an beiden Readern (4.4/4.5); Tests 5.1(13)/5.3/5.4/5.6/5.7 |
+| 7. ODT-`office:styles` (Befund 7) + DOCX-`w:basedOn` (Befund 8) an realer Datei nachvollzogen | 3.5/4.5 (`MyHeading1.odt` + synthetisch 5.3); 4.4 (`CustomHeading` 5.4) |
+| 8. Selection-Sync-Regression × Absatzformat, dauerhaft grün | 5.1 (14) |
+| 9. Kein stiller Datenverlust/keine JS-Exception | 4.2 (`disabled`), 4.1 (atomare Transaktion/Ausrichtung), 4.4/4.5 (Clamp statt Verlust), 4.6-Teil-2 (Reader behält Listenmarker der Überschrift — kein stiller Reimport-Verlust), 5.5 (Absturz-Sperre), 5.6(b) (Reimport-Assertion) |
+| 10. Sichtbare Darstellung (Befund 11/Grenzfall 20) entschieden — gestaffelte Schriftgröße oder dokumentierte Einschränkung | 3.6: **beheben** (gestaffelte `font-size`, koordiniert mit `fett-code.md` §4.5); Fix 4.9; Test 5.1(18). **In der vorigen Planfassung komplett unadressiert — siehe 0.1.** |
+| 11. Backlog-Status | Nicht Gegenstand dieser Datei; nach grünem Abschnitt 5 kann `absatzformat-dropdown` als „vorhanden" bestätigt werden, sonst „teilweise". |
 
 ---
 
-## 7. Reihenfolge der Umsetzung (Vorschlag)
+## 7. Reihenfolge der Umsetzung (Kernarbeit zuerst)
 
-1. `schema.ts` (4.3) — einzeiliger, risikoarmer Fix, entblockt sowohl Befund 5 als auch
-   den Absturz aus Finding E3; sofort mit dem Regressionstest aus 5.1 Punkt 13 /
-   5.5 absichern (**vor** dem Fix rot, danach grün — Beweis der Wirksamkeit).
-2. `commands.ts` (4.1) — `setHeading`/`canSetHeading`/`headingTargetsInSelection`,
-   behebt Befund 3/4 sowie Finding A/B-bewusste, korrekte Mehrzellen-Behandlung.
-   Begleitend Unit-Tests aus 5.2.
-3. `Toolbar.tsx` (4.2) — `disabled`-Zustand, vereinfachte `currentHeadingLevel`,
-   nutzt 1/2 direkt.
-4. `docx/writer.ts` (4.6, Finding F) — kleiner, isolierter Fix, direkt nach 1, da erst
-   ab dann eine Überschrift als erstes Kind eines Listenpunkts real vorkommen kann.
-5. `docx/reader.ts` (4.5, Finding D) und `odt/reader.ts` (4.7, Befund 6, **abgestimmt
-   mit `fett-code.md` §4.8** — beide Änderungen in einem Zug umsetzen) — unabhängig
-   von 1–4, kann parallel erfolgen.
-6. `WordEditor.tsx` (4.4, optional) — nach Abschluss von 2, sehr geringer Aufwand.
-7. Testergänzungen 5.3–5.7 (Unit-/Reader-Ebene), dann 5.1 (E2E), um alle vorherigen
-   Schritte einzeln abzusichern, bevor der Backlog-Status (Abnahme 9) angepasst wird.
+1. **`commands.ts` (4.1)** — `setHeading`/`canSetHeading`/`headingTargetsInSelection`
+   (Mehrblock + `CellSelection`-Ranges + Ausrichtungserhalt, eine atomare Transaktion).
+   Kernstück, behebt Befund 3 **und** 4 — und, als Konsequenz derselben
+   `nodesBetween`-Konstruktion (3.1), auch Befund 12/13. Begleitend Unit-Tests 5.2.
+2. **`Toolbar.tsx` (4.2)** — `disabled`-Zustand, vereinfachte `currentHeadingLevel`.
+3. **`docx/reader.ts` (4.4)** — `w:basedOn`-Kette (Befund 8) + Clamp (Befund 6).
+4. **`odt/reader.ts` (4.5)** — Clamp (isoliert, sofort) und `office:styles`+`parent`-Kaskade
+   (Befund 7), **abgestimmt mit `fett-code.md` §4.8 — in einem Zug**.
+5. **`docx/writer.ts` + `docx/reader.ts` (4.6)** — Finding-F-`numPr`-Writer-Fix **und**
+   Finding-F2-Reader-Fix (Listenmarker der Überschrift beim Reimport behalten); **zwingend
+   zusammen**, sonst nur XML-grün, aber Rundreise-rot.
+6. **`index.css` (4.9)** — gestaffelte `font-size` (Befund 11); **abgestimmt mit
+   `fett-code.md` §4.5 (`font-weight: 700`) — derselbe CSS-Block, in einem Zug**, sonst
+   überschreibt eine Umsetzung die andere.
+7. **`schema.ts` (4.3)** — optionale `toDOM`-Härtung.
+8. **`WordEditor.tsx` (4.8)** — optionale Tastenkürzel.
+9. Testergänzungen 5.3–5.7 (Unit/Reader), zuletzt 5.1 (E2E), jeder Fix vor Bestätigung des
+   Backlog-Status (DoD 11) einzeln grün abgesichert.
