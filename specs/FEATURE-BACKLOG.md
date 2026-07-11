@@ -94,8 +94,8 @@ Zusätzlich herangezogen: `E:\docs\FEATURE-SPEC-DOCX-ODT.md` (bestehende Teilana
 | durchgestrichen-doppelt | Doppelt durchgestrichen | Stellt Text mit doppelter Durchstreichungslinie dar. | fehlt | 4 |
 | hochgestellt | Hochgestellt (Superscript) | Stellt die Selektion hochgestellt dar. | fehlt | 2 |
 | tiefgestellt | Tiefgestellt (Subscript) | Stellt die Selektion tiefgestellt dar. | fehlt | 2 |
-| schriftart-waehlen | Schriftart wählen | Wählt die Schriftfamilie aus einer Liste installierter/eingebetteter Schriften. | fehlt | 1 |
-| schriftgroesse-waehlen | Schriftgröße wählen | Legt die Punktgröße numerisch oder per Auswahlliste fest. | fehlt | 1 |
+| schriftart-waehlen | Schriftart wählen | Wählt die Schriftfamilie aus einer Liste installierter/eingebetteter Schriften. | vorhanden | 1 |
+| schriftgroesse-waehlen | Schriftgröße wählen | Legt die Punktgröße numerisch oder per Auswahlliste fest. | vorhanden | 1 |
 | schrift-vergroessern | Schrift vergrößern | Vergrößert die Schriftgröße der Selektion schrittweise per Klick. | fehlt | 3 |
 | schrift-verkleinern | Schrift verkleinern | Verkleinert die Schriftgröße der Selektion schrittweise per Klick. | fehlt | 3 |
 | schriftfarbe | Schriftfarbe | Freie Farbwahl für die Zeichenfarbe der Selektion. | vorhanden | 1 |
@@ -141,7 +141,7 @@ Zusätzlich herangezogen: `E:\docs\FEATURE-SPEC-DOCX-ODT.md` (bestehende Teilana
 
 | Slug | Titel | Beschreibung | Status | Priorität |
 |---|---|---|---|---|
-| suchen | Suchen | Findet Textstellen im Dokument und hebt sie hervor. | fehlt | 1 |
+| suchen | Suchen | Findet Textstellen im Dokument und hebt sie hervor. | vorhanden | 1 |
 | suchen-ersetzen | Suchen & Ersetzen | Ersetzt Fundstellen einzeln oder auf einmal im ganzen Dokument. | fehlt | 2 |
 | suchen-ersetzen-erweitert | Erweiterte Suche (Regex/Formatierung) | Sucht nach regulären Ausdrücken oder nach Formatierungsmerkmalen. | fehlt | 4 |
 | alles-auswaehlen | Alles auswählen | Markiert den gesamten Dokumentinhalt. | vorhanden | 1 |
@@ -155,7 +155,7 @@ Zusätzlich herangezogen: `E:\docs\FEATURE-SPEC-DOCX-ODT.md` (bestehende Teilana
 | nummerierte-liste | Nummerierte Liste | Wandelt Absätze in eine fortlaufend nummerierte Liste um. | vorhanden | 1 |
 | liste-aufheben | Liste aufheben | Wandelt Listenpunkte zurück in normale Absätze, Text bleibt erhalten. | vorhanden | 1 |
 | mehrstufige-liste | Mehrstufige Liste | Verschachtelte Gliederungsebenen mit unterschiedlichem Symbol/Nummernformat je Ebene. | fehlt | 2 |
-| liste-einruecken-tab | Listenebene per Tab ändern | Tab/Umschalt+Tab verschiebt einen Listenpunkt eine Ebene tiefer/höher. | fehlt | 1 |
+| liste-einruecken-tab | Listenebene per Tab ändern | Tab/Umschalt+Tab verschiebt einen Listenpunkt eine Ebene tiefer/höher. | teilweise | 1 |
 | nummerierung-fortsetzen-neustarten | Nummerierung fortsetzen/neu starten | Setzt die Zählung einer neuen Liste an eine vorherige an oder beginnt neu bei 1. | teilweise | 3 |
 | eigene-aufzaehlungszeichen | Eigenes Aufzählungszeichen definieren | Beliebiges Symbol oder Bild als Listenzeichen wählen. | fehlt | 4 |
 | eigenes-nummernformat | Eigenes Nummernformat definieren | Legt Formate wie „1.“, „a)“ oder römische Zahlen frei fest. | fehlt | 4 |
@@ -170,7 +170,7 @@ Zusätzlich herangezogen: `E:\docs\FEATURE-SPEC-DOCX-ODT.md` (bestehende Teilana
 |---|---|---|---|---|
 | deckblatt-einfuegen | Deckblatt einfügen | Stellt dem Dokument eine vorgefertigte Titelseite voran. | fehlt | 4 |
 | leere-seite-einfuegen | Leere Seite einfügen | Schiebt eine leere Seite an der Cursor-Position ein. | fehlt | 3 |
-| seitenumbruch | Seitenumbruch einfügen | Erzwingt manuell den Beginn einer neuen Seite. | fehlt | 1 |
+| seitenumbruch | Seitenumbruch einfügen | Erzwingt manuell den Beginn einer neuen Seite. | vorhanden | 1 |
 | abschnittsumbruch | Abschnittsumbruch (nächste Seite/fortlaufend) | Beginnt einen neuen Abschnitt mit eigenem Seitenlayout. | fehlt | 3 |
 | spaltenumbruch | Spaltenumbruch | Erzwingt den Sprung in die nächste Spalte bei mehrspaltigem Layout. | fehlt | 4 |
 
@@ -178,15 +178,15 @@ Zusätzlich herangezogen: `E:\docs\FEATURE-SPEC-DOCX-ODT.md` (bestehende Teilana
 
 | Slug | Titel | Beschreibung | Status | Priorität |
 |---|---|---|---|---|
-| tabelle-einfuegen | Tabelle einfügen | Fügt eine Tabelle mit wählbarer Zeilen-/Spaltenzahl ein. | teilweise | 1 |
+| tabelle-einfuegen | Tabelle einfügen | Fügt eine Tabelle mit wählbarer Zeilen-/Spaltenzahl ein. | vorhanden | 1 |
 | tabelle-zeichnen | Tabelle zeichnen (freihändig) | Erstellt ein Tabellenraster durch Ziehen mit der Maus. | fehlt | 4 |
-| zeile-einfuegen | Zeile einfügen (oberhalb/unterhalb) | Fügt eine neue Tabellenzeile an gewählter Position ein. | fehlt | 1 |
-| zeile-loeschen | Zeile löschen | Entfernt die markierte Tabellenzeile. | fehlt | 1 |
-| spalte-einfuegen | Spalte einfügen (links/rechts) | Fügt eine neue Tabellenspalte an gewählter Position ein. | fehlt | 1 |
-| spalte-loeschen | Spalte löschen | Entfernt die markierte Tabellenspalte. | fehlt | 1 |
-| zellen-verbinden | Zellen verbinden | Führt mehrere markierte Zellen zu einer zusammen. | fehlt | 1 |
-| zellen-teilen | Zellen teilen | Teilt eine Zelle in mehrere Zeilen/Spalten auf. | fehlt | 2 |
-| tabelle-loeschen | Tabelle löschen | Entfernt die komplette Tabelle inklusive Inhalt. | fehlt | 1 |
+| zeile-einfuegen | Zeile einfügen (oberhalb/unterhalb) | Fügt eine neue Tabellenzeile an gewählter Position ein. | vorhanden | 1 |
+| zeile-loeschen | Zeile löschen | Entfernt die markierte Tabellenzeile. | vorhanden | 1 |
+| spalte-einfuegen | Spalte einfügen (links/rechts) | Fügt eine neue Tabellenspalte an gewählter Position ein. | vorhanden | 1 |
+| spalte-loeschen | Spalte löschen | Entfernt die markierte Tabellenspalte. | vorhanden | 1 |
+| zellen-verbinden | Zellen verbinden | Führt mehrere markierte Zellen zu einer zusammen. | vorhanden | 1 |
+| zellen-teilen | Zellen teilen | Teilt eine Zelle in mehrere Zeilen/Spalten auf. | vorhanden | 2 |
+| tabelle-loeschen | Tabelle löschen | Entfernt die komplette Tabelle inklusive Inhalt. | vorhanden | 1 |
 | tabelle-eigenschaften | Tabelleneigenschaften (Rahmen/Schattierung) | Stellt Rahmenlinien, Zellhintergrund und Zellabstände ein. | fehlt | 2 |
 | tabellenformatvorlagen | Tabellenformatvorlagen-Galerie | Vorgefertigte Farb-/Rahmen-Designs für Tabellen. | fehlt | 3 |
 | kopfzeile-wiederholen | Kopfzeile auf Folgeseiten wiederholen | Wiederholt die erste Tabellenzeile automatisch auf jeder Folgeseite. | fehlt | 2 |
@@ -203,7 +203,7 @@ Zusätzlich herangezogen: `E:\docs\FEATURE-SPEC-DOCX-ODT.md` (bestehende Teilana
 | bild-einfuegen | Bild aus Datei einfügen | Fügt eine Bilddatei über Dateiauswahl an der Cursor-Position ein. | vorhanden | 1 |
 | bild-online | Onlinebilder/Stockbilder einfügen | Bildsuche und -einfügung direkt aus dem Editor heraus. | fehlt | 4 |
 | bild-alt-text | Alternativtext bearbeiten | Beschreibungstext für Barrierefreiheit manuell setzen/ändern. | teilweise | 2 |
-| bild-groesse-aendern | Bildgröße ändern | Passt Höhe/Breite per Eingabefeld oder Ziehpunkte an. | fehlt | 1 |
+| bild-groesse-aendern | Bildgröße ändern | Passt Höhe/Breite per Eingabefeld oder Ziehpunkte an. | vorhanden | 1 |
 | bild-zuschneiden | Bild zuschneiden | Reduziert den sichtbaren Bildausschnitt. | fehlt | 3 |
 | bild-korrekturen | Bildkorrekturen (Helligkeit/Kontrast) | Passt Farbwerte des eingefügten Bildes an. | fehlt | 4 |
 | bild-kuenstlerische-effekte | Künstlerische Effekte | Wendet Filter wie Skizze oder Graustufen auf ein Bild an. | fehlt | 4 |
@@ -231,7 +231,7 @@ Zusätzlich herangezogen: `E:\docs\FEATURE-SPEC-DOCX-ODT.md` (bestehende Teilana
 
 | Slug | Titel | Beschreibung | Status | Priorität |
 |---|---|---|---|---|
-| hyperlink-einfuegen | Hyperlink einfügen | Verknüpft markierten Text mit einer URL. | fehlt | 1 |
+| hyperlink-einfuegen | Hyperlink einfügen | Verknüpft markierten Text mit einer URL. | vorhanden | 1 |
 | hyperlink-bearbeiten | Hyperlink bearbeiten | Ändert die Ziel-URL eines bestehenden Links. | fehlt | 2 |
 | hyperlink-entfernen | Hyperlink entfernen | Löst die Verknüpfung, der Text bleibt erhalten. | fehlt | 2 |
 | textmarke-einfuegen | Textmarke (Bookmark) einfügen | Setzt einen benannten Sprungpunkt im Dokument. | fehlt | 3 |
@@ -247,8 +247,8 @@ Zusätzlich herangezogen: `E:\docs\FEATURE-SPEC-DOCX-ODT.md` (bestehende Teilana
 
 | Slug | Titel | Beschreibung | Status | Priorität |
 |---|---|---|---|---|
-| kopfzeile-bearbeiten | Kopfzeile bearbeiten | Aktiviert und befüllt einen eigenen editierbaren Bereich am oberen Seitenrand. | fehlt | 1 |
-| fusszeile-bearbeiten | Fußzeile bearbeiten | Aktiviert und befüllt einen eigenen editierbaren Bereich am unteren Seitenrand. | fehlt | 1 |
+| kopfzeile-bearbeiten | Kopfzeile bearbeiten | Aktiviert und befüllt einen eigenen editierbaren Bereich am oberen Seitenrand. | vorhanden | 1 |
+| fusszeile-bearbeiten | Fußzeile bearbeiten | Aktiviert und befüllt einen eigenen editierbaren Bereich am unteren Seitenrand. | vorhanden | 1 |
 | seitenzahl-einfuegen | Seitenzahl einfügen | Fügt ein automatisch fortlaufendes Seitenzahl-Feld ein. | fehlt | 1 |
 | erste-seite-anders | Erste Seite anders | Eigene Kopf-/Fußzeile ausschließlich für die erste Seite. | fehlt | 3 |
 | gerade-ungerade-anders | Gerade/ungerade Seiten anders | Unterschiedliche Kopf-/Fußzeile je nach Seitenparität. | fehlt | 4 |
